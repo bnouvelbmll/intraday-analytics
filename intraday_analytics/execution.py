@@ -54,22 +54,6 @@ class ProcessInterval(Process):
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         )
 
-        tracer = None
-        if self.config.get("ENABLE_PROFILER_TOOL", False):
-            try:
-                profiling_output_dir = self.config.get(
-                    "PROFILING_OUTPUT_DIR", "/tmp/perf_traces"
-                )
-                tracer = viztracer.VizTracer(output_dir=profiling_output_dir)
-                tracer.start()
-                handler = VizLoggingHandler()
-                handler.setTracer(get_tracer())
-                logging.getLogger().addHandler(handler)
-                logging.info("📊 VizTracer started in child process.")
-            except Exception as e:
-                logging.error(f"Failed to start VizTracer in child process: {e}")
-                tracer = None
-
         try:
             ref = self.get_universe(self.sd)
             nanoseconds = int(self.config["TIME_BUCKET_SECONDS"] * 1e9)
