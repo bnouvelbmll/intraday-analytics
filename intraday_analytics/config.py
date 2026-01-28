@@ -28,7 +28,7 @@ DEFAULT_CONFIG = {
     "RUN_ONE_SYMBOL_AT_A_TIME": False,
     "DEFAULT_FREQ": None,
     "LOGGING_LEVEL": "INFO",
-    "TABLES_TO_LOAD": ["trades", "l2", "l3"],
+    "TABLES_TO_LOAD": ["trades", "l2", "l3", "marketstate"],
     "ENABLE_PROFILER_TOOL": False,
     "ENABLE_PERFORMANCE_LOGS": True,
     "ENABLE_POLARS_PROFILING": False,
