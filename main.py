@@ -24,8 +24,11 @@ import os
 import sys
 import shutil
 import logging
-import viztracer
-from viztracer import VizLoggingHandler, get_tracer
+try:
+    import viztracer
+    from viztracer import VizLoggingHandler, get_tracer
+except ImportError:
+    viztracer = None
 
 from intraday_analytics import (
     AnalyticsPipeline, # Re-add AnalyticsPipeline import

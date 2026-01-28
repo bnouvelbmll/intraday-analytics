@@ -5,7 +5,8 @@ from joblib import Parallel, delayed
 import glob
 import polars as pl
 
-from .batching import SymbolBatcherStreaming, AnalyticsRunner, S3SymbolBatcher, HeuristicBatchingStrategy, SymbolSizeEstimator
+from .batching import SymbolBatcherStreaming, S3SymbolBatcher, HeuristicBatchingStrategy, SymbolSizeEstimator
+from .pipeline import AnalyticsRunner
 from .utils import preload, get_files_for_date_range
 from .tables import ALL_TABLES
 from .process import aggregate_and_write_final_output, BatchWriter
@@ -27,9 +28,13 @@ def remote_process_executor_wrapper(func):
     return wrapper
 
 
-import viztracer
-from viztracer.vizlogging import VizLoggingHandler
-from viztracer import get_tracer
+try:
+    import viztracer
+    from viztracer.vizlogging import VizLoggingHandler
+    from viztracer import get_tracer
+except ImportError:
+    viztracer = None
+
 
 from .tables import ALL_TABLES
 
