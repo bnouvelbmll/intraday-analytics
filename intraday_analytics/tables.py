@@ -1,5 +1,9 @@
-from abc import ABC, abstractmethod
+import bmll2
 import polars as pl
+import pandas as pd
+from typing import List, Callable, Any
+import os
+from abc import ABC, abstractmethod
 
 
 class DataTable(ABC):
@@ -14,7 +18,6 @@ class DataTable(ABC):
     @abstractmethod
     def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
         """Loads the table from the data source."""
-        import bmll2 # Moved import inside function
         return bmll2.get_market_data_range(
             markets=markets,
             table_name=self.bmll_table_name,
@@ -31,15 +34,72 @@ class DataTable(ABC):
         return lf.filter(
             pl.col("ListingId").is_in(ref["ListingId"].to_list())
         ).with_columns(
-            TimeBucket=pl.when(
-                pl.col(self.timestamp_col)
-                == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-            )
-            .then(pl.col(self.timestamp_col))
-            .otherwise(pl.col(self.timestamp_col))
-            .dt.truncate(f"{nanoseconds}ns")
-            + pl.duration(nanoseconds=nanoseconds)
+            TimeBucket=(
+                pl.when(
+                    pl.col(self.timestamp_col)
+                    == pl.col(self.timestamp_col).dt.truncate(
+                        f"{nanoseconds}ns"
+                    )
+                )
+                .then(pl.col(self.timestamp_col))
+                .otherwise(
+                    pl.col(self.timestamp_col).dt.truncate(
+                        f"{nanoseconds}ns"
+                    )
+                    + pl.duration(nanoseconds=nanoseconds)
+                )
+            ).cast(pl.Datetime("ns"))
         )
+
+    def get_s3_paths(self, mics: List[str], year: int, month: int, day: int) -> List[str]:
+        """
+        Generates S3 paths for this table.
+        """
+        ap = bmll2._configure.L2_ACCESS_POINT_ALIAS
+        yyyy = "%04d" % (year,)
+        mm = "%02d" % (month,)
+        dd = "%02d" % (day,)
+
+        return [
+            f"s3://{ap}/{self.s3_folder_name}/{mic}/{yyyy}/{mm}/{dd}/{self.s3_file_prefix}{mic}-{yyyy}{mm}{dd}.parquet"
+            for mic in mics
+        ]
+
+    def get_transform_fn(self, ref: pl.DataFrame, nanoseconds: int) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
+        """
+        Returns a transformation function for this table, including filtering and resampling.
+        """
+        def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
+            lf_filtered = lf.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
+            
+            # Specific handling for L3 to select only necessary columns
+            if self.name == "l3":
+                lf_filtered = lf_filtered.select(
+                    ["TimestampNanoseconds", "ListingId", "LobAction",
+                     "Price", "Size", "OldSize", "OldPrice",
+                     "Side", "ExecutionSize", "ExecutionPrice"
+                    ]
+                ).with_columns(EventTimestamp=pl.col("TimestampNanoseconds").alias("EventTimestamp"))
+            elif self.name == "trades":
+                lf_filtered = lf_filtered.with_columns(
+                    LPrice=pl.col("TradeNotional") / pl.col("Size"),
+                    EPrice=pl.col("TradeNotionalEUR") / pl.col("Size"),
+                )
+
+            return lf_filtered.with_columns(
+                TimeBucket=(
+                    pl.when(
+                        pl.col(self.timestamp_col)
+                        == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
+                    )
+                    .then(pl.col(self.timestamp_col))
+                    .otherwise(
+                        pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
+                        + pl.duration(nanoseconds=nanoseconds)
+                    )
+                ).cast(pl.Datetime("ns"))
+            )
+        return select_and_resample
 
 
 class TradesPlusTable(DataTable):

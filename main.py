@@ -28,12 +28,14 @@ import viztracer
 from viztracer import VizLoggingHandler, get_tracer
 
 from intraday_analytics import (
-    AnalyticsPipeline,
+    AnalyticsPipeline, # Re-add AnalyticsPipeline import
     DEFAULT_CONFIG,
     cache_universe,
 )
 from intraday_analytics.utils import create_date_batches
 from intraday_analytics.execution import ProcessInterval
+
+# Re-add direct imports for analytics modules
 from intraday_analytics.metrics.dense import DenseAnalytics
 from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsTW
 from intraday_analytics.metrics.trade import TradeAnalytics
@@ -54,9 +56,16 @@ USER_CONFIG = {
     "TIME_BUCKET_SECONDS": 60,
     "L2_LEVELS": 10,
     "DENSE_OUTPUT": True,
+    # --- Batching & Performance ---
+    "PREPARE_DATA_MODE": "naive",  # "naive" or "s3_shredding"
+    "SEPARATE_METRIC_PROCESS": True,
+    "NUM_WORKERS": -1, # use -1 for all available CPUs
+    "CLEAN_UP_BATCH_FILES": True,
+    "CLEAN_UP_TEMP_DIR": True,
     # --- Output Configuration ---
     # To customize the final output path, add "FINAL_OUTPUT_PATH_TEMPLATE" here.
     # Example: "FINAL_OUTPUT_PATH_TEMPLATE": "s3://custom-bucket/analytics/{datasetname}/{start_date}_{end_date}.parquet"
+    "S3_STORAGE_OPTIONS": {"region": "us-east-1"}, # Example S3 storage options
 }
 
 CONFIG = {**DEFAULT_CONFIG, **USER_CONFIG}
@@ -202,6 +211,43 @@ def get_pipeline(N, symbols=None, ref=None, date=None):
     return AnalyticsPipeline(modules)
 
 
+def get_pipeline(N, symbols=None, ref=None, date=None):
+    """
+    Constructs the analytics pipeline.
+
+    This function creates an `AnalyticsPipeline` instance and adds the desired
+    analytics modules to it. The modules are added in the order they should be
+    executed.
+
+    Args:
+        N: The number of L2 order book levels to compute metrics for.
+        symbols: An optional list of symbols to filter the universe by.
+        ref: An optional reference DataFrame.
+        date: The date for which the pipeline is being constructed.
+
+    Returns:
+        An `AnalyticsPipeline` instance.
+    """
+    assert date is not None
+    modules = []
+
+    if CONFIG["DENSE_OUTPUT"]:
+        cref = ref if ref is not None else get_universe(date)
+        if symbols is not None:
+            cref = cref.filter(pl.col("ListingId").is_in(list(symbols)))
+        modules += [DenseAnalytics(cref, CONFIG)]
+
+    modules += [
+        L2AnalyticsLast(N, CONFIG),
+        L2AnalyticsTW(N, CONFIG),
+        TradeAnalytics(CONFIG),
+        L3Analytics(CONFIG),
+        ExecutionAnalytics(CONFIG),
+    ]
+
+    return AnalyticsPipeline(modules, CONFIG)
+
+
 if __name__ == "__main__":
     os.environ["POLARS_MAX_THREADS"] = "48"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
@@ -229,28 +275,43 @@ if __name__ == "__main__":
             tracer = None
 
         try:
-            CONFIG["TEMP_DIR"] = temp_dir
+        temp_dir = CONFIG["TEMP_DIR"] # Define temp_dir
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # storage path helper
+        s3_user = (
+            "s3://"
+            + bmll2.storage_paths()[CONFIG["AREA"]]["bucket"]
+            + "/"
+            + bmll2.storage_paths()[CONFIG["AREA"]]["prefix"]
+        )
 
-            # storage path helper
-            s3_user = (
-                "s3://"
-                + bmll2.storage_paths()[CONFIG["AREA"]]["bucket"]
-                + "/"
-                + bmll2.storage_paths()[CONFIG["AREA"]]["prefix"]
+        for sd, ed in date_batches:
+            logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
+            p = ProcessInterval(
+                sd=sd,
+                ed=ed,
+                config=CONFIG,
+                get_pipeline=get_pipeline,
+                get_universe=get_universe,
             )
+            p.start()
+            p.join() # Wait for each ProcessInterval to complete sequentially
+        logging.info("✅ All data preparation processes completed.")
 
-            for sd, ed in date_batches:
-                logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
-                p = ProcessInterval(
-                    sd=sd,
-                    ed=ed,
-                    config=CONFIG,
-                    get_pipeline=get_pipeline,
-                    get_universe=get_universe,
-                )
-                p.start()
-                processes.append(p)
-        finally:
-            if tracer:
-                tracer.stop()
-                logging.info("📊 VizTracer stopped in main process.")
+        # Call compute_metrics after all data is prepared
+        from intraday_analytics.execution import compute_metrics
+        compute_metrics(CONFIG, get_pipeline, get_universe)
+        logging.info("✅ All metric computation completed.")
+
+    finally:
+        if tracer:
+            tracer.stop()
+            logging.info("📊 VizTracer stopped in main process.")
+        
+        # Clean up temporary directory if configured
+        if CONFIG.get("CLEAN_UP_TEMP_DIR", True) and os.path.exists(temp_dir):
+            logging.info(f"🧹 Cleaning up temporary directory: {temp_dir}")
+            shutil.rmtree(temp_dir)
