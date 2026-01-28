@@ -33,4 +33,5 @@ DEFAULT_CONFIG = {
     "ENABLE_PERFORMANCE_LOGS": True,
     "ENABLE_POLARS_PROFILING": False,
     "PROFILING_OUTPUT_DIR": "/tmp/perf_traces",
+    "FINAL_OUTPUT_PATH_TEMPLATE": "s3://{bucket}/{prefix}/data/{datasetname}/{start_date}_{end_date}.parquet",
 }

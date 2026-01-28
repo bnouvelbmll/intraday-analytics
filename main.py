@@ -50,10 +50,14 @@ USER_CONFIG = {
     "START_DATE": "2025-11-01",
     "END_DATE": "2025-12-31",
     "UNIVERSE": {"Index": "bepacp"},
+    "DATASETNAME": "sample2d",
     # --- Analytics Parameters ---
     "TIME_BUCKET_SECONDS": 60,
     "L2_LEVELS": 10,
     "DENSE_OUTPUT": True,
+    # --- Output Configuration ---
+    # To customize the final output path, add "FINAL_OUTPUT_PATH_TEMPLATE" here.
+    # Example: "FINAL_OUTPUT_PATH_TEMPLATE": "s3://custom-bucket/analytics/{datasetname}/{start_date}_{end_date}.parquet"
 }
 
 CONFIG = {**DEFAULT_CONFIG, **USER_CONFIG}
@@ -125,7 +129,7 @@ def get_universe(date):
     Returns:
         A pandas DataFrame containing the universe of symbols.
     """
-    bmll2.get_file("support/ODDO/SXXP21July2025.csv")
+    bmll2.get_file("SXXP21July2025.csv")
     eumics = whitelist
 
     stoxx600bbg = (

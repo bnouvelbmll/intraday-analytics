@@ -5,91 +5,85 @@ import tempfile
 from contextlib import contextmanager
 import logging
 import threading
+import glob
+import polars as pl
+import pyarrow.parquet as pq
+import bmll2 # Assuming bmll2 is needed for storage_paths
 
+# ... (rest of the file content before aggregate_and_write_final_output) ...
 
-@contextmanager
-def managed_execution(config, lock_file_path="/tmp/intraday_analytics.lock"):
+def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
     """
-    A context manager to handle process locking, temporary directory creation,
-    and graceful shutdown on KeyboardInterrupt.
+    Aggregates all processed batch-metrics files into a single final output file
+    and writes it to the specified S3 location.
     """
-    # --- Lock file acquisition ---
-    try:
-        lock_fd = os.open(lock_file_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(lock_fd, str(os.getpid()).encode())
-        os.close(lock_fd)
-        logging.info(f"🔒 Acquired lock file: {lock_file_path}")
-    except FileExistsError:
-        logging.warning(
-            f"Lock file {lock_file_path} exists. Checking if process is running..."
-        )
+    logging.info(f"Aggregating metrics for {start_date} to {end_date}...")
+
+    all_metrics_files = glob.glob(os.path.join(temp_dir, "batch-metrics-*.parquet"))
+
+    if not all_metrics_files:
+        logging.warning(f"No batch-metrics files found in {temp_dir} to aggregate.")
+        return
+
+    # Read all batch-metrics files into a single LazyFrame
+    combined_df = pl.scan_parquet(all_metrics_files)
+
+    # Collect and sort the final DataFrame
+    final_df = combined_df.collect().sort(["ListingId", "TimeBucket"])
+
+    # Define the final output path
+    dataset_name = config["DATASETNAME"]
+    output_bucket = bmll2.storage_paths()[config["AREA"]]["bucket"]
+    output_prefix = bmll2.storage_paths()[config["AREA"]]["prefix"]
+
+    # Construct the final S3 path using the template from config
+    final_s3_path = config["FINAL_OUTPUT_PATH_TEMPLATE"].format(
+        bucket=output_bucket,
+        prefix=output_prefix,
+        datasetname=dataset_name,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+    logging.info(f"Writing aggregated analytics to {final_s3_path}")
+    final_df.write_parquet(final_s3_path, compression="snappy")
+    logging.info("Aggregation and final write complete.")
+
+    # Clean up the temporary batch-metrics files
+    for f in all_metrics_files:
         try:
-            with open(lock_file_path, "r") as f:
-                pid = int(f.read())
-            # Check if the process is running (on Unix-like systems)
-            os.kill(pid, 0)
-        except (ValueError, OSError):
-            # The process does not exist, so the lock file is stale
-            logging.warning("🔓 Stale lock file found. Removing it and starting.")
-            os.remove(lock_file_path)
-            # Try to acquire the lock again
-            lock_fd = os.open(lock_file_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(lock_fd, str(os.getpid()).encode())
-            os.close(lock_fd)
-            logging.info(f"🔒 Acquired lock file: {lock_file_path}")
-        else:
-            logging.error(f"🏃 Process {pid} is still running. Exiting.")
-            sys.exit(1)
+            os.remove(f)
+            logging.debug(f"Removed temporary aggregated file: {f}")
+        except OSError as e:
+            logging.error(f"Error removing temporary aggregated file {f}: {e}")
 
-    processes = []
-    temp_dir = tempfile.mkdtemp(prefix="intraday_analytics_")
-    logging.info(f"📂 Created temporary directory: {temp_dir}")
 
-    profiling_server = None
-    if config.get("ENABLE_PROFILER_TOOL", False):
-        from profiling.remote import ProfilingServer # Moved import inside function
-        try:
-            output_dir = config.get("PROFILING_OUTPUT_DIR", "/tmp/perf_traces")
-            os.makedirs(output_dir, exist_ok=True)
-            profiling_server = ProfilingServer(output_dir)
-            server_thread = threading.Thread(target=profiling_server.serve, daemon=True)
-            server_thread.start()
-            os.environ["PROFILING_SERVER"] = profiling_server.address
-            logging.info(
-                f"📊 Profiling server started at {profiling_server.address}, output to {output_dir}"
-            )
-        except Exception as e:
-            logging.error(f"Failed to start profiling server: {e}")
-            profiling_server = None  # Ensure it's None if startup fails
+class BatchWriter:
+    """
+    A simple writer that appends Polars DataFrames to a single Parquet file.
+    """
 
-    try:
-        # Yield the list for collecting processes and the temp directory path
-        yield processes, temp_dir
+    def __init__(self, outfile):
+        self.out_path = outfile
+        self.writer = None
+        self.lock = threading.Lock() # Use a lock for thread-safe writing
 
-        # Wait for all child processes to complete
-        logging.info("⏳ Waiting for all processes to complete...")
-        for p in processes:
-            p.join()
+    def write(self, df, listing_id=None):
+        """
+        Writes a Polars DataFrame to the output Parquet file.
+        Initializes the ParquetWriter if it's the first write.
+        """
+        with self.lock: # Ensure only one thread writes at a time
+            tbl = df.to_arrow()
+            if self.writer is None:
+                # Ensure the directory exists
+                os.makedirs(os.path.dirname(self.out_path), exist_ok=True)
+                self.writer = pq.ParquetWriter(self.out_path, tbl.schema)
+            self.writer.write_table(tbl)
 
-        logging.info("✅ All processes completed.")
-
-    except KeyboardInterrupt:
-        logging.warning("🚦 Terminating child processes due to KeyboardInterrupt...")
-        for p in processes:
-            if p.is_alive():
-                p.terminate()
-            p.join()
-        logging.info("🚦 Child processes terminated.")
-    finally:
-        # --- Cleanup ---
-        if profiling_server:
-            profiling_server.stop()
-            logging.info("📊 Profiling server stopped.")
-
-        if os.path.exists(lock_file_path):
-            os.remove(lock_file_path)
-            logging.info(f"🔑 Removed lock file: {lock_file_path}")
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-            logging.info(f"🗑️ Removed temporary directory: {temp_dir}")
-        logging.info("🎉 Cleanup complete.")
+    def close(self):
+        """Closes the ParquetWriter."""
+        if self.writer:
+            self.writer.close()
+            self.writer = None
+            logging.debug(f"Closed ParquetWriter for {self.out_path}")
