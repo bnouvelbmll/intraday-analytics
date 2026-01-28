@@ -14,8 +14,6 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 
 from intraday_analytics.utils import SYMBOL_COL
-from intraday_analytics.pipeline import AnalyticsPipeline
-
 
 class SymbolBatcherStreaming:
     """
@@ -151,59 +149,6 @@ class SymbolBatcherStreaming:
                 else:
                     batch_data[name] = pl.DataFrame()
             yield batch_data
-
-
-class PipelineDispatcher:
-    """
-    Dispatches batches of data to an analytics pipeline for processing.
-
-    This class takes batches of data, runs them through a given
-    `AnalyticsPipeline`, and uses a writer function to output the results.
-    It can be configured to process data for each symbol in a batch individually.
-    """
-
-    def __init__(
-        self,
-        pipeline: AnalyticsPipeline,
-        out_writer: Callable[[pl.DataFrame, str], None],
-        config: dict,
-    ):
-        self.pipeline = pipeline
-        self.out_writer = out_writer
-        self.config = config
-
-    def run_batch(self, batch_data: Dict[str, pl.DataFrame]):
-        """
-        Runs a single batch of data through the analytics pipeline.
-
-        Args:
-            batch_data: A dictionary where keys are table names and values are
-                        DataFrames containing the data for the batch.
-        """
-        if not len(batch_data):
-            logging.warning("Empty batch received.")
-            return
-
-        # RUN SYMBOL BY SYMBOL
-        if self.config["RUN_ONE_SYMBOL_AT_A_TIME"]:
-            for sym in sorted(
-                set().union(
-                    *[
-                        df.select(SYMBOL_COL).collect()[SYMBOL_COL].to_list()
-                        for df in batch_data.values()
-                        if len(df) > 0
-                    ]
-                )
-            ):
-                tables_for_sym = {
-                    name: df.filter(pl.col(SYMBOL_COL) == sym)
-                    for name, df in batch_data.items()
-                }
-                result = self.pipeline.run_on_multi_tables(**tables_for_sym)
-                self.out_writer(result, sym)
-        else:
-            result = self.pipeline.run_on_multi_tables(**batch_data)
-            self.out_writer(result, "batch")
 
 
 # --- Batching Strategy Abstraction ---

@@ -201,43 +201,6 @@ def get_pipeline(N, symbols=None, ref=None, date=None):
         modules += [DenseAnalytics(cref, CONFIG)]
 
     modules += [
-        L2AnalyticsLast(N),
-        L2AnalyticsTW(N, CONFIG),
-        TradeAnalytics(),
-        L3Analytics(),
-        ExecutionAnalytics(),
-    ]
-
-    return AnalyticsPipeline(modules)
-
-
-def get_pipeline(N, symbols=None, ref=None, date=None):
-    """
-    Constructs the analytics pipeline.
-
-    This function creates an `AnalyticsPipeline` instance and adds the desired
-    analytics modules to it. The modules are added in the order they should be
-    executed.
-
-    Args:
-        N: The number of L2 order book levels to compute metrics for.
-        symbols: An optional list of symbols to filter the universe by.
-        ref: An optional reference DataFrame.
-        date: The date for which the pipeline is being constructed.
-
-    Returns:
-        An `AnalyticsPipeline` instance.
-    """
-    assert date is not None
-    modules = []
-
-    if CONFIG["DENSE_OUTPUT"]:
-        cref = ref if ref is not None else get_universe(date)
-        if symbols is not None:
-            cref = cref.filter(pl.col("ListingId").is_in(list(symbols)))
-        modules += [DenseAnalytics(cref, CONFIG)]
-
-    modules += [
         L2AnalyticsLast(N, CONFIG),
         L2AnalyticsTW(N, CONFIG),
         TradeAnalytics(CONFIG),
@@ -274,7 +237,7 @@ if __name__ == "__main__":
             logging.error(f"Failed to start VizTracer in main process: {e}")
             tracer = None
 
-        try:
+    try:
         temp_dir = CONFIG["TEMP_DIR"] # Define temp_dir
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)

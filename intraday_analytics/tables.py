@@ -1,4 +1,3 @@
-import bmll2
 import polars as pl
 import pandas as pd
 from typing import List, Callable, Any
@@ -55,6 +54,7 @@ class DataTable(ABC):
         """
         Generates S3 paths for this table.
         """
+        import bmll2
         ap = bmll2._configure.L2_ACCESS_POINT_ALIAS
         yyyy = "%04d" % (year,)
         mm = "%02d" % (month,)

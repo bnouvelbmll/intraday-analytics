@@ -1,14 +1,9 @@
 import os
-import sys
-import shutil
-import tempfile
-from contextlib import contextmanager
 import logging
 import threading
 import glob
 import polars as pl
 import pyarrow.parquet as pq
-import bmll2 # Assuming bmll2 is needed for storage_paths
 
 # ... (rest of the file content before aggregate_and_write_final_output) ...
 
@@ -17,6 +12,7 @@ def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
     Aggregates all processed batch-metrics files into a single final output file
     and writes it to the specified S3 location.
     """
+    import bmll2
     logging.info(f"Aggregating metrics for {start_date} to {end_date}...")
 
     all_metrics_files = glob.glob(os.path.join(temp_dir, "batch-metrics-*.parquet"))

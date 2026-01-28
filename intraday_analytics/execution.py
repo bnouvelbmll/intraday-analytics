@@ -1,20 +1,14 @@
-import cloudpickle
-import sys
 import os
-import traceback
-import subprocess
-import tempfile
-import random
-import time
 from multiprocessing import Process
 import logging
 from joblib import Parallel, delayed
+import glob
+import polars as pl
 
-from .batching import SymbolBatcherStreaming, PipelineDispatcher, S3SymbolBatcher, HeuristicBatchingStrategy
-from .utils import preload
+from .batching import SymbolBatcherStreaming, AnalyticsRunner, S3SymbolBatcher, HeuristicBatchingStrategy, SymbolSizeEstimator
+from .utils import preload, get_files_for_date_range
 from .tables import ALL_TABLES
-import bmll2
-import datetime
+from .process import aggregate_and_write_final_output, BatchWriter
 
 def remote_process_executor_wrapper(func):
     """
@@ -116,13 +110,9 @@ class ProcessInterval(Process):
                     sbs_input,
                     max_rows_per_table=self.config["MAX_ROWS_PER_TABLE"],
                 )
-                pid = PipelineDispatcher(pipe, writer, self.config)
+                pid = AnalyticsRunner(pipe, writer, self.config)
 
                 def process_batch(b):
-                    import resource
-
-                    # Limit memory to 16gb per batch
-                    # resource.setrlimit(resource.RLIMIT_AS, (16 * 1024**3, 16 * 1024**3))
                     pid.run_batch(b)
 
                 logging.info("Writing batches to disk...")
@@ -134,8 +124,90 @@ class ProcessInterval(Process):
                         data.write_parquet(
                             os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
                         )
+
+            elif MODE == "s3_shredding":
+                logging.info("🚚 Starting S3 Shredding...")
+
+                # 1. Identify tables to load
+                tables_to_load_names = self.config.get(
+                    "TABLES_TO_LOAD", ["trades", "l2", "l3"]
+                )
+
+                # 2. Generate S3 file lists
+                s3_file_lists = {}
+                mics = ref["MIC"].unique().tolist()
+                for table_name in tables_to_load_names:
+                    s3_file_lists[table_name] = get_files_for_date_range(
+                        self.sd, self.ed, mics, table_name
+                    )
+
+                # 3. Initialize S3SymbolBatcher
+                sbs = S3SymbolBatcher(
+                    s3_file_lists=s3_file_lists,
+                    transform_fns={},
+                    batching_strategy=HeuristicBatchingStrategy(
+                        SymbolSizeEstimator(self.sd, self.get_universe),
+                        self.config["MAX_ROWS_PER_TABLE"],
+                    ),
+                    temp_dir=TEMP_DIR,
+                    storage_options=self.config.get("S3_STORAGE_OPTIONS", {}),
+                    date=self.sd,
+                    get_universe=self.get_universe,
+                )
+
+                # 4. Run the shredding process
+                sbs.process(num_workers=self.config["NUM_WORKERS"])
+
         finally:
             if tracer:
                 tracer.stop()
                 logging.info("📊 VizTracer stopped in child process.")
 
+
+def compute_metrics(config, get_pipeline, get_universe):
+    """
+    Computes metrics for all batches in the temporary directory and aggregates them.
+    """
+    temp_dir = config["TEMP_DIR"]
+    logging.info(f"Computing metrics in {temp_dir}...")
+
+    # Find all batch indices by looking for one of the tables (e.g., trades)
+    # Pattern: batch-trades-{i}.parquet
+    batch_files = glob.glob(os.path.join(temp_dir, "batch-trades-*.parquet"))
+    batch_indices = sorted([int(f.split("-")[-1].split(".")[0]) for f in batch_files])
+
+    if not batch_indices:
+        logging.warning("No batches found to process.")
+        return
+
+    # We need a reference date for the pipeline.
+    start_date = config["START_DATE"]
+    ref = get_universe(start_date)
+
+    pipe = get_pipeline(config["L2_LEVELS"], ref=ref, date=start_date)
+
+    for i in batch_indices:
+        logging.info(f"Processing batch {i}...")
+
+        # Load batch data
+        batch_data = {}
+        for table_name in config.get("TABLES_TO_LOAD", ["trades", "l2", "l3"]):
+            path = os.path.join(temp_dir, f"batch-{table_name}-{i}.parquet")
+            if os.path.exists(path):
+                batch_data[table_name] = pl.read_parquet(path)
+            else:
+                batch_data[table_name] = pl.DataFrame()
+
+        # Run pipeline
+        # We need an output writer for the batch results
+        out_path = os.path.join(temp_dir, f"batch-metrics-{i}.parquet")
+        writer = BatchWriter(out_path)
+
+        runner = AnalyticsRunner(pipe, writer.write, config)
+        runner.run_batch(batch_data)
+        writer.close()
+
+    # Aggregate
+    aggregate_and_write_final_output(
+        config["START_DATE"], config["END_DATE"], config, temp_dir
+    )
