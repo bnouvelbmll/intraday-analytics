@@ -108,6 +108,7 @@ class L2AnalyticsTW(BaseTWAnalytics):
     - Time-Weighted Average Ask Price
     - Time-Weighted Average Bid Price
     """
+
     REQUIRES = ["l2"]
 
     def __init__(self, N: int, config: dict):

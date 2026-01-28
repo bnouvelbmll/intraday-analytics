@@ -86,6 +86,7 @@ class BaseTWAnalytics(BaseAnalytics):
     time-weighted calculations. The `tw_analytics` method must be implemented
     by subclasses.
     """
+
     def __init__(self, name: str, specific_fill_cols=None, nanoseconds=None):
         super().__init__(name, specific_fill_cols=specific_fill_cols)
         self.nanoseconds = nanoseconds

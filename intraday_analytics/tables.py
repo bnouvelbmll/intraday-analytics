@@ -2,8 +2,10 @@ from abc import ABC, abstractmethod
 import polars as pl
 import bmll2
 
+
 class DataTable(ABC):
     """Abstract base class for defining an input data table."""
+
     name: str
     timestamp_col: str
     bmll_table_name: str
@@ -22,7 +24,9 @@ class DataTable(ABC):
             lazy_load=True,
         )
 
-    def post_load_process(self, lf: pl.LazyFrame, ref: pl.DataFrame, nanoseconds: int) -> pl.LazyFrame:
+    def post_load_process(
+        self, lf: pl.LazyFrame, ref: pl.DataFrame, nanoseconds: int
+    ) -> pl.LazyFrame:
         """Applies post-loading transformations, like resampling."""
         return lf.filter(
             pl.col("ListingId").is_in(ref["ListingId"].to_list())
@@ -37,8 +41,10 @@ class DataTable(ABC):
             + pl.duration(nanoseconds=nanoseconds)
         )
 
+
 class TradesPlusTable(DataTable):
     """Represents the 'trades-plus' data table."""
+
     name = "trades"
     bmll_table_name = "trades-plus"
     timestamp_col = "TradeTimestamp"
@@ -53,8 +59,10 @@ class TradesPlusTable(DataTable):
             EPrice=pl.col("TradeNotionalEUR") / pl.col("Size"),
         )
 
+
 class L2Table(DataTable):
     """Represents the 'l2' data table."""
+
     name = "l2"
     bmll_table_name = "l2"
     timestamp_col = "EventTimestamp"
@@ -64,8 +72,10 @@ class L2Table(DataTable):
     def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
         return super().load(markets, start_date, end_date)
 
+
 class L3Table(DataTable):
     """Represents the 'l3' data table."""
+
     name = "l3"
     bmll_table_name = "l3"
     timestamp_col = "EventTimestamp"
@@ -77,8 +87,10 @@ class L3Table(DataTable):
         lf = super().load(markets, start_date, end_date)
         return lf.with_columns(pl.col("TimestampNanoseconds").alias("EventTimestamp"))
 
+
 class MarketStateTable(DataTable):
     """Represents the 'MarketState' data table."""
+
     name = "marketstate"
     bmll_table_name = "MarketState"
     timestamp_col = "EventTimestamp"
@@ -87,6 +99,7 @@ class MarketStateTable(DataTable):
 
     def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
         return super().load(markets, start_date, end_date)
+
 
 ALL_TABLES = {
     "trades": TradesPlusTable(),

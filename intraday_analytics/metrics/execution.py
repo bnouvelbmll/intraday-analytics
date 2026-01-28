@@ -83,7 +83,9 @@ class ExecutionAnalytics(BaseAnalytics):
                             (pl.col("PricePoint").clip(0, 1) * 2 - 1) * pl.col("Size")
                         ).sum()
                         / pl.col("Size").sum()
-                    ).alias(f"{trade_type}VolumeWeightedPricePlacement{side_suffix}Aggressor"),
+                    ).alias(
+                        f"{trade_type}VolumeWeightedPricePlacement{side_suffix}Aggressor"
+                    ),
                 )
             )
 

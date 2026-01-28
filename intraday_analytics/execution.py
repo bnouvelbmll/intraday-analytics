@@ -11,7 +11,7 @@ import logging
 
 from .batching import SymbolBatcherStreaming, PipelineDispatcher
 from .utils import preload
-from ..config import DEFAULT_CONFIG as CONFIG # Added import
+from ..config import DEFAULT_CONFIG as CONFIG  # Added import
 
 
 def _create_runner_script(tmp_dir, enable_profiler_tool, profiling_output_dir):
@@ -112,10 +112,14 @@ def remote_process_executor_wrapper(func):
             result_pkl_path = os.path.join(tmp_dir, "result.pkl")
 
             enable_profiler_tool = CONFIG.get("ENABLE_PROFILER_TOOL", False)
-            profiling_output_dir = CONFIG.get("PROFILING_OUTPUT_DIR", "/tmp/perf_traces")
+            profiling_output_dir = CONFIG.get(
+                "PROFILING_OUTPUT_DIR", "/tmp/perf_traces"
+            )
 
             # Create the bootstrap script once
-            runner_path = _create_runner_script(tmp_dir, enable_profiler_tool, profiling_output_dir)
+            runner_path = _create_runner_script(
+                tmp_dir, enable_profiler_tool, profiling_output_dir
+            )
 
             # 2. Serialize the function and arguments to a file
             payload = (func, args, kwargs)
@@ -128,22 +132,20 @@ def remote_process_executor_wrapper(func):
                 runner_path,  # The bootstrap script
                 func_pkl_path,  # Argument 1: path to the function pickle
                 result_pkl_path,  # Argument 2: path for the result pickle
-                str(enable_profiler_tool), # Argument 3: enable_profiler_tool
-                profiling_output_dir, # Argument 4: profiling_output_dir
+                str(enable_profiler_tool),  # Argument 3: enable_profiler_tool
+                profiling_output_dir,  # Argument 4: profiling_output_dir
             ]
 
             # Run the command and wait for it to complete
             # Capture stdout/stderr for debugging
-            process = subprocess.run(
-                command,
-                capture_output=True,
-                text=True
-            )
+            process = subprocess.run(command, capture_output=True, text=True)
 
             # 4. Check exit code and retrieve result
             if process.returncode != 0:
                 # If the script failed (non-zero exit code)
-                logging.error(f"Remote process script failed with exit code {process.returncode}")
+                logging.error(
+                    f"Remote process script failed with exit code {process.returncode}"
+                )
                 logging.error(f"STDOUT: {process.stdout}")
                 logging.error(f"STDERR: {process.stderr}")
 
@@ -191,6 +193,7 @@ from profiling import Profiler
 
 from .tables import ALL_TABLES
 
+
 class ProcessInterval(Process):
     """
     A multiprocessing.Process subclass for preparing data for the analytics pipeline.
@@ -198,6 +201,7 @@ class ProcessInterval(Process):
     This class encapsulates the logic for loading, batching, and processing data
     in a separate process for a given time interval.
     """
+
     def __init__(self, sd, ed, config, get_pipeline, get_universe):
         super().__init__()
         self.sd = sd
@@ -212,11 +216,13 @@ class ProcessInterval(Process):
             level=self.config.get("LOGGING_LEVEL", "INFO").upper(),
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         )
-        
+
         profiler = None
         if self.config.get("ENABLE_PROFILER_TOOL", False):
             try:
-                profiling_output_dir = self.config.get("PROFILING_OUTPUT_DIR", "/tmp/perf_traces")
+                profiling_output_dir = self.config.get(
+                    "PROFILING_OUTPUT_DIR", "/tmp/perf_traces"
+                )
                 profiler = Profiler(output_dir=profiling_output_dir)
                 profiler.start()
                 logging.info("📊 Profiler client started in child process.")
@@ -234,21 +240,29 @@ class ProcessInterval(Process):
 
             if MODE == "naive":
                 logging.info("🚚 Creating batch files...")
-                
-                tables_to_load_names = self.config.get("TABLES_TO_LOAD", ["trades", "l2", "l3"])
+
+                tables_to_load_names = self.config.get(
+                    "TABLES_TO_LOAD", ["trades", "l2", "l3"]
+                )
                 table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
-                loaded_tables = preload(self.sd, self.ed, ref, nanoseconds, table_definitions)
-                
+                loaded_tables = preload(
+                    self.sd, self.ed, ref, nanoseconds, table_definitions
+                )
+
                 def write_per_listing(df, listing_id):
-                    out_path = os.path.join(TEMP_DIR, f"out-listing-{listing_id}.parquet")
+                    out_path = os.path.join(
+                        TEMP_DIR, f"out-listing-{listing_id}.parquet"
+                    )
                     df.write_parquet(out_path)
 
                 writer = write_per_listing
-                
+
                 sbs_input = {}
                 for table in table_definitions:
-                    sbs_input[table.name] = loaded_tables[table.name].sort(["ListingId", table.timestamp_col])
-                
+                    sbs_input[table.name] = loaded_tables[table.name].sort(
+                        ["ListingId", table.timestamp_col]
+                    )
+
                 sbs = SymbolBatcherStreaming(
                     sbs_input,
                     max_rows_per_table=self.config["MAX_ROWS_PER_TABLE"],
@@ -257,13 +271,16 @@ class ProcessInterval(Process):
 
                 def process_batch(b):
                     import resource
+
                     # Limit memory to 16gb per batch
                     # resource.setrlimit(resource.RLIMIT_AS, (16 * 1024**3, 16 * 1024**3))
                     pid.run_batch(b)
 
                 logging.info("Writing batches to disk...")
                 for i, batch in enumerate(sbs.stream_batches()):
-                    logging.info(f"  - Writing batch {i} (l2 length: {len(batch.get('l2', []))})")
+                    logging.info(
+                        f"  - Writing batch {i} (l2 length: {len(batch.get('l2', []))})"
+                    )
                     for table_name, data in batch.items():
                         data.write_parquet(
                             os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")

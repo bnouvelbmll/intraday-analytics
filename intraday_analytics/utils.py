@@ -93,7 +93,9 @@ def get_total_system_memory_gb():
     raise NotImplementedError
 
 
-def preload(sd, ed, ref, nanoseconds, tables: list[DataTable]) -> dict[str, pl.LazyFrame]:
+def preload(
+    sd, ed, ref, nanoseconds, tables: list[DataTable]
+) -> dict[str, pl.LazyFrame]:
     """
     Preloads data from the data lake for a given date range and reference data.
 
@@ -111,16 +113,16 @@ def preload(sd, ed, ref, nanoseconds, tables: list[DataTable]) -> dict[str, pl.L
         A dictionary of LazyFrames, with table names as keys.
     """
     logging.info(f"Preloading data for {sd.date()} -> {ed.date()}")
-    
+
     loaded_tables = {}
     markets = ref["MIC"].unique().tolist()
-    
+
     for table in tables:
         logging.info(f"  - Loading table: {table.name}")
         lf = table.load(markets, sd, ed)
         processed_lf = table.post_load_process(lf, ref, nanoseconds)
         loaded_tables[table.name] = processed_lf
-        
+
     return loaded_tables
 
 
@@ -200,6 +202,7 @@ def assert_unique_lazy(lf: pl.LazyFrame, keys: list[str], name=""):
     Raises:
         AssertionError: If duplicate keys are found.
     """
+
     def check_uniqueness(df: pl.DataFrame) -> pl.DataFrame:
         # Perform the actual check on the materialized chunk
         is_duplicated = df.select(keys).is_duplicated().any()
@@ -228,6 +231,7 @@ class BatchWriter:
     This class uses `pyarrow.parquet.ParquetWriter` to append data to a
     Parquet file, which is useful when writing out results in batches.
     """
+
     def __init__(self, outfile):
         self.out_path = outfile
         self.writer = None
@@ -265,11 +269,11 @@ def generate_path(mics, year, month, day, table_name):
         raise ValueError(f"Unknown table name: {table_name}")
 
     ap = bmll2._configure.L2_ACCESS_POINT_ALIAS
-    
+
     yyyy = "%04d" % (year,)
     mm = "%02d" % (month,)
     dd = "%02d" % (day,)
-    
+
     return [
         f"s3://{ap}/{table.s3_folder_name}/{mic}/{yyyy}/{mm}/{dd}/{table.s3_file_prefix}{mic}-{yyyy}{mm}{dd}.parquet"
         for mic in mics
@@ -320,12 +324,13 @@ def cache_universe(cache_dir_path_from_config: str):
         cache_dir_path_from_config: The base directory for the cache,
                                     typically from a config object.
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(date, *args, **kwargs):
             # Ensure the date is in a consistent format for the filename
             iso_date = pd.Timestamp(date).date().isoformat()
-            
+
             # Construct the cache path
             cache_dir = os.path.join(cache_dir_path_from_config, "universe_cache")
             os.makedirs(cache_dir, exist_ok=True)
@@ -344,8 +349,12 @@ def cache_universe(cache_dir_path_from_config: str):
                 logging.info(f"✅ Loaded universe for {iso_date} from cache.")
 
             # Always read from the cache, returning a Polars DataFrame
-            return pl.read_parquet(universe_path, storage_options={"region": "us-east-1"})
+            return pl.read_parquet(
+                universe_path, storage_options={"region": "us-east-1"}
+            )
+
         return wrapper
+
     return decorator
 
 
@@ -386,7 +395,6 @@ def create_date_batches(
         logging.info(f"Auto-detected frequency: {period_freq}")
     else:
         logging.info(f"Using specified frequency: {period_freq}")
-
 
     # Map user-friendly frequency to pandas period and offset
     if period_freq == "W":

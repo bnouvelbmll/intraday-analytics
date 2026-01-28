@@ -161,6 +161,7 @@ class PipelineDispatcher:
     `AnalyticsPipeline`, and uses a writer function to output the results.
     It can be configured to process data for each symbol in a batch individually.
     """
+
     def __init__(
         self,
         pipeline: AnalyticsPipeline,
@@ -249,6 +250,7 @@ class SymbolSizeEstimator:
     def _load_estimates(self) -> pl.DataFrame:
         """Loads size estimates from an external source."""
         import pandas as pd
+
         universe = self.get_universe(self.date)
         end_date_m2w = (
             (pd.Timestamp(self.date) - pd.Timedelta(days=14)).date().isoformat()
@@ -272,7 +274,9 @@ class SymbolSizeEstimator:
                 )
                 all_res.append(res)
             except Exception as e:
-                logging.warning(f"Could not load size estimates for mic {mic}. Error: {e}")
+                logging.warning(
+                    f"Could not load size estimates for mic {mic}. Error: {e}"
+                )
 
         if not all_res:
             logging.warning("Could not load size estimates for any mic.")
@@ -358,7 +362,9 @@ class HeuristicBatchingStrategy(BatchingStrategy):
         table_names = list(self.max_rows_per_table.keys())
 
         if not symbol_estimates:
-            logging.warning("No size estimates found. Falling back to fixed-size batching.")
+            logging.warning(
+                "No size estimates found. Falling back to fixed-size batching."
+            )
             fixed_size = 100
             return [
                 symbols[i : i + fixed_size] for i in range(0, len(symbols), fixed_size)
@@ -453,7 +459,9 @@ class PolarsScanBatchingStrategy(BatchingStrategy):
         if current_batch:
             batches.append(current_batch)
 
-        logging.info(f"Defined {len(batches)} batches using PolarsScanBatchingStrategy.")
+        logging.info(
+            f"Defined {len(batches)} batches using PolarsScanBatchingStrategy."
+        )
         return batches
 
 
@@ -533,6 +541,7 @@ class S3SymbolBatcher:
     according to a chosen strategy, processing it in parallel, and writing the
     output. It uses a temporary local directory to stage data during processing.
     """
+
     def __init__(
         self,
         s3_file_lists: Dict[str, List[str]],
@@ -595,7 +604,9 @@ class S3SymbolBatcher:
         if num_workers <= 0:
             num_workers = multiprocessing.cpu_count()  # *2
 
-        logging.info(f"--- PHASE 1: PARALLEL S3 STREAM & SHRED ({num_workers} workers) ---")
+        logging.info(
+            f"--- PHASE 1: PARALLEL S3 STREAM & SHRED ({num_workers} workers) ---"
+        )
         # Process
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = []

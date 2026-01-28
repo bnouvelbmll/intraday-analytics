@@ -16,6 +16,7 @@ The main steps of the pipeline are:
 The script is designed to be run from the command line. It uses a locking
 mechanism to prevent multiple instances from running simultaneously.
 """
+
 import bmll2
 import polars as pl
 import pandas as pd
@@ -200,16 +201,15 @@ def get_pipeline(N, symbols=None, ref=None, date=None):
 if __name__ == "__main__":
     os.environ["POLARS_MAX_THREADS"] = "48"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
-    
+
     logging.basicConfig(
         level=CONFIG.get("LOGGING_LEVEL", "INFO").upper(),
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
-    date_batches = create_date_batches( 
-            CONFIG["START_DATE"], CONFIG["END_DATE"], CONFIG.get("DEFAULT_FREQ")
-    )                    
+    date_batches = create_date_batches(
+        CONFIG["START_DATE"], CONFIG["END_DATE"], CONFIG.get("DEFAULT_FREQ")
+    )
     logging.info(f"📅 Created {len(date_batches)} date batches.")
-
 
     with managed_execution(CONFIG) as (processes, temp_dir):
         profiler = None
@@ -232,7 +232,6 @@ if __name__ == "__main__":
                 + "/"
                 + bmll2.storage_paths()[CONFIG["AREA"]]["prefix"]
             )
-
 
             for sd, ed in date_batches:
                 logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")

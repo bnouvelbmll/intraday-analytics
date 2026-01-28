@@ -7,6 +7,7 @@ import logging
 import threading
 from profiling.remote import ProfilingServer
 
+
 @contextmanager
 def managed_execution(config, lock_file_path="/tmp/intraday_analytics.lock"):
     """
@@ -20,7 +21,9 @@ def managed_execution(config, lock_file_path="/tmp/intraday_analytics.lock"):
         os.close(lock_fd)
         logging.info(f"🔒 Acquired lock file: {lock_file_path}")
     except FileExistsError:
-        logging.warning(f"Lock file {lock_file_path} exists. Checking if process is running...")
+        logging.warning(
+            f"Lock file {lock_file_path} exists. Checking if process is running..."
+        )
         try:
             with open(lock_file_path, "r") as f:
                 pid = int(f.read())
@@ -52,20 +55,22 @@ def managed_execution(config, lock_file_path="/tmp/intraday_analytics.lock"):
             server_thread = threading.Thread(target=profiling_server.serve, daemon=True)
             server_thread.start()
             os.environ["PROFILING_SERVER"] = profiling_server.address
-            logging.info(f"📊 Profiling server started at {profiling_server.address}, output to {output_dir}")
+            logging.info(
+                f"📊 Profiling server started at {profiling_server.address}, output to {output_dir}"
+            )
         except Exception as e:
             logging.error(f"Failed to start profiling server: {e}")
-            profiling_server = None # Ensure it's None if startup fails
-    
+            profiling_server = None  # Ensure it's None if startup fails
+
     try:
         # Yield the list for collecting processes and the temp directory path
         yield processes, temp_dir
-        
+
         # Wait for all child processes to complete
         logging.info("⏳ Waiting for all processes to complete...")
         for p in processes:
             p.join()
-        
+
         logging.info("✅ All processes completed.")
 
     except KeyboardInterrupt:
@@ -80,7 +85,7 @@ def managed_execution(config, lock_file_path="/tmp/intraday_analytics.lock"):
         if profiling_server:
             profiling_server.stop()
             logging.info("📊 Profiling server stopped.")
-        
+
         if os.path.exists(lock_file_path):
             os.remove(lock_file_path)
             logging.info(f"🔑 Removed lock file: {lock_file_path}")
