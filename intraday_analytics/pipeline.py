@@ -1,8 +1,11 @@
 import polars as pl
 from typing import List, Dict, Optional, Callable, Any
 from abc import ABC, abstractmethod
+import logging
 
-from intraday_analytics.utils import dc, ffill_with_shifts, assert_unique_lazy, lprint
+from intraday_analytics.utils import dc, ffill_with_shifts, assert_unique_lazy
+
+logger = logging.getLogger(__name__)
 
 
 class BaseAnalytics(ABC):
@@ -162,18 +165,16 @@ class AnalyticsPipeline:
     passing the output of one module as the input to the next.
     """
 
-    def __init__(self, modules, config, lprint):
+    def __init__(self, modules, config):
         """
         Initializes the AnalyticsPipeline.
 
         Args:
             modules: A list of `BaseAnalytics` instances to be run.
             config: A dictionary of configuration settings for the pipeline.
-            lprint: A logging function.
         """
         self.modules = modules
         self.config = config
-        self.lprint = lprint
 
     # ----------------------------
     def run_on_multi_tables(
@@ -221,23 +222,27 @@ class AnalyticsPipeline:
             if base is None:
                 base = lf_result
                 prev_specific_cols = module.specific_fill_cols
+                logger.debug(f"Initial base schema: {base.collect_schema().names()}")
             else:
+                logger.debug(f"Base schema before join with {module.name}: {base.collect_schema().names()}")
+                logger.debug(f"Current module ({module.name}) result will be joined.")
                 base = module.join(
                     base, prev_specific_cols, self.config["DEFAULT_FFILL"]
                 )
+                logger.debug(f"Base schema after join with {module.name}: {base.collect_schema().names()}")
                 prev_specific_cols.update(module.specific_fill_cols)
             if self.config["PROFILE"]:
                 # Many null listing ids
                 try:
-                    print(module, "SHAPE", base.select(pl.len()).collect())
+                    logger.info(f"{module} SHAPE {base.select(pl.len()).collect()}")
                 except Exception as e:
-                    print(e)
+                    logger.error(e, exc_info=True)
 
         # finally collect as eager DataFrame
         if self.config.get("ENABLE_PERFORMANCE_LOGS", False):
             r = base.profile(show_plot=False)
-            self.lprint("/PERFORMANCE_LOGS - output shape = ", r[0].shape)
-            print(r[1].with_columns(dt=pl.col("end") - pl.col("start")).sort("dt"))
+            logger.info(f"/PERFORMANCE_LOGS - output shape = {r[0].shape}")
+            logger.info(f"{r[1].with_columns(dt=pl.col('end') - pl.col('start')).sort('dt')}")
             return r[0]
         else:
             return base.collect()

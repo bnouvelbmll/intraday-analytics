@@ -1,7 +1,6 @@
 import os
 import re
 import sys
-import bmll2
 import polars as pl
 import pandas as pd
 import pyarrow.parquet as pq
@@ -112,6 +111,7 @@ def preload(
     Returns:
         A dictionary of LazyFrames, with table names as keys.
     """
+    import bmll2 # Moved import inside function
     logging.info(f"Preloading data for {sd.date()} -> {ed.date()}")
 
     loaded_tables = {}
@@ -264,6 +264,7 @@ def generate_path(mics, year, month, day, table_name):
     Returns:
         A list of S3 paths.
     """
+    import bmll2 # Moved import inside function
     table = ALL_TABLES.get(table_name)
     if not table:
         raise ValueError(f"Unknown table name: {table_name}")
@@ -328,6 +329,7 @@ def cache_universe(cache_dir_path_from_config: str):
     def decorator(func):
         @wraps(func)
         def wrapper(date, *args, **kwargs):
+            import bmll2 # Moved import inside function
             # Ensure the date is in a consistent format for the filename
             iso_date = pd.Timestamp(date).date().isoformat()
 
@@ -427,3 +429,5 @@ def create_date_batches(
         current_start += offset
 
     return batches
+
+

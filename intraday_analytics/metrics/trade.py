@@ -63,4 +63,4 @@ class TradeAnalytics(BaseAnalytics):
         self.df = df.join(
             df2, on=["MIC", "ListingId", "Ticker", "TimeBucket"], how="left"
         )
-        return df
+        return self.df

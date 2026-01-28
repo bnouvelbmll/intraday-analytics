@@ -5,7 +5,6 @@ import tempfile
 from contextlib import contextmanager
 import logging
 import threading
-from profiling.remote import ProfilingServer
 
 
 @contextmanager
@@ -48,6 +47,7 @@ def managed_execution(config, lock_file_path="/tmp/intraday_analytics.lock"):
 
     profiling_server = None
     if config.get("ENABLE_PROFILER_TOOL", False):
+        from profiling.remote import ProfilingServer # Moved import inside function
         try:
             output_dir = config.get("PROFILING_OUTPUT_DIR", "/tmp/perf_traces")
             os.makedirs(output_dir, exist_ok=True)

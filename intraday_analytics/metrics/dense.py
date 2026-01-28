@@ -1,7 +1,10 @@
 import polars as pl
 import pandas as pd
 import datetime as dt
+import logging
 from intraday_analytics import BaseAnalytics, SYMBOL_COL
+
+logger = logging.getLogger(__name__)
 
 
 class DenseAnalytics(BaseAnalytics):
@@ -65,7 +68,8 @@ class DenseAnalytics(BaseAnalytics):
             return (
                 pl.LazyFrame(symbols.cast(pl.Int64))
                 .join(pl.LazyFrame(times_df), how="cross")
-                .set_sorted(sc, "TimeBucket")
+                .join(self.ref.lazy().select([SYMBOL_COL, "MIC", "Ticker", "CurrencyCode"]), on=SYMBOL_COL, how="left")
+                .sort([sc, "TimeBucket"])
             )
         elif self.config["DENSE_OUTPUT_MODE"] == "adaptative":
             tsc = "EventTimestamp"
@@ -125,7 +129,7 @@ class DenseAnalytics(BaseAnalytics):
                         ).with_columns(ListingId=s)
                     )
                 except Exception as e:
-                    print(s, e)
+                    logger.error(f"Error processing ListingId {s}: {e}", exc_info=True)
             r = pl.concat(res).set_sorted([sc, "TimeBucket"])
             return r.lazy()
         else:
