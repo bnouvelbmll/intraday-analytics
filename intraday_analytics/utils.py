@@ -115,7 +115,7 @@ def preload(
     logging.info(f"Preloading data for {sd.date()} -> {ed.date()}")
 
     loaded_tables = {}
-    markets = ref["MIC"].unique().tolist()
+    markets = ref["MIC"].unique().to_list()
 
     for table in tables:
         logging.info(f"  - Loading table: {table.name}")
@@ -308,7 +308,7 @@ def get_s3_files(config, date, ref):
     s3_files = {}
     for table_name in config["REQUIRES"]:
         s3_files[table_name] = get_files_for_date_range(
-            date, date, ref["MIC"].unique().tolist(), table_name
+            date, date, ref["MIC"].unique().to_list(), table_name
         )
     return s3_files
 

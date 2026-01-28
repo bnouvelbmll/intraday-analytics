@@ -116,7 +116,7 @@ class ProcessInterval(Process):
 
                 # 2. Generate S3 file lists
                 s3_file_lists = {}
-                mics = ref["MIC"].unique().tolist()
+                mics = ref["MIC"].unique().to_list()
                 for table_name in tables_to_load_names:
                     s3_file_lists[table_name] = get_files_for_date_range(
                         self.sd, self.ed, mics, table_name
