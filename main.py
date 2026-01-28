@@ -254,6 +254,9 @@ if __name__ == "__main__":
             + bmll2.storage_paths()[CONFIG["AREA"]]["prefix"]
         )
 
+        # Call compute_metrics after all data is prepared
+        from intraday_analytics.execution import compute_metrics
+
         for sd, ed in date_batches:
             logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
             p = ProcessInterval(
@@ -265,12 +268,12 @@ if __name__ == "__main__":
             )
             p.start()
             p.join() # Wait for each ProcessInterval to complete sequentially
-        logging.info("✅ All data preparation processes completed.")
-
-        # Call compute_metrics after all data is prepared
-        from intraday_analytics.execution import compute_metrics
-        compute_metrics(CONFIG, get_pipeline, get_universe)
-        logging.info("✅ All metric computation completed.")
+            
+            # Compute metrics for this interval immediately
+            logging.info(f"📊 Computing metrics for batch: {sd.date()} -> {ed.date()}")
+            compute_metrics(CONFIG, get_pipeline, get_universe, start_date=sd, end_date=ed)
+            
+        logging.info("✅ All data preparation and metric computation processes completed.")
 
     finally:
         if tracer:

@@ -152,7 +152,7 @@ class ProcessInterval(Process):
             pass
 
 
-def compute_metrics(config, get_pipeline, get_universe):
+def compute_metrics(config, get_pipeline, get_universe, start_date=None, end_date=None):
     """
     Computes metrics for all batches in the temporary directory and aggregates them.
     """
@@ -169,7 +169,11 @@ def compute_metrics(config, get_pipeline, get_universe):
         return
 
     # We need a reference date for the pipeline.
-    start_date = config["START_DATE"]
+    if start_date is None:
+        start_date = config["START_DATE"]
+    if end_date is None:
+        end_date = config["END_DATE"]
+        
     ref = get_universe(start_date)
 
     pipe = get_pipeline(config["L2_LEVELS"], ref=ref, date=start_date)
@@ -197,5 +201,5 @@ def compute_metrics(config, get_pipeline, get_universe):
 
     # Aggregate
     aggregate_and_write_final_output(
-        config["START_DATE"], config["END_DATE"], config, temp_dir
+        start_date, end_date, config, temp_dir
     )
