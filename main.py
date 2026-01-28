@@ -213,14 +213,14 @@ if __name__ == "__main__":
 
     with managed_execution(CONFIG) as (processes, temp_dir):
         profiler = None
-        if CONFIG.get("PROFILE", False):
-            try:
-                profiler = Profiler()
-                profiler.start()
-                logging.info("📊 Profiler client started in main process.")
-            except Exception as e:
-                logging.error(f"Failed to start profiler client in main process: {e}")
-                profiler = None
+    if CONFIG.get("ENABLE_PROFILER_TOOL", False):
+        try:
+            profiler = Profiler()
+            profiler.start()
+            logging.info("📊 Profiler client started in main process.")
+        except Exception as e:
+            logging.error(f"Failed to start profiler client in main process: {e}")
+            profiler = None
 
         try:
             CONFIG["TEMP_DIR"] = temp_dir

@@ -256,9 +256,9 @@ class AnalyticsPipeline:
                     print(e)
 
         # finally collect as eager DataFrame
-        if self.config["PROFILE"]:
+        if self.config.get("ENABLE_PERFORMANCE_LOGS", False):
             r = base.profile(show_plot=False)
-            self.lprint("/PROFILE - output shape = ", r[0].shape)
+            self.lprint("/PERFORMANCE_LOGS - output shape = ", r[0].shape)
             print(r[1].with_columns(dt=pl.col("end") - pl.col("start")).sort("dt"))
             return r[0]
         else:
@@ -272,8 +272,10 @@ class AnalyticsPipeline:
             df: The DataFrame to be saved.
             path: The path to the output Parquet file.
             profile: If True, profiles the sorting operation before saving.
+                            Overrides ENABLE_POLARS_PROFILING config if set to True.
         """
-        if profile:
+        should_profile = profile or self.config.get("ENABLE_POLARS_PROFILING", False)
+        if should_profile:
             res = df.sort(["ListingId", "TimeBucket"]).profile(show_plot=True)
             return res
         df.sort(["ListingId", "TimeBucket"]).sink_parquet(

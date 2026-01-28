@@ -11,45 +11,58 @@ import logging
 
 from .batching import SymbolBatcherStreaming, PipelineDispatcher
 from .utils import preload
+from ..config import DEFAULT_CONFIG as CONFIG # Added import
 
 
-def _create_runner_script(tmp_dir):
+def _create_runner_script(tmp_dir, enable_profiler_tool, profiling_output_dir):
     """
     Creates a temporary Python script that acts as the bootstrap runner
     for the child process.
     """
-    runner_script_content = """
+    runner_script_content = f"""
 import cloudpickle
 import sys
 import os
 import traceback
 import logging
+from profiling import Profiler
 
 def run_pickled_func():
     # File paths are passed as command-line arguments
     func_path = sys.argv[1]
     result_path = sys.argv[2]
+    enable_profiler_tool = sys.argv[3] == 'True' # Read as string, convert to bool
+    profiling_output_dir = sys.argv[4]
+
+    profiler = None
+    if enable_profiler_tool:
+        try:
+            profiler = Profiler(output_dir=profiling_output_dir)
+            profiler.start()
+            logging.info("📊 Profiler client started in remote process.")
+        except Exception as e:
+            logging.error(f"Failed to start profiler client in remote process: {{e}}")
+            profiler = None
 
     try:
-        # 1. Load the function and args from the pickle file
         with open(func_path, 'rb') as f:
             func, args, kwargs = cloudpickle.load(f)
 
-        # 2. Execute the function
         result = func(*args, **kwargs)
 
-        # 3. Pickle the result (and a success status)
         with open(result_path, 'wb') as f:
             cloudpickle.dump(('result', result), f)
 
     except Exception as e:
-        # 4. Pickle the exception (and a failure status)
         logging.error("Error in remote process", exc_info=True)
         exc_info = sys.exc_info()
         with open(result_path, 'wb') as f:
             cloudpickle.dump(('exception', exc_info), f)
-        # Exit with a non-zero code to signal failure
         sys.exit(1)
+    finally:
+        if profiler:
+            profiler.stop()
+            logging.info("📊 Profiler client stopped in remote process.")
 
     sys.exit(0)
 
@@ -98,8 +111,11 @@ def remote_process_executor_wrapper(func):
             func_pkl_path = os.path.join(tmp_dir, "func.pkl")
             result_pkl_path = os.path.join(tmp_dir, "result.pkl")
 
+            enable_profiler_tool = CONFIG.get("ENABLE_PROFILER_TOOL", False)
+            profiling_output_dir = CONFIG.get("PROFILING_OUTPUT_DIR", "/tmp/perf_traces")
+
             # Create the bootstrap script once
-            runner_path = _create_runner_script(tmp_dir)
+            runner_path = _create_runner_script(tmp_dir, enable_profiler_tool, profiling_output_dir)
 
             # 2. Serialize the function and arguments to a file
             payload = (func, args, kwargs)
@@ -112,6 +128,8 @@ def remote_process_executor_wrapper(func):
                 runner_path,  # The bootstrap script
                 func_pkl_path,  # Argument 1: path to the function pickle
                 result_pkl_path,  # Argument 2: path for the result pickle
+                str(enable_profiler_tool), # Argument 3: enable_profiler_tool
+                profiling_output_dir, # Argument 4: profiling_output_dir
             ]
 
             # Run the command and wait for it to complete
@@ -196,9 +214,10 @@ class ProcessInterval(Process):
         )
         
         profiler = None
-        if "PROFILING_SERVER" in os.environ:
+        if self.config.get("ENABLE_PROFILER_TOOL", False):
             try:
-                profiler = Profiler()
+                profiling_output_dir = self.config.get("PROFILING_OUTPUT_DIR", "/tmp/perf_traces")
+                profiler = Profiler(output_dir=profiling_output_dir)
                 profiler.start()
                 logging.info("📊 Profiler client started in child process.")
             except Exception as e:

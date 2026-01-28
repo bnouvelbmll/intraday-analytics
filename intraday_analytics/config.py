@@ -26,10 +26,11 @@ DEFAULT_CONFIG = {
     "METRIC_COMPUTATION": "parallel",
     "SEPARATE_METRIC_PROCESS": True,
     "RUN_ONE_SYMBOL_AT_A_TIME": False,
-    "PROFILE": False,
     "DEFAULT_FREQ": None,
     "LOGGING_LEVEL": "INFO",
     "TABLES_TO_LOAD": ["trades", "l2", "l3"],
-    "PROFILE": False,
+    "ENABLE_PROFILER_TOOL": False,
+    "ENABLE_PERFORMANCE_LOGS": True,
+    "ENABLE_POLARS_PROFILING": False,
     "PROFILING_OUTPUT_DIR": "/tmp/perf_traces",
 }

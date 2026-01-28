@@ -44,7 +44,7 @@ def managed_execution(config, lock_file_path="/tmp/intraday_analytics.lock"):
     logging.info(f"📂 Created temporary directory: {temp_dir}")
 
     profiling_server = None
-    if config.get("PROFILE", False):
+    if config.get("ENABLE_PROFILER_TOOL", False):
         try:
             output_dir = config.get("PROFILING_OUTPUT_DIR", "/tmp/perf_traces")
             os.makedirs(output_dir, exist_ok=True)
