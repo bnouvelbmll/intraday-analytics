@@ -16,48 +16,21 @@ The main steps of the pipeline are:
 The script is designed to be run from the command line. It uses a locking
 mechanism to prevent multiple instances from running simultaneously.
 """
-import functools
-import time
 import bmll2
-import bmll
-import glob
-import logging
-import resource
-import numpy as np
 import polars as pl
 import pandas as pd
-import datetime as dt
-import pyarrow.parquet as pq
 import os
-import re
-import multiprocessing as mp
-from typing import List, Dict, Optional, Callable
-import cloudpickle
-import multiprocessing
-import subprocess
-import tempfile
 import sys
-import polars as pl
-import pyarrow as pa
-import pyarrow.dataset as ds
 import shutil
-from pathlib import Path
-from typing import Dict, List, Callable, Any, Optional
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from abc import ABC, abstractmethod
-import random, time
-import traceback
-from multiprocessing import Process
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+import logging
 
 from intraday_analytics import (
     AnalyticsPipeline,
-    SymbolBatcherStreaming,
-    PipelineDispatcher,
-    preload,
-    lprint,
+    DEFAULT_CONFIG,
+    cache_universe,
+    managed_execution,
 )
-from intraday_analytics.execution import PrepareDataProcess
+from intraday_analytics.execution import ProcessInterval
 from intraday_analytics.metrics.dense import DenseAnalytics
 from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsTW
 from intraday_analytics.metrics.trade import TradeAnalytics
@@ -68,40 +41,19 @@ from intraday_analytics.metrics.execution import ExecutionAnalytics
 # At 1min : 3 minutes per day.
 # At 10 sec: 15 minutes per day ! 250gb matchine (20 GB memory)
 
-CONFIG = {
+USER_CONFIG = {
     # --- Date & Scope ---
-    "START_DATE": "2025-11-01",  # can we use calendar objects? (not really)
+    "START_DATE": "2025-11-01",
     "END_DATE": "2025-12-31",
-    "PART_DAYS": 7,  # How many days per file (including saturday and sunday - the goal is to avoid over fragmentation)
-    "DATASETNAME": "sample2d",  # Name of the dataset
     "UNIVERSE": {"Index": "bepacp"},
     # --- Analytics Parameters ---
-    # "TIME_BUCKET_SECONDS": 2.5,
-    "TIME_BUCKET_SECONDS": 60,  # Bertrand's default was 1 second;
-    "L2_LEVELS": 10,  # Need to be less than 10 if relying on standard l2 analytics
-    # --- Batching & Performance ---
-    "BATCHING_STRATEGY": "heuristic",  # "heuristic" or "polars_scan" (how to group symbols -heuristics recommended)
-    "NUM_WORKERS": -1,  # use -1 for all available CPUs
-    "MAX_ROWS_PER_TABLE": {"trades": 500_000, "l2": 2_000_000, "l3": 10_000_000},
-    # --- File Paths ---
-    "HEURISTIC_SIZES_PATH": f"/tmp/symbol_sizes/latest.parquet",
-    "TEMP_DIR": "/tmp/temp_ian3",  # may need to be updated if many similar notebook run at the same time
-    "AREA": "user",
-    "PREPARE_DATA_MODE": "s3symb",  # or naive
-    "DEFAULT_FFILL": False,
+    "TIME_BUCKET_SECONDS": 60,
+    "L2_LEVELS": 10,
     "DENSE_OUTPUT": True,
-    "DENSE_OUTPUT_MODE": "adaptative",
-    # Ben TODO: Make the below robust under summer/winter time shifts; limit dense output for lit continuous trading at the primary venue.
-    "DENSE_OUTPUT_TIME_INTERVAL": [
-        "08:00",
-        "15:30",
-    ],  # make this flexible with calendar objects? [limit ourselves to the lit market?]
-    "MEMORY_PER_WORKER": 20,  # This will depend on resolution and universe (at 1 second this looks reasonable) (20gb fine up 10s)
-    "METRIC_COMPUTATION": "parallel",  # Parallel or sequential
-    "SEPARATE_METRIC_PROCESS": True,  # This may exceed resource limit on very large nodes
-    "RUN_ONE_SYMBOL_AT_A_TIME": False,  # may impact required memory
-    "PROFILE": False,
 }
+
+CONFIG = {**DEFAULT_CONFIG, **USER_CONFIG}
+
 
 whitelist = [
     "AQXE",
@@ -154,7 +106,8 @@ whitelist = [
 ]
 
 
-def _get_universe(date):
+@cache_universe(CONFIG["TEMP_DIR"])
+def get_universe(date):
     """
     Retrieves the universe of symbols for a given date.
 
@@ -205,36 +158,6 @@ def _get_universe(date):
     return ref
 
 
-def get_universe(date):
-    """
-    Retrieves the universe of symbols for a given date, with caching.
-
-    This function is a cached version of `_get_universe`. It stores the universe
-    data in a Parquet file to avoid re-computing it on subsequent calls for the
-    same date.
-
-    Args:
-        date: The date for which to retrieve the universe.
-
-    Returns:
-        A Polars DataFrame containing the universe of symbols.
-    """
-    date = pd.Timestamp(date).date().isoformat()
-
-    # Use a subdirectory in the temp dir for caching the universe
-    cache_dir = os.path.join(CONFIG["TEMP_DIR"], "universe_cache")
-    os.makedirs(cache_dir, exist_ok=True)
-    universe_path = os.path.join(cache_dir, f"universe-{date}.parquet")
-
-    if not os.path.exists(universe_path):
-        u = _get_universe(date)
-        u.to_parquet(universe_path)
-
-    return pl.read_parquet(
-        universe_path, storage_options={"region": "us-east-1"}
-    )  # Ben
-
-
 def get_pipeline(N, symbols=None, ref=None, date=None):
     """
     Constructs the analytics pipeline.
@@ -272,40 +195,88 @@ def get_pipeline(N, symbols=None, ref=None, date=None):
     return AnalyticsPipeline(modules)
 
 
+def create_date_batches(
+    start_date_str: str,
+    end_date_str: str,
+    period_freq: str | None = None,
+) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    """
+    Creates date batches from a date range, aligning to calendar weeks,
+    months, or years for better consistency.
+
+    Args:
+        start_date_str: The start date of the range.
+        end_date_str: The end date of the range.
+        period_freq: The frequency to use for batching ('W', '2W', 'M', 'A').
+                     If None, the frequency is auto-detected based on the
+                     duration of the date range.
+    """
+    start_date = pd.to_datetime(start_date_str)
+    end_date = pd.to_datetime(end_date_str)
+    total_days = (end_date - start_date).days
+
+    if period_freq is None:
+        logging.info("Auto-detecting batching frequency...")
+        if total_days <= 7:
+            logging.info("Date range is <= 7 days, creating a single batch.")
+            return [(start_date, end_date)]
+        # Auto-detect frequency
+        if 7 < total_days <= 60:
+            period_freq = "W"
+        elif 60 < total_days <= 180:
+            period_freq = "2W"
+        elif 180 < total_days <= 365 * 2:
+            period_freq = "M"
+        else:
+            period_freq = "A"
+        logging.info(f"Auto-detected frequency: {period_freq}")
+    else:
+        logging.info(f"Using specified frequency: {period_freq}")
+
+
+    # Map user-friendly frequency to pandas period and offset
+    if period_freq == "W":
+        align_freq = "W"
+        offset = pd.DateOffset(weeks=1)
+    elif period_freq == "2W":
+        align_freq = "W"  # Align to week start
+        offset = pd.DateOffset(weeks=2)
+    elif period_freq == "M":
+        align_freq = "M"
+        offset = pd.DateOffset(months=1)
+    elif period_freq == "A":
+        align_freq = "A"
+        offset = pd.DateOffset(years=1)
+    else:
+        raise ValueError(
+            f"Unsupported frequency: {period_freq}. Supported values are 'W', '2W', 'M', 'A'."
+        )
+
+    # Align start date to the beginning of the period for consistent chunks
+    aligned_start = start_date.to_period(align_freq).start_time
+
+    batches = []
+    current_start = aligned_start
+    while current_start <= end_date:
+        current_end = current_start + offset - pd.Timedelta(days=1)
+        # Ensure the batch does not go beyond the overall end_date
+        batch_end = min(current_end, end_date)
+        batches.append((current_start, batch_end))
+        current_start += offset
+
+    return batches
+
+
 if __name__ == "__main__":
     os.environ["POLARS_MAX_THREADS"] = "48"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+    
+    logging.basicConfig(
+        level=CONFIG.get("LOGGING_LEVEL", "INFO").upper(),
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
 
-    lock_file_path = "/tmp/intraday_analytics.lock"
-    temp_dir = None
-    processes = []
-
-    try:
-        # Try to open the file in exclusive creation mode. This is atomic.
-        lock_fd = os.open(lock_file_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(lock_fd, str(os.getpid()).encode())
-        os.close(lock_fd)
-    except FileExistsError:
-        print(f"Lock file {lock_file_path} exists. Checking if process is running...")
-        try:
-            with open(lock_file_path, "r") as f:
-                pid = int(f.read())
-            # Check if process is running (on Unix-like systems)
-            os.kill(pid, 0)
-        except (ValueError, OSError):
-            # Stale lock file
-            print("Stale lock file found. Removing it and starting.")
-            os.remove(lock_file_path)
-            # Second attempt to create lock file
-            lock_fd = os.open(lock_file_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(lock_fd, str(os.getpid()).encode())
-            os.close(lock_fd)
-        else:
-            print(f"Process {pid} is still running. Exiting.")
-            sys.exit(1)
-
-    try:
-        temp_dir = tempfile.mkdtemp(prefix="intraday_analytics_")
+    with managed_execution() as (processes, temp_dir):
         CONFIG["TEMP_DIR"] = temp_dir
 
         # storage path helper
@@ -316,42 +287,19 @@ if __name__ == "__main__":
             + bmll2.storage_paths()[CONFIG["AREA"]]["prefix"]
         )
 
-        dates = pd.date_range(CONFIG["START_DATE"], CONFIG["END_DATE"], freq="D")
+        date_batches = create_date_batches(
+            CONFIG["START_DATE"], CONFIG["END_DATE"], CONFIG.get("DEFAULT_FREQ")
+        )
+        logging.info(f"📅 Created {len(date_batches)} date batches.")
 
-        for i in range(0, len(dates), CONFIG["PART_DAYS"]):
-            chunk = dates[i : i + CONFIG["PART_DAYS"]]
-            sd, ed = chunk[0], chunk[-1]
-
-            lprint(f"STARTING {sd} -> {ed}")
-            p = PrepareDataProcess(
+        for sd, ed in date_batches:
+            logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
+            p = ProcessInterval(
                 sd=sd,
                 ed=ed,
-                CONFIG=CONFIG,
+                config=CONFIG,
                 get_pipeline=get_pipeline,
                 get_universe=get_universe,
-                preload=preload,
-                lprint=lprint,
-                SymbolBatcherStreaming=SymbolBatcherStreaming,
-                PipelineDispatcher=PipelineDispatcher,
             )
             p.start()
             processes.append(p)
-
-        for p in processes:
-            p.join()
-
-        lprint("All processes completed.")
-
-    except KeyboardInterrupt:
-        print("\nTerminating child processes...")
-        for p in processes:
-            if p.is_alive():
-                p.terminate()
-            p.join()
-        print("Child processes terminated.")
-    finally:
-        if os.path.exists(lock_file_path):
-            os.remove(lock_file_path)
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-        print("Cleanup complete.")

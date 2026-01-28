@@ -1,23 +1,17 @@
 import os
 import re
 import sys
-import glob
-import bmll
 import bmll2
 import polars as pl
 import pandas as pd
 import pyarrow.parquet as pq
 from typing import List, Callable
+import logging
+from functools import wraps
+from .tables import DataTable, ALL_TABLES
 
 # small constants
 SYMBOL_COL = "ListingId"
-
-
-def lprint(*args, **kwargs):
-    """
-    A logging function that prefixes messages with the current timestamp.
-    """
-    print(pd.Timestamp("today").isoformat(), *args, **kwargs)
 
 
 def dc(lf, suffix, timebucket_col="TimeBucket"):
@@ -99,77 +93,35 @@ def get_total_system_memory_gb():
     raise NotImplementedError
 
 
-def preload(sd, ed, ref, nanoseconds):
+def preload(sd, ed, ref, nanoseconds, tables: list[DataTable]) -> dict[str, pl.LazyFrame]:
     """
     Preloads data from the data lake for a given date range and reference data.
 
-    This function constructs queries to fetch trades, L2, and L3 data from the
-    data lake, applies initial filtering and resampling, and returns LazyFrames
-    for further processing.
+    This function iterates through a list of table objects, loads the data for
+    each, applies post-processing, and returns a dictionary of LazyFrames.
 
     Args:
         sd: The start date of the data to load.
         ed: The end date of the data to load.
         ref: A DataFrame containing the reference data (e.g., symbols).
         nanoseconds: The time bucket size in nanoseconds.
+        tables: A list of DataTable objects to load.
 
     Returns:
-        A tuple of LazyFrames for trades, L2, and L3 data.
+        A dictionary of LazyFrames, with table names as keys.
     """
-    def resample_and_select(lf, timestamp_col="EventTimestamp"):
-        return lf.filter(
-            pl.col("ListingId").is_in(ref["ListingId"].to_list())
-        ).with_columns(
-            TimeBucket=pl.when(
-                pl.col(timestamp_col)
-                == pl.col(timestamp_col).dt.truncate(f"{nanoseconds}ns")
-            )
-            .then(pl.col(timestamp_col))
-            .otherwise(pl.col(timestamp_col))
-            .dt.truncate(f"{nanoseconds}ns")
-            + pl.duration(nanoseconds=nanoseconds)
-        )
-
-    print(sd, ed, nanoseconds)
-
-    trades = resample_and_select(
-        bmll2.get_market_data_range(
-            markets=ref["MIC"].unique().tolist(),
-            table_name="trades-plus",
-            df_engine="polars",
-            start_date=sd,
-            end_date=ed,
-            lazy_load=True,
-        ).with_columns(
-            LPrice=pl.col("TradeNotional") / pl.col("Size"),
-            EPrice=pl.col("TradeNotionalEUR") / pl.col("Size"),
-        ),
-        timestamp_col="TradeTimestamp",
-    )
-
-    # Pull the L2
-    l2 = resample_and_select(
-        bmll2.get_market_data_range(
-            markets=ref["MIC"].unique().tolist(),
-            table_name="l2",
-            df_engine="polars",
-            start_date=sd,
-            end_date=ed,
-            lazy_load=True,
-        )
-    )
-
-    l3 = resample_and_select(
-        bmll2.get_market_data_range(
-            markets=ref["MIC"].unique().tolist(),
-            table_name="l3",
-            df_engine="polars",
-            start_date=sd,
-            end_date=ed,
-            lazy_load=True,
-        ).with_columns(pl.col("TimestampNanoseconds").alias("EventTimestamp"))
-    )
-    return trades, l2, l3
+    logging.info(f"Preloading data for {sd.date()} -> {ed.date()}")
+    
+    loaded_tables = {}
+    markets = ref["MIC"].unique().tolist()
+    
+    for table in tables:
+        logging.info(f"  - Loading table: {table.name}")
+        lf = table.load(markets, sd, ed)
+        processed_lf = table.post_load_process(lf, ref, nanoseconds)
+        loaded_tables[table.name] = processed_lf
+        
+    return loaded_tables
 
 
 # helper: forward fill with shifts (exact original algorithm)
@@ -308,28 +260,18 @@ def generate_path(mics, year, month, day, table_name):
     Returns:
         A list of S3 paths.
     """
+    table = ALL_TABLES.get(table_name)
+    if not table:
+        raise ValueError(f"Unknown table name: {table_name}")
+
     ap = bmll2._configure.L2_ACCESS_POINT_ALIAS
-    table_map = {
-        "l2": "Equity",
-        "l3": "Equity-L3",
-        "trades": "Trades-Plus",
-        "marketstate": "MarketState",
-    }
-
-    file_prefix = {
-        "l2": "",
-        "l3": "l3-",
-        "trades": "trades-plus-",
-        "marketstate": "market-state-",
-    }
-
+    
     yyyy = "%04d" % (year,)
     mm = "%02d" % (month,)
     dd = "%02d" % (day,)
-    prefix = file_prefix[table_name]
-
+    
     return [
-        f"s3://{ap}/{table_map[table_name]}/{mic}/{yyyy}/{mm}/{dd}/{prefix}{mic}-{yyyy}{mm}{dd}.parquet"
+        f"s3://{ap}/{table.s3_folder_name}/{mic}/{yyyy}/{mm}/{dd}/{table.s3_file_prefix}{mic}-{yyyy}{mm}{dd}.parquet"
         for mic in mics
     ]
 
@@ -364,3 +306,44 @@ def get_s3_files(config, date, ref):
             date, date, ref["MIC"].unique().tolist(), table_name
         )
     return s3_files
+
+
+def cache_universe(cache_dir_path_from_config: str):
+    """
+    A decorator to cache the result of a function that returns a universe DataFrame.
+
+    The cache is stored in a subdirectory 'universe_cache' within the provided
+    cache directory path. The result is cached based on the date argument of the
+    decorated function.
+
+    Args:
+        cache_dir_path_from_config: The base directory for the cache,
+                                    typically from a config object.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(date, *args, **kwargs):
+            # Ensure the date is in a consistent format for the filename
+            iso_date = pd.Timestamp(date).date().isoformat()
+            
+            # Construct the cache path
+            cache_dir = os.path.join(cache_dir_path_from_config, "universe_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            universe_path = os.path.join(cache_dir, f"universe-{iso_date}.parquet")
+
+            if not os.path.exists(universe_path):
+                logging.info(f"📜 Universe for {iso_date} not in cache. Fetching...")
+                # If not cached, call the original function to get the universe
+                # (expected to be a pandas DataFrame)
+                universe_df = func(date, *args, **kwargs)
+                # Save the result to the cache
+                universe_df.to_parquet(universe_path)
+                logging.info(f"💾 Saved universe for {iso_date} to cache.")
+
+            else:
+                logging.info(f"✅ Loaded universe for {iso_date} from cache.")
+
+            # Always read from the cache, returning a Polars DataFrame
+            return pl.read_parquet(universe_path, storage_options={"region": "us-east-1"})
+        return wrapper
+    return decorator

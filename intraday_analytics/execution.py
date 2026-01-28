@@ -7,6 +7,10 @@ import tempfile
 import random
 import time
 from multiprocessing import Process
+import logging
+
+from .batching import SymbolBatcherStreaming, PipelineDispatcher
+from .utils import preload
 
 
 def _create_runner_script(tmp_dir):
@@ -19,6 +23,7 @@ import cloudpickle
 import sys
 import os
 import traceback
+import logging
 
 def run_pickled_func():
     # File paths are passed as command-line arguments
@@ -39,6 +44,7 @@ def run_pickled_func():
 
     except Exception as e:
         # 4. Pickle the exception (and a failure status)
+        logging.error("Error in remote process", exc_info=True)
         exc_info = sys.exc_info()
         with open(result_path, 'wb') as f:
             cloudpickle.dump(('exception', exc_info), f)
@@ -112,14 +118,16 @@ def remote_process_executor_wrapper(func):
             # Capture stdout/stderr for debugging
             process = subprocess.run(
                 command,
-                # capture_output=True,
-                # text=True
+                capture_output=True,
+                text=True
             )
 
             # 4. Check exit code and retrieve result
             if process.returncode != 0:
                 # If the script failed (non-zero exit code)
-                print("Script failed")
+                logging.error(f"Remote process script failed with exit code {process.returncode}")
+                logging.error(f"STDOUT: {process.stdout}")
+                logging.error(f"STDERR: {process.stderr}")
 
                 # Try to load the exception details if available
                 if os.path.exists(result_pkl_path):
@@ -161,69 +169,70 @@ def remote_process_executor_wrapper(func):
     return wrapper
 
 
-class PrepareDataProcess(Process):
+from .tables import ALL_TABLES
+
+class ProcessInterval(Process):
     """
     A multiprocessing.Process subclass for preparing data for the analytics pipeline.
 
     This class encapsulates the logic for loading, batching, and processing data
-    in a separate process. It is designed to be used in a larger data preparation
-    workflow.
+    in a separate process for a given time interval.
     """
-    def __init__(self, **kwargs):
+    def __init__(self, sd, ed, config, get_pipeline, get_universe):
         super().__init__()
-        self.kwargs = kwargs
+        self.sd = sd
+        self.ed = ed
+        self.config = config
+        self.get_pipeline = get_pipeline
+        self.get_universe = get_universe
 
     def run(self):
-        # print(list(self.kwargs.keys()))
-        globals().update(self.kwargs)
-        ref = get_universe(sd)
-        nanoseconds = int(CONFIG["TIME_BUCKET_SECONDS"] * 1e9)
-        pipe = get_pipeline(CONFIG["L2_LEVELS"], ref=ref, date=sd)
+        # Configure logging for the new process
+        logging.basicConfig(
+            level=self.config.get("LOGGING_LEVEL", "INFO").upper(),
+            format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        )
+        
+        ref = self.get_universe(self.sd)
+        nanoseconds = int(self.config["TIME_BUCKET_SECONDS"] * 1e9)
+        pipe = self.get_pipeline(self.config["L2_LEVELS"], ref=ref, date=self.sd)
 
-        MODE = CONFIG["PREPARE_DATA_MODE"]
-        TEMP_DIR = CONFIG["TEMP_DIR"]
+        MODE = self.config["PREPARE_DATA_MODE"]
+        TEMP_DIR = self.config["TEMP_DIR"]
 
         if MODE == "naive":
-            lprint("CREATING BATCH FILES...")
-            lprint("LAZY LOADING ALL DATA...")
-            trades, l2, l3 = preload(sd, ed, ref, nanoseconds)
-
+            logging.info("🚚 Creating batch files...")
+            
+            tables_to_load_names = self.config.get("TABLES_TO_LOAD", ["trades", "l2", "l3"])
+            table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
+            loaded_tables = preload(self.sd, self.ed, ref, nanoseconds, table_definitions)
+            
             def write_per_listing(df, listing_id):
                 out_path = os.path.join(TEMP_DIR, f"out-listing-{listing_id}.parquet")
                 df.write_parquet(out_path)
 
             writer = write_per_listing
+            
+            sbs_input = {}
+            for table in table_definitions:
+                sbs_input[table.name] = loaded_tables[table.name].sort(["ListingId", table.timestamp_col])
+            
             sbs = SymbolBatcherStreaming(
-                {
-                    "trades": trades.sort(["ListingId", "TradeTimestamp"]),
-                    "l2": l2.sort(["ListingId", "EventTimestamp"]),
-                    "l3": l3.sort(["ListingId", "EventTimestamp"]),
-                    "marketstate": marketstate.sort(["ListingId", "EventTimestamp"]),
-                },
-                max_rows_per_table=CONFIG["MAX_ROWS_PER_TABLE"],
+                sbs_input,
+                max_rows_per_table=self.config["MAX_ROWS_PER_TABLE"],
             )
-            pid = PipelineDispatcher(pipe, writer, CONFIG)
-
-            import sys
+            pid = PipelineDispatcher(pipe, writer, self.config)
 
             def process_batch(b):
-                sys.stderr.write(".")
                 import resource
-
                 # Limit memory to 16gb per batch
                 # resource.setrlimit(resource.RLIMIT_AS, (16 * 1024**3, 16 * 1024**3))
                 pid.run_batch(b)
 
-            lprint("DUMPING BATCHES")
+            logging.info("Writing batches to disk...")
             for i, batch in enumerate(sbs.stream_batches()):
-                sys.stderr.write(".")
-                print(i, len(batch["l2"]))
-                batch["l3"].write_parquet(
-                    os.path.join(TEMP_DIR, f"batch-l3-{i}.parquet")
-                )
-                batch["l2"].write_parquet(
-                    os.path.join(TEMP_DIR, f"batch-l2-{i}.parquet")
-                )
-                batch["trades"].write_parquet(
-                    os.path.join(TEMP_DIR, f"batch-trades-{i}.parquet")
-                )
+                logging.info(f"  - Writing batch {i} (l2 length: {len(batch.get('l2', []))})")
+                for table_name, data in batch.items():
+                    data.write_parquet(
+                        os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
+                    )

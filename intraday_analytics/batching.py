@@ -6,14 +6,14 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Callable, Any
+import logging
 
 import bmll
 import polars as pl
-import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
 
-from intraday_analytics.utils import SYMBOL_COL, lprint
+from intraday_analytics.utils import SYMBOL_COL
 from intraday_analytics.pipeline import AnalyticsPipeline
 
 
@@ -61,7 +61,7 @@ class SymbolBatcherStreaming:
         """
         Dynamically group symbols into batches without exceeding max_rows_per_table.
         """
-        print("DEFINING BATCHES")
+        logging.info("Defining batches...")
         batches = []
         current_batch = []
         current_rows = {name: 0 for name in self.lf_dict}
@@ -93,7 +93,7 @@ class SymbolBatcherStreaming:
 
         if current_batch:
             batches.append(current_batch)
-        print("/DEFINING BATCHES")
+        logging.info(f"Defined {len(batches)} batches.")
 
         return batches
 
@@ -180,7 +180,7 @@ class PipelineDispatcher:
                         DataFrames containing the data for the batch.
         """
         if not len(batch_data):
-            print("Empty batch ??")
+            logging.warning("Empty batch received.")
             return
 
         # RUN SYMBOL BY SYMBOL
@@ -248,49 +248,34 @@ class SymbolSizeEstimator:
 
     def _load_estimates(self) -> pl.DataFrame:
         """Loads size estimates from an external source."""
+        import pandas as pd
         universe = self.get_universe(self.date)
         end_date_m2w = (
             (pd.Timestamp(self.date) - pd.Timedelta(days=14)).date().isoformat()
         )
-        try:
-            res = (
-                bmll.time_series.query(
-                    object_ids=universe["ListingId"],
-                    metric=["TradeCount"],
-                    start_date=end_date_m2w,
-                    end_date=self.date,
+
+        all_res = []
+        # Assuming 'mic' column exists in the universe dataframe
+        for mic, group in universe.to_pandas().groupby("mic"):
+            try:
+                logging.info(f"🔍 Querying size estimates for mic {mic}")
+                res = (
+                    bmll.time_series.query(
+                        object_ids=group["ListingId"].tolist(),
+                        metric=["TradeCount"],
+                        start_date=end_date_m2w,
+                        end_date=self.date,
+                    )
+                    .groupby("ObjectId")["TradeCount|Lit"]
+                    .median()
+                    .reset_index()
                 )
-                .groupby("ObjectId")["TradeCount|Lit"]
-                .median()
-                .reset_index()
-            )
-            return pl.concat(
-                [
-                    pl.from_pandas(
-                        res.assign(
-                            table_name="trades",
-                            estimated_rows=res["TradeCount|Lit"],
-                            **{SYMBOL_COL: res["ObjectId"]},
-                        )
-                    ),
-                    pl.from_pandas(
-                        res.assign(
-                            table_name="l2",
-                            estimated_rows=res["TradeCount|Lit"] * 20,
-                            **{SYMBOL_COL: res["ObjectId"]},
-                        )
-                    ),
-                    pl.from_pandas(
-                        res.assign(
-                            table_name="trades",
-                            estimated_rows=res["TradeCount|Lit"] * 50,
-                            **{SYMBOL_COL: res["ObjectId"]},
-                        )
-                    ),
-                ]
-            )
-        except Exception as e:
-            print(f"Warning: Could not load size estimates. Error: {e}")
+                all_res.append(res)
+            except Exception as e:
+                logging.warning(f"Could not load size estimates for mic {mic}. Error: {e}")
+
+        if not all_res:
+            logging.warning("Could not load size estimates for any mic.")
             return pl.DataFrame(
                 {SYMBOL_COL: [], "table_name": [], "estimated_rows": []},
                 schema={
@@ -299,6 +284,34 @@ class SymbolSizeEstimator:
                     "estimated_rows": pl.UInt64,
                 },
             )
+
+        res = pd.concat(all_res)
+
+        return pl.concat(
+            [
+                pl.from_pandas(
+                    res.assign(
+                        table_name="trades",
+                        estimated_rows=res["TradeCount|Lit"],
+                        **{SYMBOL_COL: res["ObjectId"]},
+                    )
+                ),
+                pl.from_pandas(
+                    res.assign(
+                        table_name="l2",
+                        estimated_rows=res["TradeCount|Lit"] * 20,
+                        **{SYMBOL_COL: res["ObjectId"]},
+                    )
+                ),
+                pl.from_pandas(
+                    res.assign(
+                        table_name="l3",
+                        estimated_rows=res["TradeCount|Lit"] * 50,
+                        **{SYMBOL_COL: res["ObjectId"]},
+                    )
+                ),
+            ]
+        )
 
     def get_estimates_for_symbols(
         self, symbols: List[str]
@@ -339,15 +352,13 @@ class HeuristicBatchingStrategy(BatchingStrategy):
         self.max_rows_per_table = max_rows_per_table
 
     def create_batches(self, symbols: List[str], **kwargs) -> List[List[str]]:
-        print("DEFINING BATCHES using HeuristicBatchingStrategy")
+        logging.info("Defining batches using HeuristicBatchingStrategy...")
 
         symbol_estimates = self.estimator.get_estimates_for_symbols(symbols)
         table_names = list(self.max_rows_per_table.keys())
 
         if not symbol_estimates:
-            print(
-                "Warning: No size estimates found. Falling back to fixed-size batching."
-            )
+            logging.warning("No size estimates found. Falling back to fixed-size batching.")
             fixed_size = 100
             return [
                 symbols[i : i + fixed_size] for i in range(0, len(symbols), fixed_size)
@@ -378,7 +389,7 @@ class HeuristicBatchingStrategy(BatchingStrategy):
         if current_batch:
             batches.append(current_batch)
 
-        print(f"/DEFINING BATCHES: {len(batches)} batches created.")
+        logging.info(f"Defined {len(batches)} batches using HeuristicBatchingStrategy.")
         return batches
 
 
@@ -400,18 +411,18 @@ class PolarsScanBatchingStrategy(BatchingStrategy):
 
     def _compute_symbol_counts(self) -> Dict[str, pl.DataFrame]:
         """Compute row counts per symbol per table."""
-        print("Computing exact symbol counts via Polars scan...")
+        logging.info("Computing exact symbol counts via Polars scan...")
         counts = {}
         for name, lf in self.lf_dict.items():
             counts[name] = lf.group_by(SYMBOL_COL).agg(pl.len()).collect()
-        print("/Finished computing counts.")
+        logging.info("Finished computing exact symbol counts.")
         return counts
 
     def create_batches(self, symbols: List[str], **kwargs) -> List[List[str]]:
         """
         Dynamically group symbols into batches based on exact counts.
         """
-        print("DEFINING BATCHES using PolarsScanBatchingStrategy")
+        logging.info("Defining batches using PolarsScanBatchingStrategy...")
 
         symbol_counts = self._compute_symbol_counts()
 
@@ -442,7 +453,7 @@ class PolarsScanBatchingStrategy(BatchingStrategy):
         if current_batch:
             batches.append(current_batch)
 
-        print(f"/DEFINING BATCHES: {len(batches)} batches created.")
+        logging.info(f"Defined {len(batches)} batches using PolarsScanBatchingStrategy.")
         return batches
 
 
@@ -480,7 +491,7 @@ def _process_s3_chunk(
     try:
         df_chunk = lf_filtered.collect()
     except Exception as e:
-        print(f"Error reading chunk {s3_files[:1]}: {e}")
+        logging.error(f"Error reading chunk {s3_files[:1]}: {e}")
         return
 
     if df_chunk.is_empty():
@@ -492,7 +503,7 @@ def _process_s3_chunk(
 
     # Inner join attaches 'batch_id' and filters out symbols not in any batch
     shredded = df_chunk.join(pl_map, on=SYMBOL_COL, how="inner")
-    # print(
+    # logging.info(
     #     "O->", f"{output_root}/{table_name}", len(df_chunk), len(pl_map), len(shredded)
     # )
 
@@ -501,7 +512,7 @@ def _process_s3_chunk(
 
     # 5. Write to Local Partitioned Dataset (The "Router")
     # Writes to: temp_shred/table_name/batch_id=X/part-{uuid}.parquet
-    # print(f"Writting to {output_root}/{table_name} by batch_id")
+    # logging.info(f"Writting to {output_root}/{table_name} by batch_id")
     ds.write_dataset(
         shredded.to_arrow(),
         base_dir=f"{output_root}/{table_name}",
@@ -542,12 +553,12 @@ class S3SymbolBatcher:
         self.get_universe = get_universe
 
         # 1. Create batches using the chosen strategy and the provided symbols
-        print("Computing Batches...")
+        logging.info("Computing Batches...")
         universe = self.get_universe(date)
         self.batches = self.batching_strategy.create_batches(
             sorted(universe[SYMBOL_COL].unique())
         )
-        print(f"{len(self.batches)} batches created.")
+        logging.info(f"{len(self.batches)} batches created.")
 
         # 2. Create the map for routing
         self.batch_map = self._create_batch_map_table()
@@ -584,7 +595,7 @@ class S3SymbolBatcher:
         if num_workers <= 0:
             num_workers = multiprocessing.cpu_count()  # *2
 
-        lprint(f"--- PHASE 1: PARALLEL S3 STREAM & SHRED ({num_workers} workers) ---")
+        logging.info(f"--- PHASE 1: PARALLEL S3 STREAM & SHRED ({num_workers} workers) ---")
         # Process
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = []
@@ -617,20 +628,20 @@ class S3SymbolBatcher:
                 try:
                     f.result()  # Raises exceptions if worker failed
                     if i % 10 == 0:
-                        print(f"Finished chunk {i}/{len(futures)}")
+                        logging.info(f"Finished chunk {i}/{len(futures)}")
                 except Exception as e:
-                    print(f"Worker failed: {e}")
+                    logging.error(f"Worker failed: {e}")
 
-        lprint("--- PHASE 2: LOCAL SORT & FINALIZE ---")
+        logging.info("--- PHASE 2: LOCAL SORT & FINALIZE ---")
         self._finalize_batches()
-        lprint("--- PHASE 1&2: DONE ---")
+        logging.info("--- PHASE 1&2: DONE ---")
 
     def _finalize_batches(self):
         """
         Finalizes the batches by reading the locally shredded data, sorting it,
         and writing the final output for each batch.
         """
-        print(len(self.batches), "BBB")
+        logging.info(f"Finalizing {len(self.batches)} batches...")
         for b_id in range(len(self.batches)):
             batch_data = {}
             try:
@@ -652,7 +663,7 @@ class S3SymbolBatcher:
                         )
                         batch_data[name] = lf.sort([SYMBOL_COL, sort_col]).collect()
                     else:
-                        print(f"{path} does not exist...")
+                        logging.warning(f"{path} does not exist...")
                         batch_data[name] = pl.DataFrame()
 
                 # Write final output
@@ -671,4 +682,4 @@ class S3SymbolBatcher:
                 out_path = self.temp_dir / f"batch-{name}-{b_id}.parquet"
                 df.write_parquet(out_path)
             else:
-                print(f"Batch {b_id} for table {name} is empty.")
+                logging.warning(f"Batch {b_id} for table {name} is empty.")
