@@ -30,10 +30,9 @@ from viztracer import VizLoggingHandler, get_tracer
 from intraday_analytics import (
     AnalyticsPipeline,
     DEFAULT_CONFIG,
-    managed_execution,
-    create_date_batches,
     cache_universe,
 )
+from intraday_analytics.utils import create_date_batches
 from intraday_analytics.execution import ProcessInterval
 from intraday_analytics.metrics.dense import DenseAnalytics
 from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsTW
@@ -216,8 +215,7 @@ if __name__ == "__main__":
     )
     logging.info(f"📅 Created {len(date_batches)} date batches.")
 
-    with managed_execution(CONFIG) as (processes, temp_dir):
-        tracer = None
+    tracer = None
     if CONFIG.get("ENABLE_PROFILER_TOOL", False):
         try:
             tracer = viztracer.VizTracer()

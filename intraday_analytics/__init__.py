@@ -28,7 +28,7 @@ from .batching import (
 )
 
 from .config import DEFAULT_CONFIG
-from .process import managed_execution
+# from .process import managed_execution
 from .tables import DataTable, TradesPlusTable, L2Table, L3Table, ALL_TABLES
 
 __all__ = [
@@ -59,7 +59,7 @@ __all__ = [
     # config
     "DEFAULT_CONFIG",
     # process
-    "managed_execution",
+#    "managed_execution",
     # tables
     "DataTable",
     "TradesPlusTable",
