@@ -434,20 +434,31 @@ def _process_s3_chunk(
         **storage_options,
         "region": storage_options.get("region", "us-east-1"),
     }  # Ben
-    lf = pl.scan_parquet(s3_files, storage_options=storage_options)
 
-    # 2. Apply user filters (removes 90% of rows here, before materialization)
-    lf_filtered = transform_fn(lf)
-
-    # 3. Materialize this chunk (It's now small enough to fit in worker RAM)
-    # We convert to Arrow immediately to prepare for the join/write
     try:
+        # Optimistic path: Try reading all files at once
+        lf = pl.scan_parquet(s3_files, storage_options=storage_options)
+        lf_filtered = transform_fn(lf)
         df_chunk = lf_filtered.collect()
     except Exception as e:
-        logging.error(f"Error reading chunk {s3_files[:1]}: {e}")
-        return
+        logging.warning(f"Batch read failed for chunk starting with {s3_files[0]}. Falling back to individual file read. Error: {e}")
+        # Fallback: Try reading files one by one
+        valid_dfs = []
+        for f in s3_files:
+            try:
+                lf_single = pl.scan_parquet(f, storage_options=storage_options)
+                lf_single_filtered = transform_fn(lf_single)
+                valid_dfs.append(lf_single_filtered.collect())
+            except Exception as inner_e:
+                logging.warning(f"Skipping missing or corrupt file: {f}. Error: {inner_e}")
+        
+        if not valid_dfs:
+            return
+            
+        df_chunk = pl.concat(valid_dfs)
 
     if df_chunk.is_empty():
+        return
         return
 
     # 4. Join with Batch Map
