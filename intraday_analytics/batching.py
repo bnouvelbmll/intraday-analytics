@@ -203,7 +203,7 @@ class SymbolSizeEstimator:
 
         all_res = []
         # Assuming 'mic' column exists in the universe dataframe
-        for mic, group in universe.to_pandas().groupby("mic"):
+        for mic, group in universe.to_pandas().groupby("MIC"):
             try:
                 logging.info(f"🔍 Querying size estimates for mic {mic}")
                 res = (
