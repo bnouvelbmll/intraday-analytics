@@ -8,188 +8,31 @@ import random
 import time
 from multiprocessing import Process
 import logging
+from joblib import Parallel, delayed
 
 from .batching import SymbolBatcherStreaming, PipelineDispatcher
 from .utils import preload
 from ..config import DEFAULT_CONFIG as CONFIG  # Added import
 
-
-def _create_runner_script(tmp_dir, enable_profiler_tool, profiling_output_dir):
-    """
-    Creates a temporary Python script that acts as the bootstrap runner
-    for the child process.
-    """
-    runner_script_content = f"""
-import cloudpickle
-import sys
-import os
-import traceback
-import logging
-from profiling import Profiler
-
-def run_pickled_func():
-    # File paths are passed as command-line arguments
-    func_path = sys.argv[1]
-    result_path = sys.argv[2]
-    enable_profiler_tool = sys.argv[3] == 'True' # Read as string, convert to bool
-    profiling_output_dir = sys.argv[4]
-
-    profiler = None
-    if enable_profiler_tool:
-        try:
-            profiler = Profiler(output_dir=profiling_output_dir)
-            profiler.start()
-            logging.info("📊 Profiler client started in remote process.")
-        except Exception as e:
-            logging.error(f"Failed to start profiler client in remote process: {{e}}")
-            profiler = None
-
-    try:
-        with open(func_path, 'rb') as f:
-            func, args, kwargs = cloudpickle.load(f)
-
-        result = func(*args, **kwargs)
-
-        with open(result_path, 'wb') as f:
-            cloudpickle.dump(('result', result), f)
-
-    except Exception as e:
-        logging.error("Error in remote process", exc_info=True)
-        exc_info = sys.exc_info()
-        with open(result_path, 'wb') as f:
-            cloudpickle.dump(('exception', exc_info), f)
-        sys.exit(1)
-    finally:
-        if profiler:
-            profiler.stop()
-            logging.info("📊 Profiler client stopped in remote process.")
-
-    sys.exit(0)
-
-if __name__ == '__main__':
-    run_pickled_func()
-"""
-    runner_path = os.path.join(tmp_dir, "runner.py")
-    with open(runner_path, "w") as f:
-        f.write(runner_script_content)
-    return runner_path
-
-
-class RemoteExecutionError(Exception):
-    """
-    Custom exception raised when a function executed in a remote process fails.
-
-    This exception wraps the original exception and traceback from the remote
-    process, providing more context for debugging.
-    """
-
-    def __init__(self, message, original_exception=None, traceback_text=None):
-        super().__init__(message)
-        self.original_exception = original_exception
-        self.traceback_text = traceback_text
-
-
 def remote_process_executor_wrapper(func):
     """
-    A decorator that executes a function in a separate, isolated subprocess.
+    A decorator that executes a function in a separate, isolated subprocess using joblib.
 
-    This wrapper serializes the function and its arguments using `cloudpickle`,
-    runs it in a new Python process, and then deserializes the result. This
-    approach is useful for running code that might have memory leaks or other
-    side effects, as the subprocess is completely torn down after execution.
-    Communication is handled via temporary files to avoid issues with
-    multiprocessing queues.
+    This approach is useful for running code that might have memory leaks or other
+    side effects, as joblib with `max_tasks_per_child=1` ensures a fresh process
+    for each task, effectively providing a "clean worker".
     """
-
     def wrapper(*args, **kwargs):
-
-        # 1. Create a temporary directory for communication files
-        random.seed(str((os.getpid(), time.time())))
-        with tempfile.TemporaryDirectory() as tmp_dir:
-
-            # Define file paths for the function and the result
-            func_pkl_path = os.path.join(tmp_dir, "func.pkl")
-            result_pkl_path = os.path.join(tmp_dir, "result.pkl")
-
-            enable_profiler_tool = CONFIG.get("ENABLE_PROFILER_TOOL", False)
-            profiling_output_dir = CONFIG.get(
-                "PROFILING_OUTPUT_DIR", "/tmp/perf_traces"
-            )
-
-            # Create the bootstrap script once
-            runner_path = _create_runner_script(
-                tmp_dir, enable_profiler_tool, profiling_output_dir
-            )
-
-            # 2. Serialize the function and arguments to a file
-            payload = (func, args, kwargs)
-            with open(func_pkl_path, "wb") as f:
-                cloudpickle.dump(payload, f)
-
-            # 3. Launch the subprocess
-            command = [
-                sys.executable,  # Path to the current Python interpreter
-                runner_path,  # The bootstrap script
-                func_pkl_path,  # Argument 1: path to the function pickle
-                result_pkl_path,  # Argument 2: path for the result pickle
-                str(enable_profiler_tool),  # Argument 3: enable_profiler_tool
-                profiling_output_dir,  # Argument 4: profiling_output_dir
-            ]
-
-            # Run the command and wait for it to complete
-            # Capture stdout/stderr for debugging
-            process = subprocess.run(command, capture_output=True, text=True)
-
-            # 4. Check exit code and retrieve result
-            if process.returncode != 0:
-                # If the script failed (non-zero exit code)
-                logging.error(
-                    f"Remote process script failed with exit code {process.returncode}"
-                )
-                logging.error(f"STDOUT: {process.stdout}")
-                logging.error(f"STDERR: {process.stderr}")
-
-                # Try to load the exception details if available
-                if os.path.exists(result_pkl_path):
-                    with open(result_pkl_path, "rb") as f:
-                        status, exc_info = cloudpickle.load(f)
-
-                        if status == "exception":
-                            # Reconstruct and raise the remote exception
-                            exc_type, exc_value, exc_traceback = exc_info
-                            traceback_text = "".join(
-                                traceback.format_exception(*exc_info)
-                            )
-
-                            raise RemoteExecutionError(
-                                f"Remote process failed (Exit Code {process.returncode}). "
-                                f"Exception: {exc_type.__name__}: {exc_value}",
-                                original_exception=exc_value,
-                                traceback_text=traceback_text,
-                            )
-
-                # Fallback for unexpected crash (e.g., OOM, Segmentation Fault)
-                raise RemoteExecutionError(
-                    f"Remote process crashed unexpectedly (Exit Code {process.returncode}). "
-                    f"STDERR:\n{process.stderr}"
-                )
-
-            # 5. Load and return the successful result
-            with open(result_pkl_path, "rb") as f:
-                status, result = cloudpickle.load(f)
-
-                if status == "result":
-                    return result
-
-                # Should not happen if returncode is 0, but safe check
-                raise RemoteExecutionError(
-                    "Remote process succeeded but returned an unexpected status."
-                )
-
+        # max_tasks_per_child=1 ensures a new process is spawned for each task
+        results = Parallel(max_tasks_per_child=1, prefer="processes")(
+            delayed(func)(*args, **kwargs)
+        )
+        return results[0]
     return wrapper
 
 
-from profiling import Profiler
+import viztracer
+from viztracer import VizLoggingHandler, get_tracer
 
 from .tables import ALL_TABLES
 
@@ -217,18 +60,21 @@ class ProcessInterval(Process):
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         )
 
-        profiler = None
+        tracer = None
         if self.config.get("ENABLE_PROFILER_TOOL", False):
             try:
                 profiling_output_dir = self.config.get(
                     "PROFILING_OUTPUT_DIR", "/tmp/perf_traces"
                 )
-                profiler = Profiler(output_dir=profiling_output_dir)
-                profiler.start()
-                logging.info("📊 Profiler client started in child process.")
+                tracer = viztracer.VizTracer(output_dir=profiling_output_dir)
+                tracer.start()
+                handler = VizLoggingHandler()
+                handler.setTracer(get_tracer())
+                logging.getLogger().addHandler(handler)
+                logging.info("📊 VizTracer started in child process.")
             except Exception as e:
-                logging.error(f"Failed to start profiler client in child process: {e}")
-                profiler = None
+                logging.error(f"Failed to start VizTracer in child process: {e}")
+                tracer = None
 
         try:
             ref = self.get_universe(self.sd)
@@ -286,6 +132,6 @@ class ProcessInterval(Process):
                             os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
                         )
         finally:
-            if profiler:
-                profiler.stop()
-                logging.info("📊 Profiler client stopped in child process.")
+            if tracer:
+                tracer.stop()
+                logging.info("📊 VizTracer stopped in child process.")

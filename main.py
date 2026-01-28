@@ -24,7 +24,8 @@ import os
 import sys
 import shutil
 import logging
-from profiling import Profiler
+import viztracer
+from viztracer import VizLoggingHandler, get_tracer
 
 from intraday_analytics import (
     AnalyticsPipeline,
@@ -212,15 +213,18 @@ if __name__ == "__main__":
     logging.info(f"📅 Created {len(date_batches)} date batches.")
 
     with managed_execution(CONFIG) as (processes, temp_dir):
-        profiler = None
+        tracer = None
     if CONFIG.get("ENABLE_PROFILER_TOOL", False):
         try:
-            profiler = Profiler()
-            profiler.start()
-            logging.info("📊 Profiler client started in main process.")
+            tracer = viztracer.VizTracer()
+            tracer.start()
+            handler = VizLoggingHandler()
+            handler.setTracer(get_tracer())
+            logging.getLogger().addHandler(handler)
+            logging.info("📊 VizTracer started in main process.")
         except Exception as e:
-            logging.error(f"Failed to start profiler client in main process: {e}")
-            profiler = None
+            logging.error(f"Failed to start VizTracer in main process: {e}")
+            tracer = None
 
         try:
             CONFIG["TEMP_DIR"] = temp_dir
@@ -245,6 +249,6 @@ if __name__ == "__main__":
                 p.start()
                 processes.append(p)
         finally:
-            if profiler:
-                profiler.stop()
-                logging.info("📊 Profiler client stopped in main process.")
+            if tracer:
+                tracer.stop()
+                logging.info("📊 VizTracer stopped in main process.")
