@@ -204,11 +204,11 @@ def get_pipeline(N, symbols=None, ref=None, date=None):
         modules += [DenseAnalytics(cref, CONFIG)]
 
     modules += [
-        L2AnalyticsLast(N, CONFIG),
+        L2AnalyticsLast(N),
         L2AnalyticsTW(N, CONFIG),
-        TradeAnalytics(CONFIG),
-        L3Analytics(CONFIG),
-        ExecutionAnalytics(CONFIG),
+        TradeAnalytics(),
+        L3Analytics(),
+        ExecutionAnalytics(),
     ]
 
     return AnalyticsPipeline(modules, CONFIG)
