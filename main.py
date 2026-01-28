@@ -171,7 +171,6 @@ def get_universe(date):
         ref.filter(pl.col("ISIN").is_in(list(stoxx600bbg["ISIN"])))
         .filter(pl.col("IsPrimary"))
         .filter(pl.col("IsAlive"))
-        .to_pandas()
     )
 
     return ref

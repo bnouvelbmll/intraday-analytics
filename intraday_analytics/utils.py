@@ -341,10 +341,17 @@ def cache_universe(cache_dir_path_from_config: str):
             if not os.path.exists(universe_path):
                 logging.info(f"📜 Universe for {iso_date} not in cache. Fetching...")
                 # If not cached, call the original function to get the universe
-                # (expected to be a pandas DataFrame)
                 universe_df = func(date, *args, **kwargs)
+                
                 # Save the result to the cache
-                universe_df.to_parquet(universe_path)
+                if isinstance(universe_df, pl.DataFrame):
+                    universe_df.write_parquet(universe_path)
+                elif isinstance(universe_df, pl.LazyFrame):
+                     universe_df.collect().write_parquet(universe_path)
+                else:
+                    # Assume Pandas
+                    universe_df.to_parquet(universe_path)
+                
                 logging.info(f"💾 Saved universe for {iso_date} to cache.")
 
             else:
