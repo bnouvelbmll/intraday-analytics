@@ -43,6 +43,7 @@ __all__ = [
     "generate_path",
     "SYMBOL_COL",
     "cache_universe",
+    "create_date_batches",
     # pipeline
     "BaseAnalytics",
     "BaseTWAnalytics",

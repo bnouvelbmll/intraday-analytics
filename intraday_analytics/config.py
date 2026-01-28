@@ -30,4 +30,6 @@ DEFAULT_CONFIG = {
     "DEFAULT_FREQ": None,
     "LOGGING_LEVEL": "INFO",
     "TABLES_TO_LOAD": ["trades", "l2", "l3"],
+    "PROFILE": False,
+    "PROFILING_OUTPUT_DIR": "/tmp/perf_traces",
 }

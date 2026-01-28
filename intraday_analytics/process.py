@@ -4,9 +4,11 @@ import shutil
 import tempfile
 from contextlib import contextmanager
 import logging
+import threading
+from profiling.remote import ProfilingServer
 
 @contextmanager
-def managed_execution(lock_file_path="/tmp/intraday_analytics.lock"):
+def managed_execution(config, lock_file_path="/tmp/intraday_analytics.lock"):
     """
     A context manager to handle process locking, temporary directory creation,
     and graceful shutdown on KeyboardInterrupt.
@@ -40,6 +42,20 @@ def managed_execution(lock_file_path="/tmp/intraday_analytics.lock"):
     processes = []
     temp_dir = tempfile.mkdtemp(prefix="intraday_analytics_")
     logging.info(f"📂 Created temporary directory: {temp_dir}")
+
+    profiling_server = None
+    if config.get("PROFILE", False):
+        try:
+            output_dir = config.get("PROFILING_OUTPUT_DIR", "/tmp/perf_traces")
+            os.makedirs(output_dir, exist_ok=True)
+            profiling_server = ProfilingServer(output_dir)
+            server_thread = threading.Thread(target=profiling_server.serve, daemon=True)
+            server_thread.start()
+            os.environ["PROFILING_SERVER"] = profiling_server.address
+            logging.info(f"📊 Profiling server started at {profiling_server.address}, output to {output_dir}")
+        except Exception as e:
+            logging.error(f"Failed to start profiling server: {e}")
+            profiling_server = None # Ensure it's None if startup fails
     
     try:
         # Yield the list for collecting processes and the temp directory path
@@ -61,6 +77,10 @@ def managed_execution(lock_file_path="/tmp/intraday_analytics.lock"):
         logging.info("🚦 Child processes terminated.")
     finally:
         # --- Cleanup ---
+        if profiling_server:
+            profiling_server.stop()
+            logging.info("📊 Profiling server stopped.")
+        
         if os.path.exists(lock_file_path):
             os.remove(lock_file_path)
             logging.info(f"🔑 Removed lock file: {lock_file_path}")

@@ -169,6 +169,8 @@ def remote_process_executor_wrapper(func):
     return wrapper
 
 
+from profiling import Profiler
+
 from .tables import ALL_TABLES
 
 class ProcessInterval(Process):
@@ -193,46 +195,61 @@ class ProcessInterval(Process):
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         )
         
-        ref = self.get_universe(self.sd)
-        nanoseconds = int(self.config["TIME_BUCKET_SECONDS"] * 1e9)
-        pipe = self.get_pipeline(self.config["L2_LEVELS"], ref=ref, date=self.sd)
+        profiler = None
+        if "PROFILING_SERVER" in os.environ:
+            try:
+                profiler = Profiler()
+                profiler.start()
+                logging.info("📊 Profiler client started in child process.")
+            except Exception as e:
+                logging.error(f"Failed to start profiler client in child process: {e}")
+                profiler = None
 
-        MODE = self.config["PREPARE_DATA_MODE"]
-        TEMP_DIR = self.config["TEMP_DIR"]
+        try:
+            ref = self.get_universe(self.sd)
+            nanoseconds = int(self.config["TIME_BUCKET_SECONDS"] * 1e9)
+            pipe = self.get_pipeline(self.config["L2_LEVELS"], ref=ref, date=self.sd)
 
-        if MODE == "naive":
-            logging.info("🚚 Creating batch files...")
-            
-            tables_to_load_names = self.config.get("TABLES_TO_LOAD", ["trades", "l2", "l3"])
-            table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
-            loaded_tables = preload(self.sd, self.ed, ref, nanoseconds, table_definitions)
-            
-            def write_per_listing(df, listing_id):
-                out_path = os.path.join(TEMP_DIR, f"out-listing-{listing_id}.parquet")
-                df.write_parquet(out_path)
+            MODE = self.config["PREPARE_DATA_MODE"]
+            TEMP_DIR = self.config["TEMP_DIR"]
 
-            writer = write_per_listing
-            
-            sbs_input = {}
-            for table in table_definitions:
-                sbs_input[table.name] = loaded_tables[table.name].sort(["ListingId", table.timestamp_col])
-            
-            sbs = SymbolBatcherStreaming(
-                sbs_input,
-                max_rows_per_table=self.config["MAX_ROWS_PER_TABLE"],
-            )
-            pid = PipelineDispatcher(pipe, writer, self.config)
+            if MODE == "naive":
+                logging.info("🚚 Creating batch files...")
+                
+                tables_to_load_names = self.config.get("TABLES_TO_LOAD", ["trades", "l2", "l3"])
+                table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
+                loaded_tables = preload(self.sd, self.ed, ref, nanoseconds, table_definitions)
+                
+                def write_per_listing(df, listing_id):
+                    out_path = os.path.join(TEMP_DIR, f"out-listing-{listing_id}.parquet")
+                    df.write_parquet(out_path)
 
-            def process_batch(b):
-                import resource
-                # Limit memory to 16gb per batch
-                # resource.setrlimit(resource.RLIMIT_AS, (16 * 1024**3, 16 * 1024**3))
-                pid.run_batch(b)
+                writer = write_per_listing
+                
+                sbs_input = {}
+                for table in table_definitions:
+                    sbs_input[table.name] = loaded_tables[table.name].sort(["ListingId", table.timestamp_col])
+                
+                sbs = SymbolBatcherStreaming(
+                    sbs_input,
+                    max_rows_per_table=self.config["MAX_ROWS_PER_TABLE"],
+                )
+                pid = PipelineDispatcher(pipe, writer, self.config)
 
-            logging.info("Writing batches to disk...")
-            for i, batch in enumerate(sbs.stream_batches()):
-                logging.info(f"  - Writing batch {i} (l2 length: {len(batch.get('l2', []))})")
-                for table_name, data in batch.items():
-                    data.write_parquet(
-                        os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
-                    )
+                def process_batch(b):
+                    import resource
+                    # Limit memory to 16gb per batch
+                    # resource.setrlimit(resource.RLIMIT_AS, (16 * 1024**3, 16 * 1024**3))
+                    pid.run_batch(b)
+
+                logging.info("Writing batches to disk...")
+                for i, batch in enumerate(sbs.stream_batches()):
+                    logging.info(f"  - Writing batch {i} (l2 length: {len(batch.get('l2', []))})")
+                    for table_name, data in batch.items():
+                        data.write_parquet(
+                            os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
+                        )
+        finally:
+            if profiler:
+                profiler.stop()
+                logging.info("📊 Profiler client stopped in child process.")

@@ -23,12 +23,14 @@ import os
 import sys
 import shutil
 import logging
+from profiling import Profiler
 
 from intraday_analytics import (
     AnalyticsPipeline,
     DEFAULT_CONFIG,
-    cache_universe,
     managed_execution,
+    create_date_batches,
+    cache_universe,
 )
 from intraday_analytics.execution import ProcessInterval
 from intraday_analytics.metrics.dense import DenseAnalytics
@@ -195,78 +197,6 @@ def get_pipeline(N, symbols=None, ref=None, date=None):
     return AnalyticsPipeline(modules)
 
 
-def create_date_batches(
-    start_date_str: str,
-    end_date_str: str,
-    period_freq: str | None = None,
-) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
-    """
-    Creates date batches from a date range, aligning to calendar weeks,
-    months, or years for better consistency.
-
-    Args:
-        start_date_str: The start date of the range.
-        end_date_str: The end date of the range.
-        period_freq: The frequency to use for batching ('W', '2W', 'M', 'A').
-                     If None, the frequency is auto-detected based on the
-                     duration of the date range.
-    """
-    start_date = pd.to_datetime(start_date_str)
-    end_date = pd.to_datetime(end_date_str)
-    total_days = (end_date - start_date).days
-
-    if period_freq is None:
-        logging.info("Auto-detecting batching frequency...")
-        if total_days <= 7:
-            logging.info("Date range is <= 7 days, creating a single batch.")
-            return [(start_date, end_date)]
-        # Auto-detect frequency
-        if 7 < total_days <= 60:
-            period_freq = "W"
-        elif 60 < total_days <= 180:
-            period_freq = "2W"
-        elif 180 < total_days <= 365 * 2:
-            period_freq = "M"
-        else:
-            period_freq = "A"
-        logging.info(f"Auto-detected frequency: {period_freq}")
-    else:
-        logging.info(f"Using specified frequency: {period_freq}")
-
-
-    # Map user-friendly frequency to pandas period and offset
-    if period_freq == "W":
-        align_freq = "W"
-        offset = pd.DateOffset(weeks=1)
-    elif period_freq == "2W":
-        align_freq = "W"  # Align to week start
-        offset = pd.DateOffset(weeks=2)
-    elif period_freq == "M":
-        align_freq = "M"
-        offset = pd.DateOffset(months=1)
-    elif period_freq == "A":
-        align_freq = "A"
-        offset = pd.DateOffset(years=1)
-    else:
-        raise ValueError(
-            f"Unsupported frequency: {period_freq}. Supported values are 'W', '2W', 'M', 'A'."
-        )
-
-    # Align start date to the beginning of the period for consistent chunks
-    aligned_start = start_date.to_period(align_freq).start_time
-
-    batches = []
-    current_start = aligned_start
-    while current_start <= end_date:
-        current_end = current_start + offset - pd.Timedelta(days=1)
-        # Ensure the batch does not go beyond the overall end_date
-        batch_end = min(current_end, end_date)
-        batches.append((current_start, batch_end))
-        current_start += offset
-
-    return batches
-
-
 if __name__ == "__main__":
     os.environ["POLARS_MAX_THREADS"] = "48"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
@@ -275,31 +205,47 @@ if __name__ == "__main__":
         level=CONFIG.get("LOGGING_LEVEL", "INFO").upper(),
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
-
-    with managed_execution() as (processes, temp_dir):
-        CONFIG["TEMP_DIR"] = temp_dir
-
-        # storage path helper
-        s3_user = (
-            "s3://"
-            + bmll2.storage_paths()[CONFIG["AREA"]]["bucket"]
-            + "/"
-            + bmll2.storage_paths()[CONFIG["AREA"]]["prefix"]
-        )
-
-        date_batches = create_date_batches(
+    date_batches = create_date_batches( 
             CONFIG["START_DATE"], CONFIG["END_DATE"], CONFIG.get("DEFAULT_FREQ")
-        )
-        logging.info(f"📅 Created {len(date_batches)} date batches.")
+    )                    
+    logging.info(f"📅 Created {len(date_batches)} date batches.")
 
-        for sd, ed in date_batches:
-            logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
-            p = ProcessInterval(
-                sd=sd,
-                ed=ed,
-                config=CONFIG,
-                get_pipeline=get_pipeline,
-                get_universe=get_universe,
+
+    with managed_execution(CONFIG) as (processes, temp_dir):
+        profiler = None
+        if CONFIG.get("PROFILE", False):
+            try:
+                profiler = Profiler()
+                profiler.start()
+                logging.info("📊 Profiler client started in main process.")
+            except Exception as e:
+                logging.error(f"Failed to start profiler client in main process: {e}")
+                profiler = None
+
+        try:
+            CONFIG["TEMP_DIR"] = temp_dir
+
+            # storage path helper
+            s3_user = (
+                "s3://"
+                + bmll2.storage_paths()[CONFIG["AREA"]]["bucket"]
+                + "/"
+                + bmll2.storage_paths()[CONFIG["AREA"]]["prefix"]
             )
-            p.start()
-            processes.append(p)
+
+
+            for sd, ed in date_batches:
+                logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
+                p = ProcessInterval(
+                    sd=sd,
+                    ed=ed,
+                    config=CONFIG,
+                    get_pipeline=get_pipeline,
+                    get_universe=get_universe,
+                )
+                p.start()
+                processes.append(p)
+        finally:
+            if profiler:
+                profiler.stop()
+                logging.info("📊 Profiler client stopped in main process.")
