@@ -221,6 +221,7 @@ if __name__ == "__main__":
     logging.basicConfig(
         level=CONFIG.get("LOGGING_LEVEL", "INFO").upper(),
         format="%(asctime)s - %(levelname)s - %(message)s",
+        force=True,
     )
     date_batches = create_date_batches(
         CONFIG["START_DATE"], CONFIG["END_DATE"], CONFIG.get("DEFAULT_FREQ")

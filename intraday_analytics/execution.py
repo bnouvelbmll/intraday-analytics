@@ -28,14 +28,6 @@ def remote_process_executor_wrapper(func):
     return wrapper
 
 
-try:
-    import viztracer
-    from viztracer.vizlogging import VizLoggingHandler
-    from viztracer import get_tracer
-except ImportError:
-    viztracer = None
-
-
 from .tables import ALL_TABLES
 
 
@@ -164,9 +156,7 @@ class ProcessInterval(Process):
                 sbs.process(num_workers=self.config["NUM_WORKERS"])
 
         finally:
-            if tracer:
-                tracer.stop()
-                logging.info("📊 VizTracer stopped in child process.")
+            pass
 
 
 def compute_metrics(config, get_pipeline, get_universe):
