@@ -139,6 +139,14 @@ class ProcessInterval(Process):
                 # 4. Run the shredding process
                 sbs.process(num_workers=self.config["NUM_WORKERS"])
 
+            else:
+                logging.error(f"Unknown PREPARE_DATA_MODE: {MODE}")
+                raise ValueError(f"Unknown PREPARE_DATA_MODE: {MODE}")
+
+        except Exception as e:
+            logging.error(f"Critical error in ProcessInterval: {e}", exc_info=True)
+            raise
+
         finally:
             pass
 
