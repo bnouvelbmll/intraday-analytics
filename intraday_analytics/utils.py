@@ -289,13 +289,16 @@ def get_all_files_for_date(date, mics, table_name):
     return generate_path(mics, year, month, day, table_name)
 
 
-def get_files_for_date_range(start_date, end_date, mics, table_name):
+def get_files_for_date_range(start_date, end_date, mics, table_name, exclude_weekends=True):
     """
     Generates a list of S3 paths for a date range, list of MICs, and table name.
     """
     files = []
     current_date = start_date
     while current_date <= end_date:
+        if exclude_weekends and current_date.weekday() >= 5:
+            current_date += pd.Timedelta(days=1)
+            continue
         files.extend(get_all_files_for_date(current_date, mics, table_name))
         current_date += pd.Timedelta(days=1)
     return files

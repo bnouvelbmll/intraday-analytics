@@ -21,6 +21,7 @@ class AnalyticsConfig:
     START_DATE: Optional[str] = None
     END_DATE: Optional[str] = None
     PART_DAYS: int = 7
+    EXCLUDE_WEEKENDS: bool = True
     DATASETNAME: str = "sample2d"
     UNIVERSE: Optional[Dict[str, str]] = None
 

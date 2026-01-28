@@ -117,9 +117,10 @@ class ProcessInterval(Process):
                 # 2. Generate S3 file lists
                 s3_file_lists = {}
                 mics = ref["MIC"].unique().to_list()
+                exclude_weekends = self.config.get("EXCLUDE_WEEKENDS", True)
                 for table_name in tables_to_load_names:
                     s3_file_lists[table_name] = get_files_for_date_range(
-                        self.sd, self.ed, mics, table_name
+                        self.sd, self.ed, mics, table_name, exclude_weekends=exclude_weekends
                     )
 
                 # 3. Initialize S3SymbolBatcher
