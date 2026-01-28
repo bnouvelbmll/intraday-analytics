@@ -162,29 +162,6 @@ class AnalyticsPipeline:
     passing the output of one module as the input to the next.
     """
 
-    def __init__(self, analytics_modules: List[BaseAnalytics]):
-        self.modules = analytics_modules
-
-    def run(self) -> pl.LazyFrame:
-        """
-        Runs the full analytics pipeline.
-
-        This method iterates through the configured analytics modules, computes
-        the metrics for each, and joins the results.
-
-        Returns:
-            A LazyFrame containing the combined results of all analytics modules.
-        """
-        # Compute and join sequentially
-        base = None
-        for mod in self.modules:
-            df = mod.compute()
-            if base is None:
-                base = df
-            else:
-                base = mod.join(base)
-        return base
-
     def __init__(self, modules, config, lprint):
         """
         Initializes the AnalyticsPipeline.
