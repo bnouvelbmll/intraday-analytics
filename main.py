@@ -64,6 +64,7 @@ USER_CONFIG = {
     "NUM_WORKERS": -1, # use -1 for all available CPUs
     "CLEAN_UP_BATCH_FILES": True,
     "CLEAN_UP_TEMP_DIR": True,
+    "EAGER_EXECUTION": True,
     # --- Output Configuration ---
     # To customize the final output path, add "FINAL_OUTPUT_PATH_TEMPLATE" here.
     # Example: "FINAL_OUTPUT_PATH_TEMPLATE": "s3://custom-bucket/analytics/{datasetname}/{start_date}_{end_date}.parquet"
