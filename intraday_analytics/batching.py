@@ -205,7 +205,7 @@ class SymbolSizeEstimator:
 
         def query_mic(mic, group):
             try:
-                logging.info(f"🔍 Querying size estimates for mic {mic}")
+                logging.debug(f"🔍 Querying size estimates for mic {mic}")
                 res = (
                     bmll.time_series.query(
                         object_ids=group["ListingId"].tolist(),
