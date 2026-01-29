@@ -68,6 +68,7 @@ USER_CONFIG = {
     # To customize the final output path, add "FINAL_OUTPUT_PATH_TEMPLATE" here.
     # Example: "FINAL_OUTPUT_PATH_TEMPLATE": "s3://custom-bucket/analytics/{datasetname}/{start_date}_{end_date}.parquet"
     "S3_STORAGE_OPTIONS": {"region": "us-east-1"}, # Example S3 storage options
+    #"LOGGING_LEVEL": "debug",
 }
 
 config_data = {**DEFAULT_CONFIG, **USER_CONFIG}
@@ -163,8 +164,8 @@ def get_universe(date):
     ref = bmll2.get_market_data_range(
         markets=eumics,
         table_name="reference",
-        start_date=date.date().isoformat(),
-        end_date=date.date().isoformat(),
+        start_date=date,
+        end_date=date,
         df_engine="polars",
     )
 
