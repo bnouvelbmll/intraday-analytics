@@ -59,7 +59,7 @@ USER_CONFIG = {
     "TIME_BUCKET_SECONDS": 60,
     "DENSE_OUTPUT": True,
     # --- Batching & Performance ---
-    "PREPARE_DATA_MODE": "naive",  # "naive" or "s3_shredding"
+    "PREPARE_DATA_MODE": "s3_shredding",  # "naive" or "s3_shredding"
     "SEPARATE_METRIC_PROCESS": True,
     "NUM_WORKERS": -1, # use -1 for all available CPUs
     "CLEAN_UP_BATCH_FILES": True,
@@ -159,6 +159,7 @@ def get_universe(date):
         )
     )
 
+    date = pd.Timestamp(date).date()
     ref = bmll2.get_market_data_range(
         markets=eumics,
         table_name="reference",
