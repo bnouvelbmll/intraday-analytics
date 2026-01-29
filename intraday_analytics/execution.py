@@ -65,7 +65,14 @@ class ProcessInterval(Process):
             for current_date in date_range:
                 logging.info(f"Processing date: {current_date.date()}")
                 
-                ref = self.get_universe(current_date)
+                try:
+                    ref = self.get_universe(current_date)
+                except Exception as e:
+                    if "No data available" in str(e):
+                        logging.warning(f"Skipping {current_date.date()} due to missing data: {e}")
+                        continue
+                    raise e
+
                 nanoseconds = int(self.config.TIME_BUCKET_SECONDS * 1e9)
                 pipe = self.get_pipeline(ref=ref, date=current_date)
 

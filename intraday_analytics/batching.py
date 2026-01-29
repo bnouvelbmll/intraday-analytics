@@ -198,7 +198,19 @@ class SymbolSizeEstimator:
         import bmll
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        universe = self.get_universe(self.date)
+        try:
+            universe = self.get_universe(self.date)
+        except Exception as e:
+            logging.warning(f"Could not load universe for size estimates on {self.date}: {e}")
+            return pl.DataFrame(
+                {SYMBOL_COL: [], "table_name": [], "estimated_rows": []},
+                schema={
+                    SYMBOL_COL: pl.Utf8,
+                    "table_name": pl.Utf8,
+                    "estimated_rows": pl.UInt64,
+                },
+            )
+
         end_date_m2w = (
             (pd.Timestamp(self.date) - pd.Timedelta(days=14)).date().isoformat()
         )
