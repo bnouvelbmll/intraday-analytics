@@ -98,6 +98,7 @@ class TradesPlusTable(DataTable):
             lf_filtered = lf_filtered.with_columns(
                 LPrice=pl.col("TradeNotional") / pl.col("Size"),
                 EPrice=pl.col("TradeNotionalEUR") / pl.col("Size"),
+                TradeTimestamp=pl.col(self.timestamp_col).cast(pl.Datetime("ns"))
             )
             return lf_filtered.with_columns(
                 TimeBucket=(

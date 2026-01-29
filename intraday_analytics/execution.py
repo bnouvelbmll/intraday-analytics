@@ -124,9 +124,14 @@ class ProcessInterval(Process):
                     )
 
                 # 3. Initialize S3SymbolBatcher
+                table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
+                transform_fns = {
+                    table.name: table.get_transform_fn(ref, nanoseconds)
+                    for table in table_definitions
+                }
                 sbs = S3SymbolBatcher(
                     s3_file_lists=s3_file_lists,
-                    transform_fns={},
+                    transform_fns=transform_fns,
                     batching_strategy=HeuristicBatchingStrategy(
                         SymbolSizeEstimator(self.sd, self.get_universe),
                         self.config["MAX_ROWS_PER_TABLE"],
