@@ -162,8 +162,8 @@ def get_universe(date):
     ref = bmll2.get_market_data_range(
         markets=eumics,
         table_name="reference",
-        start_date=date.date(),
-        end_date=date.date(),
+        start_date=date.date().isoformat(),
+        end_date=date.date().isoformat(),
         df_engine="polars",
     )
 
