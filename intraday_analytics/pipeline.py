@@ -215,9 +215,19 @@ class AnalyticsPipeline:
                 assert getattr(module, r) is not None
             lf_result = module.compute()
 
+            if self.config.EAGER_EXECUTION:
+                # Force materialization of the module result
+                # We must update module.df because that's what join uses
+                module.df = lf_result.collect().lazy()
+                lf_result = module.df
+
             lf_result = assert_unique_lazy(
                 lf_result, ["ListingId", "TimeBucket"], name=str(module)
             )
+
+            if self.config.EAGER_EXECUTION:
+                # Force the check to run now
+                lf_result = lf_result.collect().lazy()
 
             if base is None:
                 base = lf_result
@@ -229,6 +239,8 @@ class AnalyticsPipeline:
                 base = module.join(
                     base, prev_specific_cols, self.config.DEFAULT_FFILL
                 )
+                if self.config.EAGER_EXECUTION:
+                    base = base.collect().lazy()
                 logger.debug(f"Base schema after join with {module.name}: {base.collect_schema().names()}")
                 prev_specific_cols.update(module.specific_fill_cols)
             if self.config.ENABLE_PERFORMANCE_LOGS:
@@ -240,7 +252,7 @@ class AnalyticsPipeline:
                     logger.error(e, exc_info=True)
 
         # finally collect as eager DataFrame
-        if self.config.ENABLE_PERFORMANCE_LOGS:
+        if self.config.ENABLE_PERFORMANCE_LOGS and not self.config.EAGER_EXECUTION:
             r = base.profile(show_plot=False)
             logger.info(f"/PERFORMANCE_LOGS - output shape = {r[0].shape}")
             logger.info(f"{r[1].with_columns(dt=pl.col('end') - pl.col('start')).sort('dt')}")
