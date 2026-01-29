@@ -78,20 +78,19 @@ class DenseAnalytics(BaseAnalytics):
             )
             continuous_intervals = (
                 calendar.with_columns(
-                    pstate=pl.col("MarketState").shift(1),
-                    nstate=pl.col("MarketState").shift(-1),
-                )
-                .with_columns(
-                    plid=pl.col("ListingId").shift(1),
-                    nlid=pl.col("ListingId").shift(-1),
-                    nts=pl.col(tsc).shift(-1),
+                    [
+                        pl.col("MarketState").shift(1).over("ListingId").alias("pstate"),
+                        pl.col("MarketState").shift(-1).over("ListingId").alias("nstate"),
+                        pl.col(tsc).shift(-1).over("ListingId").alias("nts"),
+                    ]
                 )
                 .filter(pl.col("MarketState") == "CONTINUOUS_TRADING")
                 .filter(
                     (pl.col("pstate") != "CONTINUOUS_TRADING")
                     | (pl.col("nstate") != "CONTINUOUS_TRADING")
+                    | (pl.col("pstate").is_null())
+                    | (pl.col("nstate").is_null())
                 )
-                .filter(pl.col("plid") == pl.col("nlid"))
                 .select(["ListingId", "MarketState", tsc, "nts"])
                 .collect()
                 .to_pandas()
