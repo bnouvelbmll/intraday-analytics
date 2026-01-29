@@ -102,34 +102,35 @@ class DenseAnalytics(BaseAnalytics):
             frequency = str(int(self.config["TIME_BUCKET_SECONDS"] * 1e9)) + "ns"
             TS_PADDING = pd.Timedelta(seconds=600)
             for s in symbols[sc]:
-                try:
-                    start_dt = (
-                        pd.Timestamp(
-                            continuous_intervals.query("ListingId==@s")[tsc].iloc[0]
-                        ).floor(str(frequency))
-                        - TS_PADDING
-                    )
-                    end_dt = (
-                        pd.Timestamp(
-                            continuous_intervals.query("ListingId==@s")["nts"].iloc[-1]
-                        ).ceil(str(frequency))
-                        + TS_PADDING
-                    )
-                    res.append(
-                        pl.DataFrame(
-                            {
-                                "TimeBucket": pl.datetime_range(
-                                    start=start_dt,
-                                    end=end_dt,
-                                    interval=str(frequency),
-                                    closed="left",  # common choice; avoids including end_time
-                                    eager=True,
-                                ).cast(pl.Datetime("ns"))
-                            }
-                        ).with_columns(ListingId=s)
-                    )
-                except Exception:
+                ciq = continuous_intervals.query("ListingId==@s")[tsc]
+                if len(ciq) == 0:
                     failed_listings.append(s)
+                    continue
+                start_dt = (
+                    pd.Timestamp(
+                        ciq.iloc[0]
+                    ).floor(str(frequency))
+                    - TS_PADDING
+                )
+                end_dt = (
+                    pd.Timestamp(
+                        continuous_intervals.query("ListingId==@s")["nts"].iloc[-1]
+                    ).ceil(str(frequency))
+                    + TS_PADDING
+                )
+                res.append(
+                    pl.DataFrame(
+                        {
+                            "TimeBucket": pl.datetime_range(
+                                start=start_dt,
+                                end=end_dt,
+                                interval=str(frequency),
+                                closed="left",  # common choice; avoids including end_time
+                                eager=True,
+                            ).cast(pl.Datetime("ns"))
+                        }
+                    ).with_columns(ListingId=s)
+                )
             
             if failed_listings:
                 logger.warning(f"Could not determine continuous intervals for {len(failed_listings)} listings: {failed_listings}")
