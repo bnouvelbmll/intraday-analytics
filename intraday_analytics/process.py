@@ -41,6 +41,14 @@ def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
         start_date=start_date.date(),
         end_date=end_date.date()
     )
+    
+    # Sanitize path to remove double slashes which Polars dislikes (except for s3://)
+    if final_s3_path.startswith("s3://"):
+        protocol = "s3://"
+        path_part = final_s3_path[5:]
+        final_s3_path = protocol + path_part.replace("//", "/")
+    else:
+        final_s3_path = final_s3_path.replace("//", "/")
 
     logging.info(f"Writing aggregated analytics to {final_s3_path}")
     final_df.write_parquet(final_s3_path, compression="snappy")
