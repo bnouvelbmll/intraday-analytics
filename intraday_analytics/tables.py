@@ -205,6 +205,7 @@ class MarketStateTable(DataTable):
     def get_transform_fn(self, ref: pl.DataFrame, nanoseconds: int) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
             lf_filtered = lf.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
+            lf_filtered = lf_filtered.with_columns(EventTimestamp=pl.col("TimestampNanoseconds").cast(pl.Datetime("ns")))
             return lf_filtered.with_columns(
                 TimeBucket=(
                     pl.when(
