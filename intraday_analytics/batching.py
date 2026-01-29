@@ -12,7 +12,8 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.dataset as ds
 
-from intraday_analytics.utils import SYMBOL_COL
+from intraday_analytics.utils import SYMBOL_COL, get_total_system_memory_gb
+
 
 class SymbolBatcherStreaming:
     """
@@ -490,11 +491,11 @@ class S3SymbolBatcher:
         s3_file_lists: Dict[str, List[str]],
         transform_fns: Dict[str, Callable[[pl.LazyFrame], pl.LazyFrame]],
         batching_strategy: BatchingStrategy,
-        # symbols_to_process: List[str],
         temp_dir: str,
         storage_options: Dict[str, str] = None,
         date: str = None,
         get_universe: Callable = None,
+        memory_per_worker: int = 20,
     ):
         self.s3_file_lists = s3_file_lists
         self.transform_fns = transform_fns
@@ -503,6 +504,7 @@ class S3SymbolBatcher:
         self.storage_options = storage_options or {}
         self.date = date
         self.get_universe = get_universe
+        self.memory_per_worker = memory_per_worker
 
         # 1. Create batches using the chosen strategy and the provided symbols
         logging.info("Computing Batches...")
@@ -545,7 +547,12 @@ class S3SymbolBatcher:
         self.temp_dir.mkdir(parents=True)
 
         if num_workers <= 0:
-            num_workers = multiprocessing.cpu_count()  # *2
+            # Calculate max workers based on memory
+            total_memory_gb = get_total_system_memory_gb()
+            max_workers_mem = int(total_memory_gb // self.memory_per_worker)
+            
+            # Use the minimum of CPU cores and memory-based limit
+            num_workers = max(1, min(multiprocessing.cpu_count(), max_workers_mem))
 
         logging.info(
             f"--- PHASE 1: PARALLEL S3 STREAM & SHRED ({num_workers} workers) ---"

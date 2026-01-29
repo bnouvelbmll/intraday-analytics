@@ -441,3 +441,38 @@ def create_date_batches(
     return batches
 
 
+
+import sys
+import os
+import re
+
+def get_total_system_memory_gb():
+    """
+    Retrieves the total system physical memory in GiB.
+    """
+    if sys.platform.startswith("linux") or sys.platform.startswith("darwin"):
+        try:
+            page_size_bytes = os.sysconf("SC_PAGE_SIZE")
+            num_phys_pages = os.sysconf("SC_PHYS_PAGES")
+            mem_total_bytes = page_size_bytes * num_phys_pages
+            mem_total_gb = mem_total_bytes / (1024**3)
+            return mem_total_gb
+        except (ValueError, OSError):
+            pass
+
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/meminfo", "r") as f:
+                meminfo = f.read()
+            match = re.search(r"^MemTotal:\s+(\d+)\s+kB", meminfo)
+            if match:
+                mem_total_kb = int(match.groups()[0])
+                mem_total_gb = mem_total_kb / (1024**2)
+                return mem_total_gb
+        except (FileNotFoundError, OSError, AttributeError):
+            pass
+
+    # Fallback if no method works
+    logging.warning("Could not determine system memory; defaulting to a safe low value (e.g., 64GB).")
+    return 64.0
+

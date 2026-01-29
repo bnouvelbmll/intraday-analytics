@@ -140,6 +140,7 @@ class ProcessInterval(Process):
                     storage_options=self.config.get("S3_STORAGE_OPTIONS", {}),
                     date=self.sd,
                     get_universe=self.get_universe,
+                    memory_per_worker=self.config["MEMORY_PER_WORKER"],
                 )
 
                 # 4. Run the shredding process
