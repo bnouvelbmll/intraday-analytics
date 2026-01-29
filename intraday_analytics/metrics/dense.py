@@ -82,6 +82,11 @@ class DenseAnalytics(BaseAnalytics):
             )
         elif self.config.mode == "adaptative":
             tsc = "EventTimestamp"
+            
+            # Filter symbols to those present in marketstate to avoid warnings for missing data
+            available_listings = self.marketstate.select("ListingId").unique().collect()
+            symbols = symbols.join(available_listings, on=sc, how="inner")
+
             calendar = self.marketstate.filter(
                 pl.col("ListingId").is_in(list(symbols[sc]))
             )
