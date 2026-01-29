@@ -234,7 +234,8 @@ class AnalyticsPipeline:
             if self.config.ENABLE_PERFORMANCE_LOGS:
                 # Many null listing ids
                 try:
-                    logger.info(f"{module} SHAPE {base.select(pl.len()).collect()}")
+                    # Force ListingId selection to prevent optimization issues in map_batches
+                    logger.info(f"{module} SHAPE {base.select(pl.len(), pl.col('ListingId').first()).collect()}")
                 except Exception as e:
                     logger.error(e, exc_info=True)
 
