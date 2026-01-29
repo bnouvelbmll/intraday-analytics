@@ -75,7 +75,20 @@ class AnalyticsConfig:
     CLEAN_UP_TEMP_DIR: bool = True
 
     def __post_init__(self):
-        """Propagate global settings to sub-configs."""
+        """Propagate global settings and ensure sub-configs are dataclass instances."""
+        # Ensure nested configs are dataclass objects, not dicts from USER_CONFIG
+        if isinstance(self.dense_analytics, dict):
+            self.dense_analytics = DenseAnalyticsConfig(**self.dense_analytics)
+        if isinstance(self.l2_analytics, dict):
+            self.l2_analytics = L2AnalyticsConfig(**self.l2_analytics)
+        if isinstance(self.l3_analytics, dict):
+            self.l3_analytics = L3AnalyticsConfig(**self.l3_analytics)
+        if isinstance(self.trade_analytics, dict):
+            self.trade_analytics = TradeAnalyticsConfig(**self.trade_analytics)
+        if isinstance(self.execution_analytics, dict):
+            self.execution_analytics = ExecutionAnalyticsConfig(**self.execution_analytics)
+
+        # Propagate global settings
         self.dense_analytics.time_bucket_seconds = self.TIME_BUCKET_SECONDS
         self.l2_analytics.time_bucket_seconds = self.TIME_BUCKET_SECONDS
 
