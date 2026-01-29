@@ -13,12 +13,13 @@ import polars.testing
 # Now that bmll2 imports are moved inside functions, we can import normally
 from intraday_analytics.pipeline import AnalyticsPipeline, AnalyticsRunner
 from intraday_analytics.batching import S3SymbolBatcher, HeuristicBatchingStrategy, SymbolSizeEstimator
-from intraday_analytics.metrics.dense import DenseAnalytics
-from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsTW
-from intraday_analytics.metrics.trade import TradeAnalytics
-from intraday_analytics.metrics.l3 import L3Analytics
+from intraday_analytics.metrics.dense import DenseAnalytics, DenseAnalyticsConfig
+from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsTW, L2AnalyticsConfig
+from intraday_analytics.metrics.trade import TradeAnalytics, TradeAnalyticsConfig
+from intraday_analytics.metrics.l3 import L3Analytics, L3AnalyticsConfig
 from intraday_analytics.metrics.execution import ExecutionAnalytics
 from intraday_analytics.utils import SYMBOL_COL
+from intraday_analytics.configuration import AnalyticsConfig
 
 # --- Mock Data Generation ---
 def create_mock_ref(listing_id: int) -> pl.DataFrame:
@@ -139,19 +140,20 @@ def create_mock_marketstate(listing_id: int, date_str: str, time_bucket_seconds:
 
 
 # --- Configuration ---
-NAIVE_CONFIG = {
-    "TIME_BUCKET_SECONDS": 60,
-    "L2_LEVELS": 1, # Keep it simple for mock data
-    "DENSE_OUTPUT": True,
-    "DENSE_OUTPUT_MODE": "uniform",
-    "DENSE_OUTPUT_TIME_INTERVAL": ["09:00:00", "10:00:00"],
-    "DEFAULT_FFILL": True,
-    "PROFILE": False,
-    "ENABLE_PERFORMANCE_LOGS": False,
-    "LOGGING_LEVEL": "INFO",
-    "RUN_ONE_SYMBOL_AT_A_TIME": False, # For PipelineDispatcher
-    "TABLES_TO_LOAD": ["trades", "l2", "l3", "marketstate"],
-}
+NAIVE_CONFIG = AnalyticsConfig(
+    TIME_BUCKET_SECONDS=60,
+    DENSE_OUTPUT=True,
+    dense_analytics=DenseAnalyticsConfig(
+        mode="uniform",
+        time_interval=["09:00:00", "10:00:00"],
+    ),
+    l2_analytics=L2AnalyticsConfig(levels=1),
+    DEFAULT_FFILL=True,
+    ENABLE_PERFORMANCE_LOGS=False,
+    LOGGING_LEVEL="INFO",
+    RUN_ONE_SYMBOL_AT_A_TIME=False, # For PipelineDispatcher
+    TABLES_TO_LOAD=["trades", "l2", "l3", "marketstate"],
+)
 
 
 
@@ -160,7 +162,7 @@ class TestPipelineEquivalence(unittest.TestCase):
     def setUp(self):
         self.listing_id = 12345
         self.date_str = "2025-11-01"
-        self.time_bucket_seconds = NAIVE_CONFIG["TIME_BUCKET_SECONDS"]
+        self.time_bucket_seconds = NAIVE_CONFIG.TIME_BUCKET_SECONDS
 
         self.ref_df = create_mock_ref(self.listing_id)
         self.trades_df = create_mock_trades(self.listing_id, self.date_str, self.time_bucket_seconds)
@@ -169,12 +171,12 @@ class TestPipelineEquivalence(unittest.TestCase):
         self.marketstate_df = create_mock_marketstate(self.listing_id, self.date_str, self.time_bucket_seconds)
 
         self.modules = [
-            DenseAnalytics(self.ref_df, NAIVE_CONFIG),
-            L2AnalyticsLast(NAIVE_CONFIG["L2_LEVELS"]),
-            L2AnalyticsTW(NAIVE_CONFIG["L2_LEVELS"], NAIVE_CONFIG),
-            TradeAnalytics(),
-            L3Analytics(),
-            ExecutionAnalytics(), # Re-added
+            DenseAnalytics(self.ref_df, NAIVE_CONFIG.dense_analytics),
+            L2AnalyticsLast(NAIVE_CONFIG.l2_analytics),
+            L2AnalyticsTW(NAIVE_CONFIG.l2_analytics),
+            TradeAnalytics(NAIVE_CONFIG.trade_analytics),
+            L3Analytics(NAIVE_CONFIG.l3_analytics),
+            ExecutionAnalytics(NAIVE_CONFIG.execution_analytics), # Re-added
         ]
 
         self.pipeline = AnalyticsPipeline(self.modules, NAIVE_CONFIG)

@@ -200,7 +200,7 @@ class AnalyticsPipeline:
 
         prev_specific_cols = {}
         for module in self.modules:
-            for key in self.config.get("TABLES_TO_LOAD"):
+            for key in self.config.TABLES_TO_LOAD:
                 # print(module, module.REQUIRES, key, tables_for_sym.keys())
                 if (
                     (key in module.REQUIRES) or (key in ["marketstate"])
@@ -227,11 +227,11 @@ class AnalyticsPipeline:
                 logger.debug(f"Base schema before join with {module.name}: {base.collect_schema().names()}")
                 logger.debug(f"Current module ({module.name}) result will be joined.")
                 base = module.join(
-                    base, prev_specific_cols, self.config["DEFAULT_FFILL"]
+                    base, prev_specific_cols, self.config.DEFAULT_FFILL
                 )
                 logger.debug(f"Base schema after join with {module.name}: {base.collect_schema().names()}")
                 prev_specific_cols.update(module.specific_fill_cols)
-            if self.config["ENABLE_PERFORMANCE_LOGS"]:
+            if self.config.ENABLE_PERFORMANCE_LOGS:
                 # Many null listing ids
                 try:
                     logger.info(f"{module} SHAPE {base.select(pl.len()).collect()}")
@@ -239,7 +239,7 @@ class AnalyticsPipeline:
                     logger.error(e, exc_info=True)
 
         # finally collect as eager DataFrame
-        if self.config.get("ENABLE_PERFORMANCE_LOGS", False):
+        if self.config.ENABLE_PERFORMANCE_LOGS:
             r = base.profile(show_plot=False)
             logger.info(f"/PERFORMANCE_LOGS - output shape = {r[0].shape}")
             logger.info(f"{r[1].with_columns(dt=pl.col('end') - pl.col('start')).sort('dt')}")
@@ -257,7 +257,7 @@ class AnalyticsPipeline:
             profile: If True, profiles the sorting operation before saving.
                             Overrides ENABLE_POLARS_PROFILING config if set to True.
         """
-        should_profile = profile or self.config.get("ENABLE_POLARS_PROFILING", False)
+        should_profile = profile or self.config.ENABLE_POLARS_PROFILING
         if should_profile:
             res = df.sort(["ListingId", "TimeBucket"]).profile(show_plot=True)
             return res
@@ -299,7 +299,7 @@ class AnalyticsRunner:
             return
 
         # RUN SYMBOL BY SYMBOL
-        if self.config["RUN_ONE_SYMBOL_AT_A_TIME"]:
+        if self.config.RUN_ONE_SYMBOL_AT_A_TIME:
             for sym in sorted(
                 set().union(
                     *[

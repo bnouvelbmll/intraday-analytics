@@ -10,7 +10,7 @@ import os
 
 from intraday_analytics.utils import create_date_batches, ffill_with_shifts
 from intraday_analytics.batching import HeuristicBatchingStrategy, SymbolSizeEstimator, S3SymbolBatcher
-from intraday_analytics.metrics.l2 import L2AnalyticsLast
+from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsConfig
 
 class TestUtils(unittest.TestCase):
     def test_create_date_batches_auto_short(self):
@@ -103,7 +103,7 @@ class TestL2Metrics(unittest.TestCase):
             "MarketState": ["OPEN", "OPEN"]
         }).lazy()
         
-        analytics = L2AnalyticsLast(N=1)
+        analytics = L2AnalyticsLast(L2AnalyticsConfig(levels=1))
         analytics.l2 = l2_df
         
         result = analytics.compute().collect()

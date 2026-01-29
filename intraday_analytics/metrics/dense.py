@@ -3,8 +3,17 @@ import pandas as pd
 import datetime as dt
 import logging
 from intraday_analytics import BaseAnalytics, SYMBOL_COL
+from dataclasses import dataclass
+from typing import List
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DenseAnalyticsConfig:
+    mode: str = "adaptative"
+    time_interval: List[str] = None
+    time_bucket_seconds: float = 60.0
 
 
 class DenseAnalytics(BaseAnalytics):
@@ -23,7 +32,7 @@ class DenseAnalytics(BaseAnalytics):
 
     REQUIRES = ["trades"]  # Use trades plus to know date
 
-    def __init__(self, ref: pl.DataFrame, config: dict):
+    def __init__(self, ref: pl.DataFrame, config: DenseAnalyticsConfig):
         self.ref = ref
         self.config = config
         super().__init__("da")
@@ -32,14 +41,14 @@ class DenseAnalytics(BaseAnalytics):
         sc = SYMBOL_COL
         symbols = pl.DataFrame({sc: list(sorted(self.ref[sc].unique()))})
 
-        if self.config["DENSE_OUTPUT_MODE"] == "uniform":
+        if self.config.mode == "uniform":
             dates = (
                 self.trades.select("TradeDate").collect()["TradeDate"].value_counts()
             )
             date = dates.sort("count")[-1]["TradeDate"][0]
 
-            start_time = str(self.config["DENSE_OUTPUT_TIME_INTERVAL"][0])
-            end_time = str(self.config["DENSE_OUTPUT_TIME_INTERVAL"][1])
+            start_time = str(self.config.time_interval[0])
+            end_time = str(self.config.time_interval[1])
             start_time = pd.Timestamp("1971-01-01 " + start_time).time()
             end_time = pd.Timestamp("1971-01-01 " + end_time).time()
 
@@ -51,7 +60,7 @@ class DenseAnalytics(BaseAnalytics):
                 date.year, date.month, date.day, end_time.hour, end_time.minute
             )
 
-            frequency = str(int(self.config["TIME_BUCKET_SECONDS"] * 1e9)) + "ns"
+            frequency = str(int(self.config.time_bucket_seconds * 1e9)) + "ns"
 
             times_df = pl.DataFrame(
                 {
@@ -71,7 +80,7 @@ class DenseAnalytics(BaseAnalytics):
                 .join(self.ref.lazy().select([SYMBOL_COL, "MIC", "Ticker", "CurrencyCode"]), on=SYMBOL_COL, how="left")
                 .sort([sc, "TimeBucket"])
             )
-        elif self.config["DENSE_OUTPUT_MODE"] == "adaptative":
+        elif self.config.mode == "adaptative":
             tsc = "EventTimestamp"
             calendar = self.marketstate.filter(
                 pl.col("ListingId").is_in(list(symbols[sc]))
@@ -99,7 +108,7 @@ class DenseAnalytics(BaseAnalytics):
             # continuous_intervals = continuous_intervals .set_index("ListingId")
             res = []
             failed_listings = []
-            frequency = str(int(self.config["TIME_BUCKET_SECONDS"] * 1e9)) + "ns"
+            frequency = str(int(self.config.time_bucket_seconds * 1e9)) + "ns"
             TS_PADDING = pd.Timedelta(seconds=600)
             for s in symbols[sc]:
                 ciq = continuous_intervals.query("ListingId==@s")[tsc]

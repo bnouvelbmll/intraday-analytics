@@ -49,15 +49,15 @@ class ProcessInterval(Process):
     def run(self):
         # Configure logging for the new process
         logging.basicConfig(
-            level=self.config.get("LOGGING_LEVEL", "INFO").upper(),
+            level=self.config.LOGGING_LEVEL.upper(),
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         )
 
         try:
             # We process day by day to save memory and ensure metric safety
             date_range = pd.date_range(self.sd, self.ed, freq='D')
-            TEMP_DIR = self.config["TEMP_DIR"]
-            MODE = self.config["PREPARE_DATA_MODE"]
+            TEMP_DIR = self.config.TEMP_DIR
+            MODE = self.config.PREPARE_DATA_MODE
             
             # Use the partition start date for universe/batching consistency across days
             ref_partition = self.get_universe(self.sd)
@@ -66,15 +66,13 @@ class ProcessInterval(Process):
                 logging.info(f"Processing date: {current_date.date()}")
                 
                 ref = self.get_universe(current_date)
-                nanoseconds = int(self.config["TIME_BUCKET_SECONDS"] * 1e9)
-                pipe = self.get_pipeline(self.config["L2_LEVELS"], ref=ref, date=current_date)
+                nanoseconds = int(self.config.TIME_BUCKET_SECONDS * 1e9)
+                pipe = self.get_pipeline(ref=ref, date=current_date)
 
                 if MODE == "naive":
                     logging.info("🚚 Creating batch files (Naive)...")
 
-                    tables_to_load_names = self.config.get(
-                        "TABLES_TO_LOAD", ["trades", "l2", "l3"]
-                    )
+                    tables_to_load_names = self.config.TABLES_TO_LOAD
                     table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
                     
                     # Preload only for current_date
@@ -90,7 +88,7 @@ class ProcessInterval(Process):
 
                     sbs = SymbolBatcherStreaming(
                         sbs_input,
-                        max_rows_per_table=self.config["MAX_ROWS_PER_TABLE"],
+                        max_rows_per_table=self.config.MAX_ROWS_PER_TABLE,
                     )
 
                     logging.info("Writing batches to disk...")
@@ -104,13 +102,11 @@ class ProcessInterval(Process):
                 elif MODE == "s3_shredding":
                     logging.info("🚚 Starting S3 Shredding...")
 
-                    tables_to_load_names = self.config.get(
-                        "TABLES_TO_LOAD", ["trades", "l2", "l3"]
-                    )
+                    tables_to_load_names = self.config.TABLES_TO_LOAD
 
                     s3_file_lists = {}
                     mics = ref["MIC"].unique().to_list()
-                    exclude_weekends = self.config.get("EXCLUDE_WEEKENDS", True)
+                    exclude_weekends = self.config.EXCLUDE_WEEKENDS
                     for table_name in tables_to_load_names:
                         s3_file_lists[table_name] = get_files_for_date_range(
                             current_date, current_date, mics, table_name, exclude_weekends=exclude_weekends
@@ -127,16 +123,16 @@ class ProcessInterval(Process):
                         transform_fns=transform_fns,
                         batching_strategy=HeuristicBatchingStrategy(
                             SymbolSizeEstimator(self.sd, self.get_universe),
-                            self.config["MAX_ROWS_PER_TABLE"],
+                            self.config.MAX_ROWS_PER_TABLE,
                         ),
                         temp_dir=TEMP_DIR,
-                        storage_options=self.config.get("S3_STORAGE_OPTIONS", {}),
+                        storage_options=self.config.S3_STORAGE_OPTIONS,
                         date=current_date, 
                         get_universe=self.get_universe,
-                        memory_per_worker=self.config["MEMORY_PER_WORKER"],
+                        memory_per_worker=self.config.MEMORY_PER_WORKER,
                     )
 
-                    sbs.process(num_workers=self.config["NUM_WORKERS"])
+                    sbs.process(num_workers=self.config.NUM_WORKERS)
 
                 else:
                     logging.error(f"Unknown PREPARE_DATA_MODE: {MODE}")
@@ -152,7 +148,7 @@ class ProcessInterval(Process):
                 for i in batch_indices:
                     # Load batch data
                     batch_data = {}
-                    for table_name in self.config.get("TABLES_TO_LOAD", ["trades", "l2", "l3"]):
+                    for table_name in self.config.TABLES_TO_LOAD:
                         path = os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
                         if os.path.exists(path):
                             batch_data[table_name] = pl.read_parquet(path)
@@ -169,7 +165,7 @@ class ProcessInterval(Process):
                     writer.close()
                     
                     # Clean up batch input files immediately to save space
-                    for table_name in self.config.get("TABLES_TO_LOAD", ["trades", "l2", "l3"]):
+                    for table_name in self.config.TABLES_TO_LOAD:
                         path = os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
                         if os.path.exists(path):
                             os.remove(path)
@@ -200,17 +196,17 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
     
     # Configure logging
     logging.basicConfig(
-        level=config.get("LOGGING_LEVEL", "INFO").upper(),
+        level=config.LOGGING_LEVEL.upper(),
         format="%(asctime)s - %(levelname)s - %(message)s",
         force=True,
     )
 
     date_batches = create_date_batches(
-        config["START_DATE"], config["END_DATE"], config.get("DEFAULT_FREQ")
+        config.START_DATE, config.END_DATE, config.DEFAULT_FREQ
     )
     logging.info(f"📅 Created {len(date_batches)} date batches.")
 
-    temp_dir = config["TEMP_DIR"]
+    temp_dir = config.TEMP_DIR
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
     os.makedirs(temp_dir, exist_ok=True)
@@ -235,6 +231,6 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
         logging.info("✅ All data preparation and metric computation processes completed.")
 
     finally:
-        if config.get("CLEAN_UP_TEMP_DIR", True) and os.path.exists(temp_dir):
+        if config.CLEAN_UP_TEMP_DIR and os.path.exists(temp_dir):
             logging.info(f"🧹 Cleaning up temporary directory: {temp_dir}")
             shutil.rmtree(temp_dir)

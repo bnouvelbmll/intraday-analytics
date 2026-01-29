@@ -1,6 +1,10 @@
 import polars as pl
 from intraday_analytics import BaseAnalytics, dc
+from dataclasses import dataclass
 
+@dataclass
+class ExecutionAnalyticsConfig:
+    pass
 
 class ExecutionAnalytics(BaseAnalytics):
     """
@@ -18,7 +22,8 @@ class ExecutionAnalytics(BaseAnalytics):
 
     REQUIRES = ["trades", "l3"]
 
-    def __init__(self):
+    def __init__(self, config: ExecutionAnalyticsConfig):
+        self.config = config
         fill_cols = {
             "ExecutedVolumeBid": "zero",
             "ExecutedVolumeAsk": "zero",

@@ -28,13 +28,13 @@ def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
     final_df = combined_df.collect().sort(["ListingId", "TimeBucket"])
 
     # Define the final output path
-    dataset_name = config["DATASETNAME"]
-    output_bucket = bmll2.storage_paths()[config["AREA"]]["bucket"]
-    output_prefix = bmll2.storage_paths()[config["AREA"]]["prefix"]
+    dataset_name = config.DATASETNAME
+    output_bucket = bmll2.storage_paths()[config.AREA]["bucket"]
+    output_prefix = bmll2.storage_paths()[config.AREA]["prefix"]
 
     # Construct the final S3 path using the template from config
     # Format dates to ensure only the date part is used in the filename
-    final_s3_path = config["FINAL_OUTPUT_PATH_TEMPLATE"].format(
+    final_s3_path = config.FINAL_OUTPUT_PATH_TEMPLATE.format(
         bucket=output_bucket,
         prefix=output_prefix,
         datasetname=dataset_name,

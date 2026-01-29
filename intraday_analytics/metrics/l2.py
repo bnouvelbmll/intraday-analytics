@@ -1,6 +1,11 @@
 import polars as pl
 from intraday_analytics import BaseAnalytics, BaseTWAnalytics
+from dataclasses import dataclass
 
+@dataclass
+class L2AnalyticsConfig:
+    levels: int = 10
+    time_bucket_seconds: float = 60.0
 
 class L2AnalyticsLast(BaseAnalytics):
     """
@@ -15,8 +20,8 @@ class L2AnalyticsLast(BaseAnalytics):
 
     REQUIRES = ["l2"]
 
-    def __init__(self, N: int):
-        self.N = N
+    def __init__(self, config: L2AnalyticsConfig):
+        self.N = config.levels
         super().__init__(
             "l2last",
             {
@@ -111,7 +116,7 @@ class L2AnalyticsTW(BaseTWAnalytics):
 
     REQUIRES = ["l2"]
 
-    def __init__(self, N: int, config: dict):
+    def __init__(self, config: L2AnalyticsConfig):
         super().__init__(
             "l2tw",
             {
@@ -120,9 +125,9 @@ class L2AnalyticsTW(BaseTWAnalytics):
                 "Ask_TWA": "last",
                 "Bid_TWA": "last",
             },
-            nanoseconds=int(config["TIME_BUCKET_SECONDS"] * 1e9),
+            nanoseconds=int(config.time_bucket_seconds * 1e9),
         )
-        self.N = N
+        self.N = config.levels
 
     # TWAP Metrics
     def tw_analytics(self, l2: pl.LazyFrame, **kwargs) -> pl.LazyFrame:

@@ -33,10 +33,10 @@ except ImportError:
 from intraday_analytics import (
     AnalyticsPipeline, # Re-add AnalyticsPipeline import
     DEFAULT_CONFIG,
+    AnalyticsConfig,
     cache_universe,
 )
 from intraday_analytics.utils import create_date_batches
-from intraday_analytics.execution import ProcessInterval
 
 # Re-add direct imports for analytics modules
 from intraday_analytics.metrics.dense import DenseAnalytics
@@ -57,7 +57,6 @@ USER_CONFIG = {
     "DATASETNAME": "sample2d",
     # --- Analytics Parameters ---
     "TIME_BUCKET_SECONDS": 60,
-    "L2_LEVELS": 10,
     "DENSE_OUTPUT": True,
     # --- Batching & Performance ---
     "PREPARE_DATA_MODE": "naive",  # "naive" or "s3_shredding"
@@ -71,7 +70,8 @@ USER_CONFIG = {
     "S3_STORAGE_OPTIONS": {"region": "us-east-1"}, # Example S3 storage options
 }
 
-CONFIG = {**DEFAULT_CONFIG, **USER_CONFIG}
+config_data = {**DEFAULT_CONFIG, **USER_CONFIG}
+CONFIG = AnalyticsConfig(**config_data)
 
 
 whitelist = [
@@ -125,7 +125,7 @@ whitelist = [
 ]
 
 
-@cache_universe(CONFIG["TEMP_DIR"])
+@cache_universe(CONFIG.TEMP_DIR)
 def get_universe(date):
     """
     Retrieves the universe of symbols for a given date.
@@ -176,7 +176,7 @@ def get_universe(date):
     return ref
 
 
-def get_pipeline(N, symbols=None, ref=None, date=None):
+def get_pipeline(symbols=None, ref=None, date=None):
     """
     Constructs the analytics pipeline.
 
@@ -196,18 +196,18 @@ def get_pipeline(N, symbols=None, ref=None, date=None):
     assert date is not None
     modules = []
 
-    if CONFIG["DENSE_OUTPUT"]:
+    if CONFIG.DENSE_OUTPUT:
         cref = ref if ref is not None else get_universe(date)
         if symbols is not None:
             cref = cref.filter(pl.col("ListingId").is_in(list(symbols)))
-        modules += [DenseAnalytics(cref, CONFIG)]
+        modules += [DenseAnalytics(cref, CONFIG.dense_analytics)]
 
     modules += [
-        L2AnalyticsLast(N),
-        L2AnalyticsTW(N, CONFIG),
-        TradeAnalytics(),
-        L3Analytics(),
-        ExecutionAnalytics(),
+        L2AnalyticsLast(CONFIG.l2_analytics),
+        L2AnalyticsTW(CONFIG.l2_analytics),
+        TradeAnalytics(CONFIG.trade_analytics),
+        L3Analytics(CONFIG.l3_analytics),
+        ExecutionAnalytics(CONFIG.execution_analytics),
     ]
 
     return AnalyticsPipeline(modules, CONFIG)
@@ -218,14 +218,14 @@ if __name__ == "__main__":
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
     logging.basicConfig(
-        level=CONFIG.get("LOGGING_LEVEL", "INFO").upper(),
+        level=CONFIG.LOGGING_LEVEL.upper(),
         format="%(asctime)s - %(levelname)s - %(message)s",
         force=True,
     )
 
     tracer = None
     ret_code = 0 
-    if CONFIG.get("ENABLE_PROFILER_TOOL", False):
+    if CONFIG.ENABLE_PROFILER_TOOL:
         try:
             tracer = viztracer.VizTracer(log_multiprocess=True)
             tracer.start()

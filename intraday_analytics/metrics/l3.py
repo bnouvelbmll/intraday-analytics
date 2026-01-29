@@ -1,6 +1,10 @@
 import polars as pl
 from intraday_analytics import BaseAnalytics, dc
+from dataclasses import dataclass
 
+@dataclass
+class L3AnalyticsConfig:
+    pass
 
 class L3Analytics(BaseAnalytics):
     """
@@ -14,7 +18,8 @@ class L3Analytics(BaseAnalytics):
 
     REQUIRES = ["l3"]
 
-    def __init__(self):
+    def __init__(self, config: L3AnalyticsConfig):
+        self.config = config
         super().__init__(
             "l3",
             {

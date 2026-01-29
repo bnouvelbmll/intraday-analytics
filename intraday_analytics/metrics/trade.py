@@ -1,6 +1,10 @@
 import polars as pl
 from intraday_analytics import BaseAnalytics
+from dataclasses import dataclass
 
+@dataclass
+class TradeAnalyticsConfig:
+    pass
 
 class TradeAnalytics(BaseAnalytics):
     """
@@ -16,7 +20,8 @@ class TradeAnalytics(BaseAnalytics):
 
     REQUIRES = ["trades"]  # (trades_plus)
 
-    def __init__(self):
+    def __init__(self, config: TradeAnalyticsConfig):
+        self.config = config
         super().__init__(
             "trades",
             {

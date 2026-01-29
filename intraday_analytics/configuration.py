@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional
 from enum import Enum
+from .metrics.dense import DenseAnalyticsConfig
+from .metrics.l2 import L2AnalyticsConfig
+from .metrics.l3 import L3AnalyticsConfig
+from .metrics.trade import TradeAnalyticsConfig
+from .metrics.execution import ExecutionAnalyticsConfig
 
 class PrepareDataMode(str, Enum):
     NAIVE = "naive"
@@ -27,7 +32,11 @@ class AnalyticsConfig:
 
     # --- Analytics Parameters ---
     TIME_BUCKET_SECONDS: float = 60
-    L2_LEVELS: int = 10
+    dense_analytics: DenseAnalyticsConfig = field(default_factory=DenseAnalyticsConfig)
+    l2_analytics: L2AnalyticsConfig = field(default_factory=L2AnalyticsConfig)
+    l3_analytics: L3AnalyticsConfig = field(default_factory=L3AnalyticsConfig)
+    trade_analytics: TradeAnalyticsConfig = field(default_factory=TradeAnalyticsConfig)
+    execution_analytics: ExecutionAnalyticsConfig = field(default_factory=ExecutionAnalyticsConfig)
 
     # --- Batching & Performance ---
     BATCHING_STRATEGY: str = BatchingStrategyType.HEURISTIC.value
@@ -45,8 +54,6 @@ class AnalyticsConfig:
     PREPARE_DATA_MODE: str = PrepareDataMode.S3_SHREDDING.value
     DEFAULT_FFILL: bool = False
     DENSE_OUTPUT: bool = True
-    DENSE_OUTPUT_MODE: str = DenseOutputMode.ADAPTATIVE.value
-    DENSE_OUTPUT_TIME_INTERVAL: List[str] = field(default_factory=lambda: ["08:00", "15:30"])
     MEMORY_PER_WORKER: int = 20
     METRIC_COMPUTATION: str = "parallel"
     SEPARATE_METRIC_PROCESS: bool = True

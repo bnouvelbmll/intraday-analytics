@@ -2,16 +2,16 @@ import unittest
 import polars as pl
 import pandas as pd
 import logging
-from intraday_analytics.metrics.dense import DenseAnalytics
+from intraday_analytics.metrics.dense import DenseAnalytics, DenseAnalyticsConfig
 from intraday_analytics.utils import SYMBOL_COL
 
 class TestDenseAnalytics(unittest.TestCase):
     def setUp(self):
-        self.config = {
-            "DENSE_OUTPUT_MODE": "adaptative",
-            "TIME_BUCKET_SECONDS": 60,
-            "DENSE_OUTPUT_TIME_INTERVAL": ["09:00:00", "10:00:00"]
-        }
+        self.config = DenseAnalyticsConfig(
+            mode="adaptative",
+            time_bucket_seconds=60,
+            time_interval=["09:00:00", "10:00:00"]
+        )
         self.ref = pl.DataFrame({
             SYMBOL_COL: [1, 2],
             "MIC": ["XAMS", "XPAR"],
