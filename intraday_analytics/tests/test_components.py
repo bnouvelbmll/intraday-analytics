@@ -185,6 +185,115 @@ class TestS3SymbolBatcherIntegration(unittest.TestCase):
         df1 = pl.read_parquet(out_1)
         self.assertEqual(df1["ListingId"][0], "B")
 
+class TestAnalyticsModuleOutputs(unittest.TestCase):
+    def setUp(self):
+        """Set up mock DataFrames for testing."""
+        base_time = dt.datetime(2025, 1, 1, 9, 30)
+        
+        # Mock L2 data
+        l2_data = {
+            "TimeBucket": [base_time, base_time, base_time + dt.timedelta(minutes=1)],
+            "ListingId": [101, 102, 101],
+            "EventTimestamp": [base_time + dt.timedelta(seconds=10), base_time + dt.timedelta(seconds=11), base_time + dt.timedelta(minutes=1, seconds=20)],
+            "MIC": ["XNYS", "XNYS", "XNYS"],
+            "Ticker": ["TICKA", "TICKB", "TICKA"],
+            "CurrencyCode": ["USD", "USD", "USD"],
+            "MarketState": ["CONTINUOUS_TRADING", "CONTINUOUS_TRADING", "CONTINUOUS_TRADING"],
+        }
+        for i in range(1, 11):
+            l2_data[f"BidPrice{i}"] = [100.0 - i, 101.0 - i, 100.5 - i]
+            l2_data[f"AskPrice{i}"] = [100.0 + i, 101.0 + i, 100.5 + i]
+            l2_data[f"BidQuantity{i}"] = [100, 200, 150]
+            l2_data[f"AskQuantity{i}"] = [100, 200, 150]
+            l2_data[f"BidNumOrders{i}"] = [1, 2, 1]
+            l2_data[f"AskNumOrders{i}"] = [1, 2, 1]
+        self.l2_df = pl.DataFrame(l2_data).lazy()
+
+        # Mock trades data
+        self.trades_df = pl.DataFrame({
+            "TimeBucket": [base_time, base_time, base_time + dt.timedelta(minutes=1)],
+            "ListingId": [101, 102, 101],
+            "Price": [100.0, 101.0, 100.5],
+            "Quantity": [10, 20, 15],
+            "TradeDate": [dt.date(2025, 1, 1), dt.date(2025, 1, 1), dt.date(2025, 1, 1)],
+            "Classification": ["LIT_CONTINIOUS", "LIT_CONTINIOUS", "LIT_CONTINIOUS"],
+            "LPrice": [100.0, 101.0, 100.5],
+            "Size": [10, 20, 15],
+            "MIC": ["XNYS", "XNYS", "XNYS"],
+            "Ticker": ["TICKA", "TICKB", "TICKA"],
+            "PricePoint": [1, 1, 1],
+            "MarketState": ["CONTINUOUS_TRADING", "CONTINUOUS_TRADING", "CONTINUOUS_TRADING"],
+            "BMLLParticipantType": ["X", "Y", "X"],
+            "TradeNotionalEUR": [1000.0, 2020.0, 1507.5],
+            "AggressorSide": [1, 2, 1],
+            "BMLLTradeType": ["LIT", "LIT", "LIT"],
+        }).lazy()
+
+        # Mock L3 data
+        self.l3_df = pl.DataFrame({
+            "TimeBucket": [base_time, base_time, base_time + dt.timedelta(minutes=1)],
+            "ListingId": [101, 102, 101],
+            "Side": [1, 2, 1], # 1 for Bid, 2 for Ask
+            "LobAction": [2, 3, 4], # 2:Insert, 3:Remove, 4:Update
+            "Size": [100, 50, 120],
+            "OldSize": [0, 50, 100],
+            "ExecutionSize": [0, 0, 0],
+            "ExecutionPrice": [0.0, 0.0, 0.0],
+        }).lazy()
+
+        # Mock market state data
+        self.marketstate_df = pl.DataFrame({
+            "ListingId": [101, 101, 101, 102, 102, 102],
+            "EventTimestamp": [base_time, base_time + dt.timedelta(seconds=5), base_time + dt.timedelta(hours=1), base_time, base_time + dt.timedelta(seconds=5), base_time + dt.timedelta(hours=1)],
+            "MarketState": ["OPEN", "CONTINUOUS_TRADING", "CLOSED", "OPEN", "CONTINUOUS_TRADING", "CLOSED"],
+        }).lazy()
+
+    def test_module_output_columns(self):
+        """Verify that each analytics module includes TimeBucket and ListingId."""
+        from intraday_analytics.metrics.dense import DenseAnalytics, DenseAnalyticsConfig
+        from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsTW, L2AnalyticsConfig
+        from intraday_analytics.metrics.trade import TradeAnalytics, TradeAnalyticsConfig
+        from intraday_analytics.metrics.l3 import L3Analytics, L3AnalyticsConfig
+        from intraday_analytics.metrics.execution import ExecutionAnalytics, ExecutionAnalyticsConfig
+        
+        mock_ref = pl.DataFrame({"ListingId": [101, 102]})
+        
+        modules = {
+            "Dense": DenseAnalytics(mock_ref, DenseAnalyticsConfig(time_bucket_seconds=60)),
+            "L2Last": L2AnalyticsLast(L2AnalyticsConfig(levels=10)),
+            "L2TW": L2AnalyticsTW(L2AnalyticsConfig(time_bucket_seconds=60, levels=10)),
+            "Trade": TradeAnalytics(TradeAnalyticsConfig()),
+            "L3": L3Analytics(L3AnalyticsConfig()),
+            "Execution": ExecutionAnalytics(ExecutionAnalyticsConfig()),
+        }
+
+        for name, module in modules.items():
+            with self.subTest(name=name):
+                # Assign the specific mock data needed by each module
+                if hasattr(module, 'REQUIRES'):
+                    if 'l2' in module.REQUIRES:
+                        module.l2 = self.l2_df
+                    if 'trades' in module.REQUIRES:
+                        module.trades = self.trades_df
+                    if 'l3' in module.REQUIRES:
+                        module.l3 = self.l3_df
+                
+                # DenseAnalytics also uses marketstate
+                if name == "Dense":
+                    module.marketstate = self.marketstate_df
+                
+                # ExecutionAnalytics also uses l2
+                if name == "Execution":
+                    module.l2 = self.l2_df
+                    module.trades = self.trades_df
+
+                result_df = module.compute().collect()
+                
+                self.assertIn("TimeBucket", result_df.columns)
+                self.assertIn("ListingId", result_df.columns)
+
+
+
 if __name__ == '__main__':
     import logging
     logging.basicConfig(level=logging.INFO)
