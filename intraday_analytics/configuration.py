@@ -74,6 +74,11 @@ class AnalyticsConfig:
     CLEAN_UP_BATCH_FILES: bool = True
     CLEAN_UP_TEMP_DIR: bool = True
 
+    def __post_init__(self):
+        """Propagate global settings to sub-configs."""
+        self.dense_analytics.time_bucket_seconds = self.TIME_BUCKET_SECONDS
+        self.l2_analytics.time_bucket_seconds = self.TIME_BUCKET_SECONDS
+
     def to_dict(self):
         return asdict(self)
 

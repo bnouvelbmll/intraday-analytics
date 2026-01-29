@@ -5,7 +5,7 @@ from dataclasses import dataclass
 @dataclass
 class L2AnalyticsConfig:
     levels: int = 10
-    time_bucket_seconds: float = 60.0
+    time_bucket_seconds: float = None
 
 class L2AnalyticsLast(BaseAnalytics):
     """

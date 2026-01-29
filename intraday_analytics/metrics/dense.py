@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class DenseAnalyticsConfig:
     mode: str = "adaptative"
     time_interval: List[str] = None
-    time_bucket_seconds: float = 60.0
+    time_bucket_seconds: float = None
 
 
 class DenseAnalytics(BaseAnalytics):

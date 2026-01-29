@@ -39,7 +39,7 @@ from intraday_analytics import (
 from intraday_analytics.utils import create_date_batches
 
 # Re-add direct imports for analytics modules
-from intraday_analytics.metrics.dense import DenseAnalytics
+from intraday_analytics.metrics.dense import DenseAnalytics, DenseAnalyticsConfig
 from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsTW
 from intraday_analytics.metrics.trade import TradeAnalytics
 from intraday_analytics.metrics.l3 import L3Analytics
