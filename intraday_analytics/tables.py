@@ -17,6 +17,7 @@ class DataTable(ABC):
     @abstractmethod
     def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
         """Loads the table from the data source."""
+        import bmll2
         return bmll2.get_market_data_range(
             markets=markets,
             table_name=self.bmll_table_name,

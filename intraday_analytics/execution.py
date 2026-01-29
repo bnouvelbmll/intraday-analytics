@@ -7,7 +7,7 @@ import polars as pl
 
 from .batching import SymbolBatcherStreaming, S3SymbolBatcher, HeuristicBatchingStrategy, SymbolSizeEstimator
 from .pipeline import AnalyticsRunner
-from .utils import preload, get_files_for_date_range
+from .utils import preload, get_files_for_date_range, create_date_batches
 from .tables import ALL_TABLES
 from .process import aggregate_and_write_final_output, BatchWriter
 
@@ -203,3 +203,57 @@ def compute_metrics(config, get_pipeline, get_universe, start_date=None, end_dat
     aggregate_and_write_final_output(
         start_date, end_date, config, temp_dir
     )
+
+def run_metrics_pipeline(config, get_pipeline, get_universe):
+    """
+    Runs the full intraday analytics pipeline:
+    1. Creates date batches.
+    2. For each batch:
+       a. Runs ProcessInterval (shredding/preparation).
+       b. Runs compute_metrics (analytics & aggregation).
+    """
+    import shutil
+    
+    # Configure logging
+    logging.basicConfig(
+        level=config.get("LOGGING_LEVEL", "INFO").upper(),
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        force=True,
+    )
+
+    date_batches = create_date_batches(
+        config["START_DATE"], config["END_DATE"], config.get("DEFAULT_FREQ")
+    )
+    logging.info(f"📅 Created {len(date_batches)} date batches.")
+
+    temp_dir = config["TEMP_DIR"]
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    try:
+        for sd, ed in date_batches:
+            logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
+            p = ProcessInterval(
+                sd=sd,
+                ed=ed,
+                config=config,
+                get_pipeline=get_pipeline,
+                get_universe=get_universe,
+            )
+            p.start()
+            p.join()
+            
+            if p.exitcode != 0:
+                logging.error(f"ProcessInterval failed with exit code {p.exitcode}")
+                raise RuntimeError("ProcessInterval failed")
+
+            logging.info(f"📊 Computing metrics for batch: {sd.date()} -> {ed.date()}")
+            compute_metrics(config, get_pipeline, get_universe, start_date=sd, end_date=ed)
+
+        logging.info("✅ All data preparation and metric computation processes completed.")
+
+    finally:
+        if config.get("CLEAN_UP_TEMP_DIR", True) and os.path.exists(temp_dir):
+            logging.info(f"🧹 Cleaning up temporary directory: {temp_dir}")
+            shutil.rmtree(temp_dir)

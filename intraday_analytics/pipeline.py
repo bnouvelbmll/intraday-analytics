@@ -231,7 +231,7 @@ class AnalyticsPipeline:
                 )
                 logger.debug(f"Base schema after join with {module.name}: {base.collect_schema().names()}")
                 prev_specific_cols.update(module.specific_fill_cols)
-            if self.config["PROFILE"]:
+            if self.config["ENABLE_PERFORMANCE_LOGS"]:
                 # Many null listing ids
                 try:
                     logger.info(f"{module} SHAPE {base.select(pl.len()).collect()}")

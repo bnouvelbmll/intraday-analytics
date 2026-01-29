@@ -4,9 +4,12 @@ import polars as pl
 import polars.testing
 from unittest.mock import MagicMock, patch
 import datetime as dt
+import tempfile
+import shutil
+import os
 
 from intraday_analytics.utils import create_date_batches, ffill_with_shifts
-from intraday_analytics.batching import HeuristicBatchingStrategy, SymbolSizeEstimator
+from intraday_analytics.batching import HeuristicBatchingStrategy, SymbolSizeEstimator, S3SymbolBatcher
 from intraday_analytics.metrics.l2 import L2AnalyticsLast
 
 class TestUtils(unittest.TestCase):
@@ -119,5 +122,70 @@ class TestL2Metrics(unittest.TestCase):
         expected_spread = 20000 * (11.5 - 10.5) / (11.5 + 10.5)
         self.assertAlmostEqual(result["SpreadBps"][0], expected_spread, places=4)
 
+class TestS3SymbolBatcherIntegration(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.source_dir = tempfile.mkdtemp()
+        
+        # Create a dummy parquet file
+        self.df = pl.DataFrame({
+            "ListingId": ["A", "B"],
+            "TradeTimestamp": [1, 2],
+            "Price": [10.0, 20.0]
+        })
+        self.source_file = os.path.join(self.source_dir, "trades.parquet")
+        self.df.write_parquet(self.source_file)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+        shutil.rmtree(self.source_dir)
+
+    def test_process_and_finalize(self):
+        # Mock dependencies
+        mock_estimator = MagicMock()
+        mock_estimator.get_estimates_for_symbols.return_value = {"trades": {"A": 1, "B": 1}}
+        
+        # Strategy that puts A and B in separate batches
+        # Max rows = 1 -> A in batch 0, B in batch 1
+        strategy = HeuristicBatchingStrategy(mock_estimator, {"trades": 1})
+        
+        def mock_get_universe(date):
+            return pl.DataFrame({"ListingId": ["A", "B"], "mic": ["X", "X"]})
+
+        batcher = S3SymbolBatcher(
+            s3_file_lists={"trades": [self.source_file]},
+            transform_fns={"trades": lambda x: x},
+            batching_strategy=strategy,
+            temp_dir=self.temp_dir,
+            storage_options={},
+            date="2025-01-01",
+            get_universe=mock_get_universe
+        )
+        
+        # Run process
+        batcher.process(num_workers=1)
+        
+        # Check if output files exist
+        # We expect batch-trades-0.parquet and batch-trades-1.parquet
+        out_0 = os.path.join(self.temp_dir, "batch-trades-0.parquet")
+        out_1 = os.path.join(self.temp_dir, "batch-trades-1.parquet")
+        
+        if not os.path.exists(out_0):
+            print(f"Listing {self.temp_dir}:")
+            for root, dirs, files in os.walk(self.temp_dir):
+                print(root, dirs, files)
+
+        self.assertTrue(os.path.exists(out_0), "Batch 0 output missing")
+        self.assertTrue(os.path.exists(out_1), "Batch 1 output missing")
+        
+        # Verify content
+        df0 = pl.read_parquet(out_0)
+        self.assertEqual(df0["ListingId"][0], "A")
+        
+        df1 = pl.read_parquet(out_1)
+        self.assertEqual(df1["ListingId"][0], "B")
+
 if __name__ == '__main__':
+    import logging
+    logging.basicConfig(level=logging.INFO)
     unittest.main()

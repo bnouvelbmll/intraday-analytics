@@ -241,46 +241,14 @@ if __name__ == "__main__":
             tracer = None
 
     try:
-        temp_dir = CONFIG["TEMP_DIR"] # Define temp_dir
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-        os.makedirs(temp_dir, exist_ok=True)
-        
-        # storage path helper
-        s3_user = (
-            "s3://"
-            + bmll2.storage_paths()[CONFIG["AREA"]]["bucket"]
-            + "/"
-            + bmll2.storage_paths()[CONFIG["AREA"]]["prefix"]
-        )
+        from intraday_analytics.execution import run_metrics_pipeline
+        run_metrics_pipeline(CONFIG, get_pipeline, get_universe)
 
-        # Call compute_metrics after all data is prepared
-        from intraday_analytics.execution import compute_metrics
-
-        for sd, ed in date_batches:
-            logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
-            p = ProcessInterval(
-                sd=sd,
-                ed=ed,
-                config=CONFIG,
-                get_pipeline=get_pipeline,
-                get_universe=get_universe,
-            )
-            p.start()
-            p.join() # Wait for each ProcessInterval to complete sequentially
-            
-            # Compute metrics for this interval immediately
-            logging.info(f"📊 Computing metrics for batch: {sd.date()} -> {ed.date()}")
-            compute_metrics(CONFIG, get_pipeline, get_universe, start_date=sd, end_date=ed)
-            
-        logging.info("✅ All data preparation and metric computation processes completed.")
+    except Exception as e:
+        logging.error(f"Pipeline failed: {e}", exc_info=True)
+        sys.exit(1)
 
     finally:
         if tracer:
             tracer.stop()
             logging.info("📊 VizTracer stopped in main process.")
-        
-        # Clean up temporary directory if configured
-        if CONFIG.get("CLEAN_UP_TEMP_DIR", True) and os.path.exists(temp_dir):
-            logging.info(f"🧹 Cleaning up temporary directory: {temp_dir}")
-            shutil.rmtree(temp_dir)

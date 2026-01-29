@@ -467,11 +467,10 @@ def _process_s3_chunk(
 
     # Inner join attaches 'batch_id' and filters out symbols not in any batch
     shredded = df_chunk.join(pl_map, on=SYMBOL_COL, how="inner")
-    # logging.info(
-    #     "O->", f"{output_root}/{table_name}", len(df_chunk), len(pl_map), len(shredded)
-    # )
+    logging.info(f"Worker {worker_id}: Read {len(df_chunk)} rows. Shredded {len(shredded)} rows.")
 
     if shredded.is_empty():
+        logging.warning(f"Worker {worker_id}: Shredded dataframe is empty.")
         return
 
     # 5. Write to Local Partitioned Dataset (The "Router")
