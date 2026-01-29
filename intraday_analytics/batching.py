@@ -422,42 +422,57 @@ def _process_s3_chunk(
     worker_id: int,
 ):
     """
-    Processes a chunk of S3 files in a worker process based on the archived logic.
+    Processes a chunk of S3 files in a worker process.
+    This function reads a subset of S3 files, applies a transformation, joins
+    the data with a batch ID map, and writes the results to local partitioned
+    folders. This is a core part of the distributed data processing workflow.
     """
     try:
-        # 1. Create a LazyFrame for this chunk of files
+        # Optimistic path: Try reading all files at once
         lf = pl.scan_parquet(s3_files, storage_options=storage_options)
-
-        # 2. Apply transformations
         lf_filtered = transform_fn(lf)
-
-        # 3. Materialize the transformed chunk
         df_chunk = lf_filtered.collect()
-
-        if df_chunk.is_empty():
-            return
-
-        # 4. Join with the batch map to assign a batch_id
-        pl_map = pl.from_arrow(batch_map_table)
-        shredded = df_chunk.join(pl_map, on=SYMBOL_COL, how="inner")
-        
-        logging.info(f"Worker {worker_id}: Read {len(df_chunk)} rows. Shredded {len(shredded)} rows.")
-
-        if shredded.is_empty():
-            return
-
-        # 5. Write to a local partitioned dataset
-        ds.write_dataset(
-            shredded.to_arrow(),
-            base_dir=f"{output_root}/{table_name}",
-            partitioning=["batch_id"],
-            format="parquet",
-            existing_data_behavior="overwrite_or_ignore",
-            max_rows_per_group=1_000_000,
-            basename_template=f"f-{worker_id}-{{i}}.parquet",
-        )
     except Exception as e:
-        logging.error(f"Worker {worker_id}: Failed to process chunk starting with {s3_files[0] if s3_files else 'N/A'}. Error: {e}", exc_info=True)
+        logging.warning(f"Batch read failed for chunk starting with {s3_files[0] if s3_files else 'N/A'}. Falling back to individual file read. Error: {e}")
+        # Fallback: Try reading files one by one
+        valid_dfs = []
+        for f in s3_files:
+            try:
+                lf_single = pl.scan_parquet(f, storage_options=storage_options)
+                lf_single_filtered = transform_fn(lf_single)
+                valid_dfs.append(lf_single_filtered.collect())
+            except Exception as inner_e:
+                logging.warning(f"Skipping missing or corrupt file: {f}. Error: {inner_e}")
+        
+        if not valid_dfs:
+            return
+            
+        df_chunk = pl.concat(valid_dfs)
+
+    if df_chunk.is_empty():
+        return
+
+    # 4. Join with Batch Map
+    pl_map = pl.from_arrow(batch_map_table)
+
+    # Inner join attaches 'batch_id' and filters out symbols not in any batch
+    shredded = df_chunk.join(pl_map, on="ListingId", how="inner")
+    logging.info(f"Worker {worker_id}: Read {len(df_chunk)} rows. Shredded {len(shredded)} rows.")
+
+    if shredded.is_empty():
+        logging.warning(f"Worker {worker_id}: Shredded dataframe is empty.")
+        return
+
+    # 5. Write to Local Partitioned Dataset
+    ds.write_dataset(
+        shredded.to_arrow(),
+        base_dir=f"{output_root}/{table_name}",
+        partitioning=["batch_id"],
+        format="parquet",
+        existing_data_behavior="overwrite_or_ignore",
+        max_rows_per_group=1_000_000,
+        basename_template=f"f-{worker_id}-{{i}}.parquet",
+    )
 
 
 
