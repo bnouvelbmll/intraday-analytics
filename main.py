@@ -222,12 +222,9 @@ if __name__ == "__main__":
         format="%(asctime)s - %(levelname)s - %(message)s",
         force=True,
     )
-    date_batches = create_date_batches(
-        CONFIG["START_DATE"], CONFIG["END_DATE"], CONFIG.get("DEFAULT_FREQ")
-    )
-    logging.info(f"📅 Created {len(date_batches)} date batches.")
 
     tracer = None
+    ret_code = 0 
     if CONFIG.get("ENABLE_PROFILER_TOOL", False):
         try:
             tracer = viztracer.VizTracer()
@@ -246,9 +243,12 @@ if __name__ == "__main__":
 
     except Exception as e:
         logging.error(f"Pipeline failed: {e}", exc_info=True)
-        sys.exit(1)
+        ret_code=1
 
     finally:
         if tracer:
             tracer.stop()
             logging.info("📊 VizTracer stopped in main process.")
+            tracer.save()
+    
+    sys.exit(ret_code)

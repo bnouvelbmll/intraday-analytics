@@ -241,7 +241,7 @@ class TestPipelineEquivalence(unittest.TestCase):
         
         # Mock get_universe for SymbolSizeEstimator
         def mock_get_universe(date):
-            return pl.DataFrame({SYMBOL_COL: [self.listing_id], "mic": ["XAMS"]})
+            return pl.DataFrame({SYMBOL_COL: [self.listing_id], "MIC": ["XAMS"]})
 
         # Instantiate SymbolSizeEstimator and HeuristicBatchingStrategy
         estimator = SymbolSizeEstimator(self.date_str, mock_get_universe)

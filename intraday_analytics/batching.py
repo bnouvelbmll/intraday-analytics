@@ -196,15 +196,14 @@ class SymbolSizeEstimator:
         """Loads size estimates from an external source."""
         import pandas as pd
         import bmll
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         universe = self.get_universe(self.date)
         end_date_m2w = (
             (pd.Timestamp(self.date) - pd.Timedelta(days=14)).date().isoformat()
         )
 
-        all_res = []
-        # Assuming 'mic' column exists in the universe dataframe
-        for mic, group in universe.to_pandas().groupby("MIC"):
+        def query_mic(mic, group):
             try:
                 logging.info(f"🔍 Querying size estimates for mic {mic}")
                 res = (
@@ -218,11 +217,26 @@ class SymbolSizeEstimator:
                     .median()
                     .reset_index()
                 )
-                all_res.append(res)
+                return res
             except Exception as e:
                 logging.warning(
                     f"Could not load size estimates for mic {mic}. Error: {e}"
                 )
+                return None
+
+        all_res = []
+        # Assuming 'mic' column exists in the universe dataframe
+        mic_groups = list(universe.to_pandas().groupby("MIC"))
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {
+                executor.submit(query_mic, mic, group): mic for mic, group in mic_groups
+            }
+
+            for future in as_completed(futures):
+                res = future.result()
+                if res is not None:
+                    all_res.append(res)
 
         if not all_res:
             logging.warning("Could not load size estimates for any mic.")
