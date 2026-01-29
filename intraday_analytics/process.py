@@ -33,12 +33,13 @@ def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
     output_prefix = bmll2.storage_paths()[config["AREA"]]["prefix"]
 
     # Construct the final S3 path using the template from config
+    # Format dates to ensure only the date part is used in the filename
     final_s3_path = config["FINAL_OUTPUT_PATH_TEMPLATE"].format(
         bucket=output_bucket,
         prefix=output_prefix,
         datasetname=dataset_name,
-        start_date=start_date,
-        end_date=end_date
+        start_date=start_date.date(),
+        end_date=end_date.date()
     )
 
     logging.info(f"Writing aggregated analytics to {final_s3_path}")

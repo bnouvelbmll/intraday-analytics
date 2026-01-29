@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Callable, Any
 import logging
 
-import bmll
 import polars as pl
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -195,6 +194,7 @@ class SymbolSizeEstimator:
     def _load_estimates(self) -> pl.DataFrame:
         """Loads size estimates from an external source."""
         import pandas as pd
+        import bmll
 
         universe = self.get_universe(self.date)
         end_date_m2w = (
