@@ -227,7 +227,7 @@ if __name__ == "__main__":
     ret_code = 0 
     if CONFIG.get("ENABLE_PROFILER_TOOL", False):
         try:
-            tracer = viztracer.VizTracer()
+            tracer = viztracer.VizTracer(log_multiprocess=True)
             tracer.start()
             handler = VizLoggingHandler()
             handler.setTracer(get_tracer())
