@@ -13,6 +13,8 @@ class DataTable(ABC):
     bmll_table_name: str
     s3_folder_name: str
     s3_file_prefix: str
+    source_id_col: str = "BMLLObjectId"
+
 
     @abstractmethod
     def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
@@ -83,6 +85,7 @@ class TradesPlusTable(DataTable):
     timestamp_col = "TradeTimestamp"
     s3_folder_name = "Trades-Plus"
     s3_file_prefix = "trades-plus-"
+    source_id_col: str = "BMLLObjectId"
 
     def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
         """Loads trades data and adds calculated price columns."""
@@ -94,7 +97,8 @@ class TradesPlusTable(DataTable):
 
     def get_transform_fn(self, ref: pl.DataFrame, nanoseconds: int) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
-            lf_filtered = lf.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
+            lf_renamed = lf.rename({self.source_id_col: "ListingId"})
+            lf_filtered = lf_renamed.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
             lf_filtered = lf_filtered.with_columns(
                 LPrice=pl.col("TradeNotional") / pl.col("Size"),
                 EPrice=pl.col("TradeNotionalEUR") / pl.col("Size"),
