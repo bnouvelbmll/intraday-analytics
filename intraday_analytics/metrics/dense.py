@@ -99,6 +99,7 @@ class DenseAnalytics(BaseAnalytics):
             # continuous_intervals = continuous_intervals.groupby(["ListingId"])
             # continuous_intervals = continuous_intervals .set_index("ListingId")
             res = []
+            failed_listings = []
             frequency = str(int(self.config["TIME_BUCKET_SECONDS"] * 1e9)) + "ns"
             TS_PADDING = pd.Timedelta(seconds=600)
             for s in symbols[sc]:
@@ -128,9 +129,16 @@ class DenseAnalytics(BaseAnalytics):
                             }
                         ).with_columns(ListingId=s)
                     )
-                except Exception as e:
-                    logger.error(f"Error processing ListingId {s}: {e}", exc_info=True)
-            r = pl.concat(res).set_sorted([sc, "TimeBucket"])
+                except Exception:
+                    failed_listings.append(s)
+            
+            if failed_listings:
+                logger.warning(f"Could not determine continuous intervals for {len(failed_listings)} listings: {failed_listings}")
+
+            if not res:
+                return pl.DataFrame(schema={"ListingId": pl.Int64, "TimeBucket": pl.Datetime("ns")}).lazy()
+
+            r = pl.concat(res).sort([sc, "TimeBucket"])
             return r.lazy()
         else:
             raise ValueError()
