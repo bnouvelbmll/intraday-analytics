@@ -173,7 +173,7 @@ class L3Table(DataTable):
                  "Price", "Size", "OldSize", "OldPrice",
                  "Side", "ExecutionSize", "ExecutionPrice"
                 ]
-            ).with_columns(EventTimestamp=pl.col("TimestampNanoseconds").alias("EventTimestamp"))
+            ).with_columns(EventTimestamp=pl.col("TimestampNanoseconds").cast(pl.Datetime("ns")))
             return lf_filtered.with_columns(
                 TimeBucket=(
                     pl.when(
