@@ -24,7 +24,7 @@ def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
     combined_df = pl.scan_parquet(all_metrics_files)
 
     # Collect and sort the final DataFrame
-    final_df = combined_df.collect().sort(["ListingId", "TimeBucket"])
+    final_df = combined_df.sort(["ListingId", "TimeBucket"])
 
     # Define the final output path
     dataset_name = config.DATASETNAME
@@ -50,7 +50,7 @@ def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
         final_s3_path = final_s3_path.replace("//", "/")
 
     logging.info(f"Writing aggregated analytics to {final_s3_path}")
-    final_df.write_parquet(final_s3_path, compression="snappy")
+    final_df.sink_parquet(final_s3_path, compression="snappy")
     logging.info("Aggregation and final write complete.")
 
     # Clean up the temporary batch-metrics files

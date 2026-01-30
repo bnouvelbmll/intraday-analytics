@@ -174,7 +174,7 @@ def ffill_with_shifts(
     )
 
     # 3. Join original values
-    result = df_expanded.join(df, on=group_cols + [time_col], how="left")
+    result = df_expanded.join(df, on=group_cols + [time_col], how="left").sort(group_cols + [time_col])
 
     # 4. Forward-fill missing values within groups
     for col in value_cols:
