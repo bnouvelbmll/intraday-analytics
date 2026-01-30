@@ -164,7 +164,7 @@ class ProcessInterval(Process):
                         s3_file_lists=s3_file_lists,
                         transform_fns=transform_fns,
                         batching_strategy=HeuristicBatchingStrategy(
-                            SymbolSizeEstimator(self.sd, self.get_universe),
+                            SymbolSizeEstimator(current_date, self.get_universe),
                             self.config.MAX_ROWS_PER_TABLE,
                         ),
                         temp_dir=TEMP_DIR,
