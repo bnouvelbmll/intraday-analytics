@@ -271,6 +271,30 @@ class ProcessInterval(Process):
             pass
 
 
+def get_final_s3_path(start_date, end_date, config):
+    """Constructs the final S3 output path for a given date range."""
+    import bmll2
+    dataset_name = config.DATASETNAME
+    output_bucket = bmll2.storage_paths()[config.AREA]["bucket"]
+    output_prefix = bmll2.storage_paths()[config.AREA]["prefix"]
+
+    final_s3_path = config.FINAL_OUTPUT_PATH_TEMPLATE.format(
+        bucket=output_bucket,
+        prefix=output_prefix,
+        datasetname=dataset_name,
+        start_date=start_date.date(),
+        end_date=end_date.date()
+    )
+    
+    if final_s3_path.startswith("s3://"):
+        protocol = "s3://"
+        path_part = final_s3_path[5:]
+        final_s3_path = protocol + path_part.replace("//", "/")
+    else:
+        final_s3_path = final_s3_path.replace("//", "/")
+    return final_s3_path
+
+
 def run_metrics_pipeline(config, get_pipeline, get_universe):
     """
     Runs the full intraday analytics pipeline:
@@ -279,6 +303,7 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
        a. Runs ProcessInterval (shredding + computation + aggregation).
     """
     import shutil
+    import bmll2
     
     # Configure logging
     logging.basicConfig(
@@ -294,11 +319,25 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
 
     temp_dir = config.TEMP_DIR
     if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
+        if config.OVERWRITE_TEMP_DIR:
+            logging.warning(f"TEMP_DIR {temp_dir} exists and will be overwritten.")
+            shutil.rmtree(temp_dir)
+        else:
+            raise FileExistsError(
+                f"TEMP_DIR {temp_dir} already exists. "
+                f"Set OVERWRITE_TEMP_DIR=True to overwrite."
+            )
     os.makedirs(temp_dir, exist_ok=True)
 
     try:
         for sd, ed in date_batches:
+            # Incremental check
+            if config.SKIP_EXISTING_OUTPUT:
+                final_s3_path = get_final_s3_path(sd, ed, config)
+                if bmll2.file_exists(final_s3_path, area=config.AREA):
+                    logging.info(f"✅ Output already exists for {sd.date()} -> {ed.date()}. Skipping.")
+                    continue
+
             logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
             p = ProcessInterval(
                 sd=sd,

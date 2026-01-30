@@ -168,6 +168,18 @@ class AnalyticsConfig:
     CLEAN_UP_TEMP_DIR: bool = True
     """If True, the entire temporary directory is deleted at the end of the run."""
 
+    OVERWRITE_TEMP_DIR: bool = False
+    """
+    If True, an existing TEMP_DIR will be deleted and recreated. If False (default),
+    the pipeline will raise an error if TEMP_DIR already exists.
+    """
+
+    SKIP_EXISTING_OUTPUT: bool = False
+    """
+    If True, the pipeline will check if the final output file for a date batch
+    already exists and skip processing if it does. Useful for resuming runs.
+    """
+
     def __post_init__(self):
         """Propagate global settings and ensure sub-configs are dataclass instances."""
         # Ensure nested configs are dataclass objects, not dicts from USER_CONFIG
