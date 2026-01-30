@@ -5,7 +5,6 @@ import glob
 import polars as pl
 import pyarrow.parquet as pq
 
-# ... (rest of the file content before aggregate_and_write_final_output) ...
 
 def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
     """
@@ -87,7 +86,9 @@ class BatchWriter:
             self.writer.write_table(tbl)
 
     def close(self):
-        """Closes the ParquetWriter."""
+        """
+        Closes the ParquetWriter.
+        """
         if self.writer:
             self.writer.close()
             self.writer = None

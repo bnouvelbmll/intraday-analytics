@@ -1,11 +1,12 @@
 import os
-from multiprocessing import Process
+from multiprocessing import Process, get_context
 import logging
 from joblib import Parallel, delayed
 import glob
 import polars as pl
 import pandas as pd
 import shutil
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from .batching import SymbolBatcherStreaming, S3SymbolBatcher, HeuristicBatchingStrategy, SymbolSizeEstimator
 from .pipeline import AnalyticsRunner
@@ -28,6 +29,40 @@ def remote_process_executor_wrapper(func):
         )
         return results[0]
     return wrapper
+
+
+def process_batch_task(i, temp_dir, current_date, config, pipe):
+    """
+    Worker function to process a single batch in a separate process.
+    """
+    try:
+        # Load batch data
+        batch_data = {}
+        for table_name in config.TABLES_TO_LOAD:
+            path = os.path.join(temp_dir, f"batch-{table_name}-{i}.parquet")
+            if os.path.exists(path):
+                batch_data[table_name] = pl.read_parquet(path)
+            else:
+                batch_data[table_name] = pl.DataFrame()
+
+        # Run pipeline
+        # Write to a date-specific file
+        out_path = os.path.join(temp_dir, f"batch-metrics-{i}-{current_date.date()}.parquet")
+        writer = BatchWriter(out_path)
+
+        runner = AnalyticsRunner(pipe, writer.write, config)
+        runner.run_batch(batch_data)
+        writer.close()
+        
+        # Clean up batch input files immediately to save space
+        for table_name in config.TABLES_TO_LOAD:
+            path = os.path.join(temp_dir, f"batch-{table_name}-{i}.parquet")
+            if os.path.exists(path):
+                os.remove(path)
+        return True
+    except Exception as e:
+        logging.error(f"Error processing batch {i}: {e}", exc_info=True)
+        raise e
 
 
 class ProcessInterval(Process):
@@ -152,30 +187,31 @@ class ProcessInterval(Process):
                 batch_files = glob.glob(os.path.join(TEMP_DIR, "batch-trades-*.parquet"))
                 batch_indices = sorted([int(f.split("-")[-1].split(".")[0]) for f in batch_files])
                 
-                for i in batch_indices:
-                    # Load batch data
-                    batch_data = {}
-                    for table_name in self.config.TABLES_TO_LOAD:
-                        path = os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
-                        if os.path.exists(path):
-                            batch_data[table_name] = pl.read_parquet(path)
-                        else:
-                            batch_data[table_name] = pl.DataFrame()
+                # Determine max_workers
+                max_workers = self.config.NUM_WORKERS
+                if max_workers <= 0:
+                    max_workers = os.cpu_count()
 
-                    # Run pipeline
-                    # Write to a date-specific file
-                    out_path = os.path.join(TEMP_DIR, f"batch-metrics-{i}-{current_date.date()}.parquet")
-                    writer = BatchWriter(out_path)
-
-                    runner = AnalyticsRunner(pipe, writer.write, self.config)
-                    runner.run_batch(batch_data)
-                    writer.close()
+                with ProcessPoolExecutor(max_workers=max_workers, mp_context=get_context('spawn')) as executor:
+                    futures = []
+                    for i in batch_indices:
+                        futures.append(
+                            executor.submit(
+                                process_batch_task,
+                                i,
+                                TEMP_DIR,
+                                current_date,
+                                self.config,
+                                pipe
+                            )
+                        )
                     
-                    # Clean up batch input files immediately to save space
-                    for table_name in self.config.TABLES_TO_LOAD:
-                        path = os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
-                        if os.path.exists(path):
-                            os.remove(path)
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            logging.error(f"Batch processing failed: {e}")
+                            raise e
 
             # --- End of Date Loop ---
             

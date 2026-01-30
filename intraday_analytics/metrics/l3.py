@@ -4,6 +4,9 @@ from dataclasses import dataclass
 
 @dataclass
 class L3AnalyticsConfig:
+    """
+    These need review before they can be enabled
+    """
     enable_fleeting_liquidity: bool = False
     enable_arrival_flow_imbalance: bool = False
     enable_replacement_latency: bool = False
@@ -156,6 +159,7 @@ class L3Analytics(BaseAnalytics):
         if self.config.enable_replacement_latency:
             base_df = self._compute_replacement_latency(base_df)
 
+        self.df = base_df
         return base_df
 
     def _compute_arrival_flow_imbalance(self, base_df: pl.LazyFrame) -> pl.LazyFrame:
@@ -172,6 +176,11 @@ class L3Analytics(BaseAnalytics):
 
     def _compute_cancel_to_trade_ratio(self, base_df: pl.LazyFrame) -> pl.LazyFrame:
         # Executions are identified by ExecutionSize > 0
+        exec_counts = (
+            self.l3.filter(pl.col("ExecutionSize") > 0)
+            .group_by(["ListingId", "TimeBucket"])
+            .agg(pl.len().alias("ExecCount"))
+        )
         base_df = base_df.join(exec_counts, on=["ListingId", "TimeBucket"], how="left").with_columns(
             pl.col("ExecCount").fill_null(pl.lit(0))
         )
