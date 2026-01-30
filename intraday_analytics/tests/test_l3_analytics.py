@@ -1,6 +1,10 @@
 import polars as pl
 import unittest
-from intraday_analytics.metrics.l3 import L3Analytics, L3AnalyticsConfig
+from intraday_analytics.analytics.l3 import (
+    L3Analytics,
+    L3AnalyticsConfig,
+    L3AdvancedConfig,
+)
 from intraday_analytics import BaseAnalytics
 from datetime import datetime
 
@@ -79,7 +83,9 @@ class TestL3Analytics(unittest.TestCase):
         )
 
     def test_arrival_flow_imbalance(self):
-        config = L3AnalyticsConfig(enable_arrival_flow_imbalance=True)
+        config = L3AnalyticsConfig(
+            advanced_metrics=[L3AdvancedConfig(variant="ArrivalFlowImbalance")]
+        )
         analytics = L3Analytics(config)
         analytics.l3 = self.mock_l3_data
         result_df = analytics.compute().collect()
@@ -94,7 +100,9 @@ class TestL3Analytics(unittest.TestCase):
         )
 
     def test_cancel_to_trade_ratio(self):
-        config = L3AnalyticsConfig(enable_cancel_to_trade_ratio=True)
+        config = L3AnalyticsConfig(
+            advanced_metrics=[L3AdvancedConfig(variant="CancelToTradeRatio")]
+        )
         analytics = L3Analytics(config)
         analytics.l3 = self.mock_l3_data
         result_df = analytics.compute().collect()
@@ -110,7 +118,9 @@ class TestL3Analytics(unittest.TestCase):
         )
 
     def test_queue_positioning(self):
-        config = L3AnalyticsConfig(enable_queue_positioning=True)
+        config = L3AnalyticsConfig(
+            advanced_metrics=[L3AdvancedConfig(variant="AvgQueuePosition")]
+        )
         analytics = L3Analytics(config)
         analytics.l3 = self.mock_l3_data
         result_df = analytics.compute().collect()
@@ -125,9 +135,12 @@ class TestL3Analytics(unittest.TestCase):
 
     def test_order_resting_time_and_fleeting_liquidity(self):
         config = L3AnalyticsConfig(
-            enable_order_resting_time=True,
-            enable_fleeting_liquidity=True,
-            fleeting_threshold_ms=5000,  # 5 seconds
+            advanced_metrics=[
+                L3AdvancedConfig(variant="AvgRestingTime"),
+                L3AdvancedConfig(
+                    variant="FleetingLiquidityRatio", fleeting_threshold_ms=5000
+                ),
+            ]
         )
         analytics = L3Analytics(config)
         analytics.l3 = self.mock_l3_data
@@ -162,7 +175,9 @@ class TestL3Analytics(unittest.TestCase):
         )
 
     def test_replacement_latency(self):
-        config = L3AnalyticsConfig(enable_replacement_latency=True)
+        config = L3AnalyticsConfig(
+            advanced_metrics=[L3AdvancedConfig(variant="AvgReplacementLatency")]
+        )
         analytics = L3Analytics(config)
         analytics.l3 = self.mock_l3_data
         result_df = analytics.compute().collect()

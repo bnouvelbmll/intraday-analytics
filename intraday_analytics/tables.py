@@ -91,8 +91,8 @@ class TradesPlusTable(DataTable):
         """Loads trades data and adds calculated price columns."""
         lf = super().load(markets, start_date, end_date)
         return lf.with_columns(
-            LPrice=pl.col("TradeNotional") / pl.col("Size"),
-            EPrice=pl.col("TradeNotionalEUR") / pl.col("Size"),
+            LocalPrice=pl.col("TradeNotional") / pl.col("Size"),
+            PriceEUR=pl.col("TradeNotionalEUR") / pl.col("Size"),
         )
 
     def get_transform_fn(
@@ -103,8 +103,8 @@ class TradesPlusTable(DataTable):
                 pl.col("ListingId").is_in(ref["ListingId"].to_list())
             )
             lf_filtered = lf_filtered.with_columns(
-                LPrice=pl.col("TradeNotional") / pl.col("Size"),
-                EPrice=pl.col("TradeNotionalEUR") / pl.col("Size"),
+                LocalPrice=pl.col("TradeNotional") / pl.col("Size"),
+                PriceEUR=pl.col("TradeNotionalEUR") / pl.col("Size"),
                 TradeTimestamp=pl.col(self.timestamp_col).cast(pl.Datetime("ns")),
             )
             return lf_filtered.with_columns(

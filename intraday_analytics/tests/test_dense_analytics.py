@@ -2,7 +2,7 @@ import unittest
 import polars as pl
 import pandas as pd
 import logging
-from intraday_analytics.metrics.dense import DenseAnalytics, DenseAnalyticsConfig
+from intraday_analytics.analytics.dense import DenseAnalytics, DenseAnalyticsConfig
 from intraday_analytics.utils import SYMBOL_COL
 
 
@@ -49,7 +49,9 @@ class TestDenseAnalytics(unittest.TestCase):
         da.marketstate = marketstate
 
         # We expect a warning log for Listing 2
-        with self.assertLogs("intraday_analytics.metrics.dense", level="WARNING") as cm:
+        with self.assertLogs(
+            "intraday_analytics.analytics.dense", level="WARNING"
+        ) as cm:
             result_lf = da.compute()
             result_df = result_lf.collect()
 
@@ -82,7 +84,9 @@ class TestDenseAnalytics(unittest.TestCase):
         da = DenseAnalytics(self.ref.filter(pl.col(SYMBOL_COL) == 1), self.config)
         da.marketstate = marketstate
 
-        with self.assertLogs("intraday_analytics.metrics.dense", level="WARNING") as cm:
+        with self.assertLogs(
+            "intraday_analytics.analytics.dense", level="WARNING"
+        ) as cm:
             result_lf = da.compute()
             result_df = result_lf.collect()
 

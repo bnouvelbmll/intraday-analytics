@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from intraday_analytics.execution import run_metrics_pipeline, ProcessInterval
 from intraday_analytics.configuration import AnalyticsConfig, PrepareDataMode
 from intraday_analytics.pipeline import AnalyticsPipeline
-from intraday_analytics.metrics.trade import TradeAnalytics
+from intraday_analytics.analytics.trade import TradeAnalytics
 
 # Capture real scan_parquet before any patching
 REAL_SCAN_PARQUET = pl.scan_parquet
@@ -79,9 +79,9 @@ class TestEndToEnd(unittest.TestCase):
             FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(
                 self.temp_dir, "final_{start_date}_{end_date}.parquet"
             ),
-            TABLES_TO_LOAD=["trades"], # Only load trades for this test
+            TABLES_TO_LOAD=["trades"],  # Only load trades for this test
             BATCH_FREQ=None,
-            OVERWRITE_TEMP_DIR=True
+            OVERWRITE_TEMP_DIR=True,
         )
 
         # Create dummy source files
@@ -95,8 +95,8 @@ class TestEndToEnd(unittest.TestCase):
                 "Size": [100],
                 "TradeNotional": [1000.0],
                 "TradeNotionalEUR": [1000.0],
-                "LPrice": [10.0],
-                "EPrice": [10.0],
+                "LocalPrice": [10.0],
+                "PriceEUR": [10.0],
                 "PricePoint": [0.0],
                 "MIC": ["X"],
                 "Ticker": ["T"],

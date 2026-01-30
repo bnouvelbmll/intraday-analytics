@@ -1,8 +1,8 @@
 import unittest
 from pydantic import ValidationError
 from intraday_analytics.configuration import AnalyticsConfig, PrepareDataMode
-from intraday_analytics.metrics.dense import DenseAnalyticsConfig
-from intraday_analytics.metrics.l2 import L2AnalyticsConfig
+from intraday_analytics.analytics.dense import DenseAnalyticsConfig
+from intraday_analytics.analytics.l2 import L2AnalyticsConfig
 
 
 class TestConfiguration(unittest.TestCase):

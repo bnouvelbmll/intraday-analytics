@@ -14,7 +14,7 @@ from intraday_analytics.batching import (
     SymbolSizeEstimator,
     S3SymbolBatcher,
 )
-from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsConfig
+from intraday_analytics.analytics.l2 import L2AnalyticsLast, L2AnalyticsConfig
 
 
 class TestUtils(unittest.TestCase):
@@ -252,7 +252,7 @@ class TestAnalyticsModuleOutputs(unittest.TestCase):
                     "LIT_CONTINIOUS",
                     "LIT_CONTINIOUS",
                 ],
-                "LPrice": [100.0, 101.0, 100.5],
+                "LocalPrice": [100.0, 101.0, 100.5],
                 "Size": [10, 20, 15],
                 "MIC": ["XNYS", "XNYS", "XNYS"],
                 "Ticker": ["TICKA", "TICKB", "TICKA"],
@@ -312,21 +312,21 @@ class TestAnalyticsModuleOutputs(unittest.TestCase):
 
     def test_module_output_columns(self):
         """Verify that each analytics module includes TimeBucket and ListingId."""
-        from intraday_analytics.metrics.dense import (
+        from intraday_analytics.analytics.dense import (
             DenseAnalytics,
             DenseAnalyticsConfig,
         )
-        from intraday_analytics.metrics.l2 import (
+        from intraday_analytics.analytics.l2 import (
             L2AnalyticsLast,
             L2AnalyticsTW,
             L2AnalyticsConfig,
         )
-        from intraday_analytics.metrics.trade import (
+        from intraday_analytics.analytics.trade import (
             TradeAnalytics,
             TradeAnalyticsConfig,
         )
-        from intraday_analytics.metrics.l3 import L3Analytics, L3AnalyticsConfig
-        from intraday_analytics.metrics.execution import (
+        from intraday_analytics.analytics.l3 import L3Analytics, L3AnalyticsConfig
+        from intraday_analytics.analytics.execution import (
             ExecutionAnalytics,
             ExecutionAnalyticsConfig,
         )

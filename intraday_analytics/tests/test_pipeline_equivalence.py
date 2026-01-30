@@ -17,15 +17,15 @@ from intraday_analytics.batching import (
     HeuristicBatchingStrategy,
     SymbolSizeEstimator,
 )
-from intraday_analytics.metrics.dense import DenseAnalytics, DenseAnalyticsConfig
-from intraday_analytics.metrics.l2 import (
+from intraday_analytics.analytics.dense import DenseAnalytics, DenseAnalyticsConfig
+from intraday_analytics.analytics.l2 import (
     L2AnalyticsLast,
     L2AnalyticsTW,
     L2AnalyticsConfig,
 )
-from intraday_analytics.metrics.trade import TradeAnalytics, TradeAnalyticsConfig
-from intraday_analytics.metrics.l3 import L3Analytics, L3AnalyticsConfig
-from intraday_analytics.metrics.execution import ExecutionAnalytics
+from intraday_analytics.analytics.trade import TradeAnalytics, TradeAnalyticsConfig
+from intraday_analytics.analytics.l3 import L3Analytics, L3AnalyticsConfig
+from intraday_analytics.analytics.execution import ExecutionAnalytics
 from intraday_analytics.utils import SYMBOL_COL
 from intraday_analytics.configuration import AnalyticsConfig
 
@@ -70,8 +70,10 @@ def create_mock_trades(
             "TradeNotional": [
                 (100.0 + i * 0.1) * (100 + i * 10) for i in range(len(times))
             ],  # Added TradeNotional
-            "LPrice": [100.0 + i * 0.1 for i in range(len(times))],  # Added LPrice
-            "EPrice": [100.0 + i * 0.1 for i in range(len(times))],  # Added EPrice
+            "LocalPrice": [
+                100.0 + i * 0.1 for i in range(len(times))
+            ],  # Added LocalPrice
+            "PriceEUR": [100.0 + i * 0.1 for i in range(len(times))],  # Added PriceEUR
             "PricePoint": [
                 i % 2 / 1.0 for i in range(len(times))
             ],  # Added PricePoint (values 0 or 0.5)
