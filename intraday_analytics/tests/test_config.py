@@ -3,6 +3,7 @@ from intraday_analytics.configuration import AnalyticsConfig, PrepareDataMode
 from intraday_analytics.metrics.dense import DenseAnalyticsConfig
 from intraday_analytics.metrics.l2 import L2AnalyticsConfig
 
+
 class TestConfiguration(unittest.TestCase):
     def test_default_config_valid(self):
         """Ensure the default configuration is valid."""
@@ -43,7 +44,7 @@ class TestConfiguration(unittest.TestCase):
         config_data = {
             "TIME_BUCKET_SECONDS": 30,
             "dense_analytics": {"mode": "uniform", "time_interval": ["08:00", "16:00"]},
-            "l2_analytics": {"levels": 5}
+            "l2_analytics": {"levels": 5},
         }
 
         config = AnalyticsConfig(**config_data)
@@ -75,5 +76,6 @@ class TestConfiguration(unittest.TestCase):
         self.assertEqual(config.dense_analytics.mode, "uniform")
         self.assertEqual(config.dense_analytics.time_bucket_seconds, 10)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

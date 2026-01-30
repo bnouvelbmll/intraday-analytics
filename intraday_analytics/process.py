@@ -12,6 +12,7 @@ def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
     and writes it to the specified S3 location.
     """
     import bmll2
+
     logging.info(f"Aggregating metrics for {start_date} to {end_date}...")
 
     all_metrics_files = glob.glob(os.path.join(temp_dir, "batch-metrics-*.parquet"))
@@ -38,9 +39,9 @@ def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
         prefix=output_prefix,
         datasetname=dataset_name,
         start_date=start_date.date(),
-        end_date=end_date.date()
+        end_date=end_date.date(),
     )
-    
+
     # Sanitize path to remove double slashes which Polars dislikes (except for s3://)
     if final_s3_path.startswith("s3://"):
         protocol = "s3://"
@@ -70,14 +71,14 @@ class BatchWriter:
     def __init__(self, outfile):
         self.out_path = outfile
         self.writer = None
-        self.lock = threading.Lock() # Use a lock for thread-safe writing
+        self.lock = threading.Lock()  # Use a lock for thread-safe writing
 
     def write(self, df, listing_id=None):
         """
         Writes a Polars DataFrame to the output Parquet file.
         Initializes the ParquetWriter if it's the first write.
         """
-        with self.lock: # Ensure only one thread writes at a time
+        with self.lock:  # Ensure only one thread writes at a time
             tbl = df.to_arrow()
             if self.writer is None:
                 # Ensure the directory exists

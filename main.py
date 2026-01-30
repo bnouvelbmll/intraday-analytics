@@ -27,7 +27,7 @@ import logging
 
 
 from intraday_analytics import (
-    AnalyticsPipeline, # Re-add AnalyticsPipeline import
+    AnalyticsPipeline,  # Re-add AnalyticsPipeline import
     DEFAULT_CONFIG,
     AnalyticsConfig,
     cache_universe,
@@ -57,15 +57,15 @@ USER_CONFIG = {
     # --- Batching & Performance ---
     "PREPARE_DATA_MODE": "s3_shredding",  # "naive" or "s3_shredding"
     "SEPARATE_METRIC_PROCESS": True,
-    "NUM_WORKERS": -1, # use -1 for all available CPUs
+    "NUM_WORKERS": -1,  # use -1 for all available CPUs
     "CLEAN_UP_BATCH_FILES": True,
     "CLEAN_UP_TEMP_DIR": True,
     "EAGER_EXECUTION": True,
     # --- Output Configuration ---
     # To customize the final output path, add "FINAL_OUTPUT_PATH_TEMPLATE" here.
     # Example: "FINAL_OUTPUT_PATH_TEMPLATE": "s3://custom-bucket/analytics/{datasetname}/{start_date}_{end_date}.parquet"
-    "S3_STORAGE_OPTIONS": {"region": "us-east-1"}, # Example S3 storage options
-    #"LOGGING_LEVEL": "debug",
+    "S3_STORAGE_OPTIONS": {"region": "us-east-1"},  # Example S3 storage options
+    # "LOGGING_LEVEL": "debug",
 }
 
 config_data = {**DEFAULT_CONFIG, **USER_CONFIG}
@@ -222,13 +222,14 @@ if __name__ == "__main__":
         force=True,
     )
 
-    ret_code = 0 
+    ret_code = 0
     try:
         from intraday_analytics.execution import run_metrics_pipeline
+
         run_metrics_pipeline(CONFIG, get_pipeline, get_universe)
 
     except Exception as e:
         logging.error(f"Pipeline failed: {e}", exc_info=True)
-        ret_code=1
-    
+        ret_code = 1
+
     sys.exit(ret_code)

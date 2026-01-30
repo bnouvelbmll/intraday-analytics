@@ -8,11 +8,17 @@ import pandas as pd
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from .batching import SymbolBatcherStreaming, S3SymbolBatcher, HeuristicBatchingStrategy, SymbolSizeEstimator
+from .batching import (
+    SymbolBatcherStreaming,
+    S3SymbolBatcher,
+    HeuristicBatchingStrategy,
+    SymbolSizeEstimator,
+)
 from .pipeline import AnalyticsRunner
 from .utils import preload, get_files_for_date_range, create_date_batches
 from .tables import ALL_TABLES
 from .process import aggregate_and_write_final_output, BatchWriter
+
 
 def remote_process_executor_wrapper(func):
     """
@@ -22,12 +28,14 @@ def remote_process_executor_wrapper(func):
     side effects, as joblib with `max_tasks_per_child=1` ensures a fresh process
     for each task, effectively providing a "clean worker".
     """
+
     def wrapper(*args, **kwargs):
         # max_tasks_per_child=1 ensures a new process is spawned for each task
         results = Parallel(max_tasks_per_child=1, prefer="processes")(
             delayed(func)(*args, **kwargs)
         )
         return results[0]
+
     return wrapper
 
 
@@ -52,13 +60,15 @@ def process_batch_task(i, temp_dir, current_date, config, pipe):
 
         # Run pipeline
         # Write to a date-specific file
-        out_path = os.path.join(temp_dir, f"batch-metrics-{i}-{current_date.date()}.parquet")
+        out_path = os.path.join(
+            temp_dir, f"batch-metrics-{i}-{current_date.date()}.parquet"
+        )
         writer = BatchWriter(out_path)
 
         runner = AnalyticsRunner(pipe, writer.write, config)
         runner.run_batch(batch_data)
         writer.close()
-        
+
         # Clean up batch input files immediately to save space
         for table_name in config.TABLES_TO_LOAD:
             path = os.path.join(temp_dir, f"batch-{table_name}-{i}.parquet")
@@ -136,21 +146,23 @@ class ProcessInterval(Process):
 
         try:
             # We process day by day to save memory and ensure metric safety
-            date_range = pd.date_range(self.sd, self.ed, freq='D')
+            date_range = pd.date_range(self.sd, self.ed, freq="D")
             TEMP_DIR = self.config.TEMP_DIR
             MODE = self.config.PREPARE_DATA_MODE
-            
+
             # Use the partition start date for universe/batching consistency across days
             ref_partition = self.get_universe(self.sd)
-            
+
             for current_date in date_range:
                 logging.info(f"Processing date: {current_date.date()}")
-                
+
                 try:
                     ref = self.get_universe(current_date)
                 except Exception as e:
                     if "No data available" in str(e):
-                        logging.warning(f"Skipping {current_date.date()} due to missing data: {e}")
+                        logging.warning(
+                            f"Skipping {current_date.date()} due to missing data: {e}"
+                        )
                         continue
                     raise e
 
@@ -161,8 +173,10 @@ class ProcessInterval(Process):
                     logging.info("🚚 Creating batch files (Naive)...")
 
                     tables_to_load_names = self.config.TABLES_TO_LOAD
-                    table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
-                    
+                    table_definitions = [
+                        ALL_TABLES[name] for name in tables_to_load_names
+                    ]
+
                     # Preload only for current_date
                     loaded_tables = preload(
                         current_date, current_date, ref, nanoseconds, table_definitions
@@ -184,7 +198,9 @@ class ProcessInterval(Process):
                         # Write batch files
                         for table_name, data in batch.items():
                             data.write_parquet(
-                                os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
+                                os.path.join(
+                                    TEMP_DIR, f"batch-{table_name}-{i}.parquet"
+                                )
                             )
 
                 elif MODE == "s3_shredding":
@@ -197,13 +213,21 @@ class ProcessInterval(Process):
                     exclude_weekends = self.config.EXCLUDE_WEEKENDS
                     for table_name in tables_to_load_names:
                         s3_file_lists[table_name] = get_files_for_date_range(
-                            current_date, current_date, mics, table_name, exclude_weekends=exclude_weekends
+                            current_date,
+                            current_date,
+                            mics,
+                            table_name,
+                            exclude_weekends=exclude_weekends,
                         )
 
-                    table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
-                    
+                    table_definitions = [
+                        ALL_TABLES[name] for name in tables_to_load_names
+                    ]
+
                     # Run shredding in a separate process to ensure memory cleanup
-                    with ProcessPoolExecutor(max_workers=1, mp_context=get_context('spawn')) as executor:
+                    with ProcessPoolExecutor(
+                        max_workers=1, mp_context=get_context("spawn")
+                    ) as executor:
                         future = executor.submit(
                             shred_data_task,
                             s3_file_lists,
@@ -213,9 +237,9 @@ class ProcessInterval(Process):
                             self.config,
                             current_date,
                             TEMP_DIR,
-                            self.get_universe
+                            self.get_universe,
                         )
-                        future.result() # Wait for completion and raise exceptions
+                        future.result()  # Wait for completion and raise exceptions
 
                 else:
                     logging.error(f"Unknown PREPARE_DATA_MODE: {MODE}")
@@ -223,19 +247,25 @@ class ProcessInterval(Process):
 
                 # --- Compute Metrics for current_date ---
                 logging.info(f"📊 Computing metrics for date: {current_date.date()}")
-                
+
                 # Find batches
                 logging.info(f"Listing {TEMP_DIR}: {os.listdir(TEMP_DIR)}")
-                batch_files = glob.glob(os.path.join(TEMP_DIR, "batch-trades-*.parquet"))
+                batch_files = glob.glob(
+                    os.path.join(TEMP_DIR, "batch-trades-*.parquet")
+                )
                 logging.info(f"Found batch files in {TEMP_DIR}: {batch_files}")
-                batch_indices = sorted([int(f.split("-")[-1].split(".")[0]) for f in batch_files])
-                
+                batch_indices = sorted(
+                    [int(f.split("-")[-1].split(".")[0]) for f in batch_files]
+                )
+
                 # Determine max_workers
                 max_workers = self.config.NUM_WORKERS
                 if max_workers <= 0:
                     max_workers = os.cpu_count()
 
-                with ProcessPoolExecutor(max_workers=max_workers, mp_context=get_context('spawn')) as executor:
+                with ProcessPoolExecutor(
+                    max_workers=max_workers, mp_context=get_context("spawn")
+                ) as executor:
                     futures = []
                     for i in batch_indices:
                         futures.append(
@@ -245,10 +275,10 @@ class ProcessInterval(Process):
                                 TEMP_DIR,
                                 current_date,
                                 self.config,
-                                pipe
+                                pipe,
                             )
                         )
-                    
+
                     for future in as_completed(futures):
                         try:
                             future.result()
@@ -257,11 +287,9 @@ class ProcessInterval(Process):
                             raise e
 
             # --- End of Date Loop ---
-            
+
             # Aggregate all daily metrics
-            aggregate_and_write_final_output(
-                self.sd, self.ed, self.config, TEMP_DIR
-            )
+            aggregate_and_write_final_output(self.sd, self.ed, self.config, TEMP_DIR)
 
         except Exception as e:
             logging.error(f"Critical error in ProcessInterval: {e}", exc_info=True)
@@ -274,6 +302,7 @@ class ProcessInterval(Process):
 def get_final_s3_path(start_date, end_date, config):
     """Constructs the final S3 output path for a given date range."""
     import bmll2
+
     dataset_name = config.DATASETNAME
     output_bucket = bmll2.storage_paths()[config.AREA]["bucket"]
     output_prefix = bmll2.storage_paths()[config.AREA]["prefix"]
@@ -283,9 +312,9 @@ def get_final_s3_path(start_date, end_date, config):
         prefix=output_prefix,
         datasetname=dataset_name,
         start_date=start_date.date(),
-        end_date=end_date.date()
+        end_date=end_date.date(),
     )
-    
+
     if final_s3_path.startswith("s3://"):
         protocol = "s3://"
         path_part = final_s3_path[5:]
@@ -304,7 +333,7 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
     """
     import shutil
     import bmll2
-    
+
     # Configure logging
     logging.basicConfig(
         level=config.LOGGING_LEVEL.upper(),
@@ -335,7 +364,9 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
             if config.SKIP_EXISTING_OUTPUT:
                 final_s3_path = get_final_s3_path(sd, ed, config)
                 if bmll2.file_exists(final_s3_path, area=config.AREA):
-                    logging.info(f"✅ Output already exists for {sd.date()} -> {ed.date()}. Skipping.")
+                    logging.info(
+                        f"✅ Output already exists for {sd.date()} -> {ed.date()}. Skipping."
+                    )
                     continue
 
             logging.info(f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()}")
@@ -348,12 +379,14 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
             )
             p.start()
             p.join()
-            
+
             if p.exitcode != 0:
                 logging.error(f"ProcessInterval failed with exit code {p.exitcode}")
                 raise RuntimeError("ProcessInterval failed")
 
-        logging.info("✅ All data preparation and metric computation processes completed.")
+        logging.info(
+            "✅ All data preparation and metric computation processes completed."
+        )
 
     finally:
         if config.CLEAN_UP_TEMP_DIR and os.path.exists(temp_dir):

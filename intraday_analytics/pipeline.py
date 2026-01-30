@@ -234,20 +234,24 @@ class AnalyticsPipeline:
                 prev_specific_cols = module.specific_fill_cols
                 logger.debug(f"Initial base schema: {base.collect_schema().names()}")
             else:
-                logger.debug(f"Base schema before join with {module.name}: {base.collect_schema().names()}")
-                logger.debug(f"Current module ({module.name}) result will be joined.")
-                base = module.join(
-                    base, prev_specific_cols, self.config.DEFAULT_FFILL
+                logger.debug(
+                    f"Base schema before join with {module.name}: {base.collect_schema().names()}"
                 )
+                logger.debug(f"Current module ({module.name}) result will be joined.")
+                base = module.join(base, prev_specific_cols, self.config.DEFAULT_FFILL)
                 if self.config.EAGER_EXECUTION:
                     base = base.collect().lazy()
-                logger.debug(f"Base schema after join with {module.name}: {base.collect_schema().names()}")
+                logger.debug(
+                    f"Base schema after join with {module.name}: {base.collect_schema().names()}"
+                )
                 prev_specific_cols.update(module.specific_fill_cols)
             if self.config.ENABLE_PERFORMANCE_LOGS:
                 # Many null listing ids
                 try:
                     # Force ListingId selection to prevent optimization issues in map_batches
-                    logger.info(f"{module} SHAPE {base.select(pl.len(), pl.col('ListingId').first()).collect()}")
+                    logger.info(
+                        f"{module} SHAPE {base.select(pl.len(), pl.col('ListingId').first()).collect()}"
+                    )
                 except Exception as e:
                     logger.error(e, exc_info=True)
 
@@ -255,7 +259,9 @@ class AnalyticsPipeline:
         if self.config.ENABLE_PERFORMANCE_LOGS and not self.config.EAGER_EXECUTION:
             r = base.profile(show_plot=False)
             logger.info(f"/PERFORMANCE_LOGS - output shape = {r[0].shape}")
-            logger.info(f"{r[1].with_columns(dt=pl.col('end') - pl.col('start')).sort('dt')}")
+            logger.info(
+                f"{r[1].with_columns(dt=pl.col('end') - pl.col('start')).sort('dt')}"
+            )
             return r[0]
         else:
             return base.collect()
@@ -331,4 +337,3 @@ class AnalyticsRunner:
         else:
             result = self.pipeline.run_on_multi_tables(**batch_data)
             self.out_writer(result, "batch")
-

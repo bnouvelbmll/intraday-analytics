@@ -77,12 +77,18 @@ class DenseAnalytics(BaseAnalytics):
             return (
                 pl.LazyFrame(symbols.cast(pl.Int64))
                 .join(pl.LazyFrame(times_df), how="cross")
-                .join(self.ref.lazy().select([SYMBOL_COL, "MIC", "Ticker", "CurrencyCode"]), on=SYMBOL_COL, how="left")
+                .join(
+                    self.ref.lazy().select(
+                        [SYMBOL_COL, "MIC", "Ticker", "CurrencyCode"]
+                    ),
+                    on=SYMBOL_COL,
+                    how="left",
+                )
                 .sort([sc, "TimeBucket"])
             )
         elif self.config.mode == "adaptative":
             tsc = "EventTimestamp"
-            
+
             # Filter symbols to those present in marketstate to avoid warnings for missing data
             available_listings = self.marketstate.select("ListingId").unique().collect()
             symbols = symbols.join(available_listings, on=sc, how="inner")
@@ -93,8 +99,14 @@ class DenseAnalytics(BaseAnalytics):
             continuous_intervals = (
                 calendar.with_columns(
                     [
-                        pl.col("MarketState").shift(1).over("ListingId").alias("pstate"),
-                        pl.col("MarketState").shift(-1).over("ListingId").alias("nstate"),
+                        pl.col("MarketState")
+                        .shift(1)
+                        .over("ListingId")
+                        .alias("pstate"),
+                        pl.col("MarketState")
+                        .shift(-1)
+                        .over("ListingId")
+                        .alias("nstate"),
                         pl.col(tsc).shift(-1).over("ListingId").alias("nts"),
                     ]
                 )
@@ -120,12 +132,7 @@ class DenseAnalytics(BaseAnalytics):
                 if len(ciq) == 0:
                     failed_listings.append(s)
                     continue
-                start_dt = (
-                    pd.Timestamp(
-                        ciq.iloc[0]
-                    ).floor(str(frequency))
-                    - TS_PADDING
-                )
+                start_dt = pd.Timestamp(ciq.iloc[0]).floor(str(frequency)) - TS_PADDING
                 end_dt = (
                     pd.Timestamp(
                         continuous_intervals.query("ListingId==@s")["nts"].iloc[-1]
@@ -145,12 +152,16 @@ class DenseAnalytics(BaseAnalytics):
                         }
                     ).with_columns(ListingId=s)
                 )
-            
+
             if failed_listings:
-                logger.warning(f"Could not determine continuous intervals for {len(failed_listings)} listings: {failed_listings}")
+                logger.warning(
+                    f"Could not determine continuous intervals for {len(failed_listings)} listings: {failed_listings}"
+                )
 
             if not res:
-                return pl.DataFrame(schema={"ListingId": pl.Int64, "TimeBucket": pl.Datetime("ns")}).lazy()
+                return pl.DataFrame(
+                    schema={"ListingId": pl.Int64, "TimeBucket": pl.Datetime("ns")}
+                ).lazy()
 
             r = pl.concat(res).sort([sc, "TimeBucket"])
             return r.lazy()

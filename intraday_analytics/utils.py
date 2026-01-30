@@ -111,7 +111,8 @@ def preload(
     Returns:
         A dictionary of LazyFrames, with table names as keys.
     """
-    import bmll2 # Moved import inside function
+    import bmll2  # Moved import inside function
+
     logging.info(f"Preloading data for {sd.date()} -> {ed.date()}")
 
     loaded_tables = {}
@@ -174,7 +175,9 @@ def ffill_with_shifts(
     )
 
     # 3. Join original values
-    result = df_expanded.join(df, on=group_cols + [time_col], how="left").sort(group_cols + [time_col])
+    result = df_expanded.join(df, on=group_cols + [time_col], how="left").sort(
+        group_cols + [time_col]
+    )
 
     # 4. Forward-fill missing values within groups
     for col in value_cols:
@@ -264,7 +267,8 @@ def generate_path(mics, year, month, day, table_name):
     Returns:
         A list of S3 paths.
     """
-    import bmll2 # Moved import inside function
+    import bmll2  # Moved import inside function
+
     table = ALL_TABLES.get(table_name)
     if not table:
         raise ValueError(f"Unknown table name: {table_name}")
@@ -289,7 +293,9 @@ def get_all_files_for_date(date, mics, table_name):
     return generate_path(mics, year, month, day, table_name)
 
 
-def get_files_for_date_range(start_date, end_date, mics, table_name, exclude_weekends=True):
+def get_files_for_date_range(
+    start_date, end_date, mics, table_name, exclude_weekends=True
+):
     """
     Generates a list of S3 paths for a date range, list of MICs, and table name.
     """
@@ -332,7 +338,8 @@ def cache_universe(cache_dir_path_from_config: str):
     def decorator(func):
         @wraps(func)
         def wrapper(date, *args, **kwargs):
-            import bmll2 # Moved import inside function
+            import bmll2  # Moved import inside function
+
             # Ensure the date is in a consistent format for the filename
             iso_date = pd.Timestamp(date).date().isoformat()
 
@@ -345,16 +352,16 @@ def cache_universe(cache_dir_path_from_config: str):
                 logging.info(f"📜 Universe for {iso_date} not in cache. Fetching...")
                 # If not cached, call the original function to get the universe
                 universe_df = func(date, *args, **kwargs)
-                
+
                 # Save the result to the cache
                 if isinstance(universe_df, pl.DataFrame):
                     universe_df.write_parquet(universe_path)
                 elif isinstance(universe_df, pl.LazyFrame):
-                     universe_df.collect().write_parquet(universe_path)
+                    universe_df.collect().write_parquet(universe_path)
                 else:
                     # Assume Pandas
                     universe_df.to_parquet(universe_path)
-                
+
                 logging.info(f"💾 Saved universe for {iso_date} to cache.")
 
             else:
@@ -441,10 +448,10 @@ def create_date_batches(
     return batches
 
 
-
 import sys
 import os
 import re
+
 
 def get_total_system_memory_gb():
     """
@@ -473,6 +480,7 @@ def get_total_system_memory_gb():
             pass
 
     # Fallback if no method works
-    logging.warning("Could not determine system memory; defaulting to a safe low value (e.g., 64GB).")
+    logging.warning(
+        "Could not determine system memory; defaulting to a safe low value (e.g., 64GB)."
+    )
     return 64.0
-

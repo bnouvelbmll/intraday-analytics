@@ -2,9 +2,11 @@ import polars as pl
 from intraday_analytics import BaseAnalytics, dc
 from dataclasses import dataclass
 
+
 @dataclass
 class ExecutionAnalyticsConfig:
     pass
+
 
 class ExecutionAnalytics(BaseAnalytics):
     """

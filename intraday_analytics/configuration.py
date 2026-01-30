@@ -7,17 +7,21 @@ from .metrics.l3 import L3AnalyticsConfig
 from .metrics.trade import TradeAnalyticsConfig
 from .metrics.execution import ExecutionAnalyticsConfig
 
+
 class PrepareDataMode(str, Enum):
     NAIVE = "naive"
     S3_SHREDDING = "s3_shredding"
+
 
 class BatchingStrategyType(str, Enum):
     HEURISTIC = "heuristic"
     POLARS_SCAN = "polars_scan"
 
+
 class DenseOutputMode(str, Enum):
     ADAPTATIVE = "adaptative"
     UNIFORM = "uniform"
+
 
 @dataclass
 class AnalyticsConfig:
@@ -56,7 +60,9 @@ class AnalyticsConfig:
     trade_analytics: TradeAnalyticsConfig = field(default_factory=TradeAnalyticsConfig)
     """Configuration for trade analytics."""
 
-    execution_analytics: ExecutionAnalyticsConfig = field(default_factory=ExecutionAnalyticsConfig)
+    execution_analytics: ExecutionAnalyticsConfig = field(
+        default_factory=ExecutionAnalyticsConfig
+    )
     """Configuration for execution analytics."""
 
     # --- Batching & Performance ---
@@ -139,18 +145,22 @@ class AnalyticsConfig:
     LOGGING_LEVEL: str = "INFO"
     """The logging level (e.g., 'DEBUG', 'INFO', 'WARNING')."""
 
-    TABLES_TO_LOAD: List[str] = field(default_factory=lambda: ["trades", "l2", "l3", "marketstate"])
+    TABLES_TO_LOAD: List[str] = field(
+        default_factory=lambda: ["trades", "l2", "l3", "marketstate"]
+    )
     """A list of the data tables to load for the analytics pipeline."""
-    
+
     # --- Profiling ---
     ENABLE_PERFORMANCE_LOGS: bool = True
     """If True, logs performance metrics such as execution time and memory usage."""
 
     ENABLE_POLARS_PROFILING: bool = False
     """If True, enables Polars' built-in query profiling."""
-    
+
     # --- Output ---
-    FINAL_OUTPUT_PATH_TEMPLATE: str = "s3://{bucket}/{prefix}/data/{datasetname}/{start_date}_{end_date}.parquet"
+    FINAL_OUTPUT_PATH_TEMPLATE: str = (
+        "s3://{bucket}/{prefix}/data/{datasetname}/{start_date}_{end_date}.parquet"
+    )
     """
     A template for the final output path. Can be customized to change the
     S3 bucket, prefix, and filename format.
@@ -192,7 +202,9 @@ class AnalyticsConfig:
         if isinstance(self.trade_analytics, dict):
             self.trade_analytics = TradeAnalyticsConfig(**self.trade_analytics)
         if isinstance(self.execution_analytics, dict):
-            self.execution_analytics = ExecutionAnalyticsConfig(**self.execution_analytics)
+            self.execution_analytics = ExecutionAnalyticsConfig(
+                **self.execution_analytics
+            )
 
         # Propagate global settings
         self.dense_analytics.time_bucket_seconds = self.TIME_BUCKET_SECONDS
@@ -205,11 +217,15 @@ class AnalyticsConfig:
         # Manual validation since we don't have Pydantic
         valid_modes = [m.value for m in PrepareDataMode]
         if self.PREPARE_DATA_MODE not in valid_modes:
-            raise ValueError(f"Invalid PREPARE_DATA_MODE: {self.PREPARE_DATA_MODE}. Must be one of {valid_modes}")
-        
+            raise ValueError(
+                f"Invalid PREPARE_DATA_MODE: {self.PREPARE_DATA_MODE}. Must be one of {valid_modes}"
+            )
+
         valid_strategies = [s.value for s in BatchingStrategyType]
         if self.BATCHING_STRATEGY not in valid_strategies:
-            raise ValueError(f"Invalid BATCHING_STRATEGY: {self.BATCHING_STRATEGY}. Must be one of {valid_strategies}")
+            raise ValueError(
+                f"Invalid BATCHING_STRATEGY: {self.BATCHING_STRATEGY}. Must be one of {valid_strategies}"
+            )
 
         if not isinstance(self.MAX_ROWS_PER_TABLE, dict):
-             raise ValueError("MAX_ROWS_PER_TABLE must be a dictionary")
+            raise ValueError("MAX_ROWS_PER_TABLE must be a dictionary")

@@ -201,7 +201,9 @@ class SymbolSizeEstimator:
         try:
             universe = self.get_universe(self.date)
         except Exception as e:
-            logging.warning(f"Could not load universe for size estimates on {self.date}: {e}")
+            logging.warning(
+                f"Could not load universe for size estimates on {self.date}: {e}"
+            )
             return pl.DataFrame(
                 {SYMBOL_COL: [], "table_name": [], "estimated_rows": []},
                 schema={
@@ -460,7 +462,9 @@ def _process_s3_chunk(
         lf_filtered = transform_fn(lf)
         df_chunk = lf_filtered.collect()
     except Exception as e:
-        logging.warning(f"Batch read failed for chunk starting with {s3_files[0] if s3_files else 'N/A'}. Falling back to individual file read. Error: {e}")
+        logging.warning(
+            f"Batch read failed for chunk starting with {s3_files[0] if s3_files else 'N/A'}. Falling back to individual file read. Error: {e}"
+        )
         # Fallback: Try reading files one by one
         valid_dfs = []
         for f in s3_files:
@@ -469,11 +473,13 @@ def _process_s3_chunk(
                 lf_single_filtered = transform_fn(lf_single)
                 valid_dfs.append(lf_single_filtered.collect())
             except Exception as inner_e:
-                logging.warning(f"Skipping missing or corrupt file: {f}. Error: {inner_e}")
-        
+                logging.warning(
+                    f"Skipping missing or corrupt file: {f}. Error: {inner_e}"
+                )
+
         if not valid_dfs:
             return
-            
+
         df_chunk = pl.concat(valid_dfs)
 
     if df_chunk.is_empty():
@@ -484,7 +490,9 @@ def _process_s3_chunk(
 
     # Inner join attaches 'batch_id' and filters out symbols not in any batch
     shredded = df_chunk.join(pl_map, on="ListingId", how="inner")
-    logging.info(f"Worker {worker_id}: Read {len(df_chunk)} rows. Shredded {len(shredded)} rows.")
+    logging.info(
+        f"Worker {worker_id}: Read {len(df_chunk)} rows. Shredded {len(shredded)} rows."
+    )
 
     if shredded.is_empty():
         logging.warning(f"Worker {worker_id}: Shredded dataframe is empty.")
@@ -500,7 +508,6 @@ def _process_s3_chunk(
         max_rows_per_group=1_000_000,
         basename_template=f"f-{worker_id}-{{i}}.parquet",
     )
-
 
 
 class S3SymbolBatcher:
@@ -576,7 +583,7 @@ class S3SymbolBatcher:
             # Calculate max workers based on memory
             total_memory_gb = get_total_system_memory_gb()
             max_workers_mem = int(total_memory_gb // self.memory_per_worker)
-            
+
             # Use the minimum of CPU cores and memory-based limit
             num_workers = max(1, min(multiprocessing.cpu_count(), max_workers_mem))
 

@@ -12,28 +12,42 @@ import polars.testing
 
 # Now that bmll2 imports are moved inside functions, we can import normally
 from intraday_analytics.pipeline import AnalyticsPipeline, AnalyticsRunner
-from intraday_analytics.batching import S3SymbolBatcher, HeuristicBatchingStrategy, SymbolSizeEstimator
+from intraday_analytics.batching import (
+    S3SymbolBatcher,
+    HeuristicBatchingStrategy,
+    SymbolSizeEstimator,
+)
 from intraday_analytics.metrics.dense import DenseAnalytics, DenseAnalyticsConfig
-from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsTW, L2AnalyticsConfig
+from intraday_analytics.metrics.l2 import (
+    L2AnalyticsLast,
+    L2AnalyticsTW,
+    L2AnalyticsConfig,
+)
 from intraday_analytics.metrics.trade import TradeAnalytics, TradeAnalyticsConfig
 from intraday_analytics.metrics.l3 import L3Analytics, L3AnalyticsConfig
 from intraday_analytics.metrics.execution import ExecutionAnalytics
 from intraday_analytics.utils import SYMBOL_COL
 from intraday_analytics.configuration import AnalyticsConfig
 
+
 # --- Mock Data Generation ---
 def create_mock_ref(listing_id: int) -> pl.DataFrame:
-    return pl.DataFrame({
-        "ListingId": [listing_id],
-        "ISIN": ["XS1234567890"],
-        "BloombergTicker": ["ABC NA Equity"],
-        "Exchange": ["XAMS"],
-        "CurrencyCode": ["EUR"],
-        "MIC": ["XAMS"],
-        "Ticker": ["ABC"],
-    })
+    return pl.DataFrame(
+        {
+            "ListingId": [listing_id],
+            "ISIN": ["XS1234567890"],
+            "BloombergTicker": ["ABC NA Equity"],
+            "Exchange": ["XAMS"],
+            "CurrencyCode": ["EUR"],
+            "MIC": ["XAMS"],
+            "Ticker": ["ABC"],
+        }
+    )
 
-def create_mock_trades(listing_id: int, date_str: str, time_bucket_seconds: int) -> pl.DataFrame:
+
+def create_mock_trades(
+    listing_id: int, date_str: str, time_bucket_seconds: int
+) -> pl.DataFrame:
     start_dt = dt.datetime.strptime(date_str + " 09:00:00", "%Y-%m-%d %H:%M:%S")
     end_dt = dt.datetime.strptime(date_str + " 10:00:00", "%Y-%m-%d %H:%M:%S")
     times = pl.datetime_range(
@@ -41,31 +55,50 @@ def create_mock_trades(listing_id: int, date_str: str, time_bucket_seconds: int)
         end=end_dt,
         interval="5m",
         eager=True,
-    ).cast(pl.Datetime("ns")) # Explicitly cast to nanoseconds
-    classifications = [ "LIT_CONTINUOUS"]
-    return pl.DataFrame({
-        SYMBOL_COL: [listing_id] * len(times),
-        "TradeTimestamp": times,
-        "TradeDate": [dt.date(start_dt.year, start_dt.month, start_dt.day)] * len(times),
-        "Price": [100.0 + i * 0.1 for i in range(len(times))],
-        "Size": [100 + i * 10 for i in range(len(times))],
-        "TradeNotional": [(100.0 + i * 0.1) * (100 + i * 10) for i in range(len(times))], # Added TradeNotional
-        "LPrice": [100.0 + i * 0.1 for i in range(len(times))], # Added LPrice
-        "EPrice": [100.0 + i * 0.1 for i in range(len(times))], # Added EPrice
-        "PricePoint": [i % 2 / 1.0 for i in range(len(times))], # Added PricePoint (values 0 or 0.5)
-        "MIC": ["XAMS"] * len(times),
-        "Ticker": ["ABC"] * len(times),
-        "CurrencyCode": ["EUR"] * len(times),
-        "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
-        "Classification": [classifications[i % len(classifications)] for i in range(len(times))], # Added Classification
-        "BMLLTradeType": ["LIT" if i % 2 == 0 else "DARK" for i in range(len(times))], # Added BMLLTradeType
-        "BMLLParticipantType": ["RETAIL"] * len(times), # Added for TradeAnalytics df2
-        "AggressorSide": [1] * len(times), # Added for TradeAnalytics df2
-        "TradeNotionalEUR": [(100.0 + i * 0.1) * (100 + i * 10) for i in range(len(times))], # Added for TradeAnalytics df2
-        "MarketState": ["CONTINUOUS_TRADING"] * len(times), # Added MarketState
-    })
+    ).cast(
+        pl.Datetime("ns")
+    )  # Explicitly cast to nanoseconds
+    classifications = ["LIT_CONTINUOUS"]
+    return pl.DataFrame(
+        {
+            SYMBOL_COL: [listing_id] * len(times),
+            "TradeTimestamp": times,
+            "TradeDate": [dt.date(start_dt.year, start_dt.month, start_dt.day)]
+            * len(times),
+            "Price": [100.0 + i * 0.1 for i in range(len(times))],
+            "Size": [100 + i * 10 for i in range(len(times))],
+            "TradeNotional": [
+                (100.0 + i * 0.1) * (100 + i * 10) for i in range(len(times))
+            ],  # Added TradeNotional
+            "LPrice": [100.0 + i * 0.1 for i in range(len(times))],  # Added LPrice
+            "EPrice": [100.0 + i * 0.1 for i in range(len(times))],  # Added EPrice
+            "PricePoint": [
+                i % 2 / 1.0 for i in range(len(times))
+            ],  # Added PricePoint (values 0 or 0.5)
+            "MIC": ["XAMS"] * len(times),
+            "Ticker": ["ABC"] * len(times),
+            "CurrencyCode": ["EUR"] * len(times),
+            "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
+            "Classification": [
+                classifications[i % len(classifications)] for i in range(len(times))
+            ],  # Added Classification
+            "BMLLTradeType": [
+                "LIT" if i % 2 == 0 else "DARK" for i in range(len(times))
+            ],  # Added BMLLTradeType
+            "BMLLParticipantType": ["RETAIL"]
+            * len(times),  # Added for TradeAnalytics df2
+            "AggressorSide": [1] * len(times),  # Added for TradeAnalytics df2
+            "TradeNotionalEUR": [
+                (100.0 + i * 0.1) * (100 + i * 10) for i in range(len(times))
+            ],  # Added for TradeAnalytics df2
+            "MarketState": ["CONTINUOUS_TRADING"] * len(times),  # Added MarketState
+        }
+    )
 
-def create_mock_l2(listing_id: int, date_str: str, time_bucket_seconds: int) -> pl.DataFrame:
+
+def create_mock_l2(
+    listing_id: int, date_str: str, time_bucket_seconds: int
+) -> pl.DataFrame:
     start_dt = dt.datetime.strptime(date_str + " 09:00:00", "%Y-%m-%d %H:%M:%S")
     end_dt = dt.datetime.strptime(date_str + " 10:00:00", "%Y-%m-%d %H:%M:%S")
     times = pl.datetime_range(
@@ -73,26 +106,41 @@ def create_mock_l2(listing_id: int, date_str: str, time_bucket_seconds: int) -> 
         end=end_dt,
         interval="5m",
         eager=True,
-    ).cast(pl.Datetime("ns")) # Explicitly cast to nanoseconds
+    ).cast(
+        pl.Datetime("ns")
+    )  # Explicitly cast to nanoseconds
     # Generate data for L2_LEVELS = 1
-    return pl.DataFrame({
-        SYMBOL_COL: [listing_id] * len(times),
-        "EventTimestamp": times,
-        "BidPrice1": [99.9 - i * 0.05 for i in range(len(times))],
-        "AskPrice1": [100.1 + i * 0.05 for i in range(len(times))],
-        "BidQuantity1": [50 + i * 5 for i in range(len(times))], # Renamed from BidSize
-        "AskQuantity1": [60 + i * 5 for i in range(len(times))], # Renamed from AskSize
-        "BidNumOrders1": [5 + i for i in range(len(times))], # Added
-        "AskNumOrders1": [6 + i for i in range(len(times))], # Added
-        "Level": [1] * len(times), # This column might not be needed if we have level-specific columns
-        "MIC": ["XAMS"] * len(times),
-        "Ticker": ["ABC"] * len(times),
-        "CurrencyCode": ["EUR"] * len(times),
-        "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
-        "MarketState": ["CONTINUOUS_TRADING"] * len(times), # Added for L2AnalyticsLast
-    })
+    return pl.DataFrame(
+        {
+            SYMBOL_COL: [listing_id] * len(times),
+            "EventTimestamp": times,
+            "BidPrice1": [99.9 - i * 0.05 for i in range(len(times))],
+            "AskPrice1": [100.1 + i * 0.05 for i in range(len(times))],
+            "BidQuantity1": [
+                50 + i * 5 for i in range(len(times))
+            ],  # Renamed from BidSize
+            "AskQuantity1": [
+                60 + i * 5 for i in range(len(times))
+            ],  # Renamed from AskSize
+            "BidNumOrders1": [5 + i for i in range(len(times))],  # Added
+            "AskNumOrders1": [6 + i for i in range(len(times))],  # Added
+            "Level": [1]
+            * len(
+                times
+            ),  # This column might not be needed if we have level-specific columns
+            "MIC": ["XAMS"] * len(times),
+            "Ticker": ["ABC"] * len(times),
+            "CurrencyCode": ["EUR"] * len(times),
+            "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
+            "MarketState": ["CONTINUOUS_TRADING"]
+            * len(times),  # Added for L2AnalyticsLast
+        }
+    )
 
-def create_mock_l3(listing_id: int, date_str: str, time_bucket_seconds: int) -> pl.DataFrame:
+
+def create_mock_l3(
+    listing_id: int, date_str: str, time_bucket_seconds: int
+) -> pl.DataFrame:
     start_dt = dt.datetime.strptime(date_str + " 09:00:00", "%Y-%m-%d %H:%M:%S")
     end_dt = dt.datetime.strptime(date_str + " 10:00:00", "%Y-%m-%d %H:%M:%S")
     times = pl.datetime_range(
@@ -100,25 +148,34 @@ def create_mock_l3(listing_id: int, date_str: str, time_bucket_seconds: int) -> 
         end=end_dt,
         interval="5m",
         eager=True,
-    ).cast(pl.Datetime("ns")) # Explicitly cast to nanoseconds
-    sides = [1, 2, 0] # 1 for BID, 2 for ASK, 0 for UNKNOWN
-    return pl.DataFrame({
-        SYMBOL_COL: [listing_id] * len(times),
-        "EventTimestamp": times,
-        "LobAction": [2] * len(times), # Changed to integer values (2 for INSERT)
-        "Price": [100.0] * len(times),
-        "Size": [100] * len(times),
-        "OldSize": [90] * len(times), # Added OldSize
-        "ExecutionPrice": [100.0] * len(times), # Added ExecutionPrice
-        "ExecutionSize": [100] * len(times), # Added ExecutionSize
-        "MIC": ["XAMS"] * len(times),
-        "Ticker": ["ABC"] * len(times),
-        "CurrencyCode": ["EUR"] * len(times),
-        "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
-        "Side": [sides[i % len(sides)] for i in range(len(times))], # Added Side, now as int
-    })
+    ).cast(
+        pl.Datetime("ns")
+    )  # Explicitly cast to nanoseconds
+    sides = [1, 2, 0]  # 1 for BID, 2 for ASK, 0 for UNKNOWN
+    return pl.DataFrame(
+        {
+            SYMBOL_COL: [listing_id] * len(times),
+            "EventTimestamp": times,
+            "LobAction": [2] * len(times),  # Changed to integer values (2 for INSERT)
+            "Price": [100.0] * len(times),
+            "Size": [100] * len(times),
+            "OldSize": [90] * len(times),  # Added OldSize
+            "ExecutionPrice": [100.0] * len(times),  # Added ExecutionPrice
+            "ExecutionSize": [100] * len(times),  # Added ExecutionSize
+            "MIC": ["XAMS"] * len(times),
+            "Ticker": ["ABC"] * len(times),
+            "CurrencyCode": ["EUR"] * len(times),
+            "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
+            "Side": [
+                sides[i % len(sides)] for i in range(len(times))
+            ],  # Added Side, now as int
+        }
+    )
 
-def create_mock_marketstate(listing_id: int, date_str: str, time_bucket_seconds: int) -> pl.DataFrame:
+
+def create_mock_marketstate(
+    listing_id: int, date_str: str, time_bucket_seconds: int
+) -> pl.DataFrame:
     start_dt = dt.datetime.strptime(date_str + " 09:00:00", "%Y-%m-%d %H:%M:%S")
     end_dt = dt.datetime.strptime(date_str + " 10:00:00", "%Y-%m-%d %H:%M:%S")
     times = pl.datetime_range(
@@ -126,17 +183,23 @@ def create_mock_marketstate(listing_id: int, date_str: str, time_bucket_seconds:
         end=end_dt,
         interval="15m",
         eager=True,
-    ).cast(pl.Datetime("ns")) # Explicitly cast to nanoseconds
+    ).cast(
+        pl.Datetime("ns")
+    )  # Explicitly cast to nanoseconds
     market_states = ["PRE_OPEN", "CONTINUOUS_TRADING", "POST_CLOSE"]
-    return pl.DataFrame({
-        SYMBOL_COL: [listing_id] * len(times),
-        "EventTimestamp": times,
-        "MarketState": [market_states[i % len(market_states)] for i in range(len(times))],
-        "MIC": ["XAMS"] * len(times),
-        "Ticker": ["ABC"] * len(times),
-        "CurrencyCode": ["EUR"] * len(times),
-        "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
-    })
+    return pl.DataFrame(
+        {
+            SYMBOL_COL: [listing_id] * len(times),
+            "EventTimestamp": times,
+            "MarketState": [
+                market_states[i % len(market_states)] for i in range(len(times))
+            ],
+            "MIC": ["XAMS"] * len(times),
+            "Ticker": ["ABC"] * len(times),
+            "CurrencyCode": ["EUR"] * len(times),
+            "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
+        }
+    )
 
 
 # --- Configuration ---
@@ -151,10 +214,9 @@ NAIVE_CONFIG = AnalyticsConfig(
     DEFAULT_FFILL=True,
     ENABLE_PERFORMANCE_LOGS=False,
     LOGGING_LEVEL="INFO",
-    RUN_ONE_SYMBOL_AT_A_TIME=False, # For PipelineDispatcher
+    RUN_ONE_SYMBOL_AT_A_TIME=False,  # For PipelineDispatcher
     TABLES_TO_LOAD=["trades", "l2", "l3", "marketstate"],
 )
-
 
 
 class TestPipelineEquivalence(unittest.TestCase):
@@ -165,10 +227,18 @@ class TestPipelineEquivalence(unittest.TestCase):
         self.time_bucket_seconds = NAIVE_CONFIG.TIME_BUCKET_SECONDS
 
         self.ref_df = create_mock_ref(self.listing_id)
-        self.trades_df = create_mock_trades(self.listing_id, self.date_str, self.time_bucket_seconds)
-        self.l2_df = create_mock_l2(self.listing_id, self.date_str, self.time_bucket_seconds)
-        self.l3_df = create_mock_l3(self.listing_id, self.date_str, self.time_bucket_seconds)
-        self.marketstate_df = create_mock_marketstate(self.listing_id, self.date_str, self.time_bucket_seconds)
+        self.trades_df = create_mock_trades(
+            self.listing_id, self.date_str, self.time_bucket_seconds
+        )
+        self.l2_df = create_mock_l2(
+            self.listing_id, self.date_str, self.time_bucket_seconds
+        )
+        self.l3_df = create_mock_l3(
+            self.listing_id, self.date_str, self.time_bucket_seconds
+        )
+        self.marketstate_df = create_mock_marketstate(
+            self.listing_id, self.date_str, self.time_bucket_seconds
+        )
 
         self.modules = [
             DenseAnalytics(self.ref_df, NAIVE_CONFIG.dense_analytics),
@@ -176,7 +246,7 @@ class TestPipelineEquivalence(unittest.TestCase):
             L2AnalyticsTW(NAIVE_CONFIG.l2_analytics),
             TradeAnalytics(NAIVE_CONFIG.trade_analytics),
             L3Analytics(NAIVE_CONFIG.l3_analytics),
-            ExecutionAnalytics(NAIVE_CONFIG.execution_analytics), # Re-added
+            ExecutionAnalytics(NAIVE_CONFIG.execution_analytics),  # Re-added
         ]
 
         self.pipeline = AnalyticsPipeline(self.modules, NAIVE_CONFIG)
@@ -201,7 +271,9 @@ class TestPipelineEquivalence(unittest.TestCase):
 
         # Calculate naive_result once in setUp
         logging.info("Running naive path in setUp...")
-        self.naive_result = self.pipeline.run_on_multi_tables(**self.tables_for_pipeline)
+        self.naive_result = self.pipeline.run_on_multi_tables(
+            **self.tables_for_pipeline
+        )
         logging.debug(f"Type of naive_result in setUp: {type(self.naive_result)}")
         logging.info("Naive path in setUp complete.")
 
@@ -216,6 +288,7 @@ class TestPipelineEquivalence(unittest.TestCase):
         # self.naive_result is already calculated in setUp
         logging.info("Running sophisticated path (simulated via PipelineDispatcher)...")
         mock_out_writer_results = {}
+
         def mock_out_writer(df: pl.DataFrame, key: str):
             mock_out_writer_results[key] = df
 
@@ -225,29 +298,36 @@ class TestPipelineEquivalence(unittest.TestCase):
 
         sophisticated_result = mock_out_writer_results.get("batch")
 
-        self.assertIsNotNone(sophisticated_result, "Sophisticated path did not produce a result.")
-        pl.testing.assert_frame_equal(self.naive_result, sophisticated_result, check_row_order=False)
+        self.assertIsNotNone(
+            sophisticated_result, "Sophisticated path did not produce a result."
+        )
+        pl.testing.assert_frame_equal(
+            self.naive_result, sophisticated_result, check_row_order=False
+        )
         logging.info("Both paths produced equivalent results.")
 
-    @patch('bmll.time_series.query')
+    @patch("bmll.time_series.query")
     def test_s3_batcher_equivalence(self, mock_bmll_query):
         logging.info("Running S3Batcher-driven path...")
 
         # Mock bmll.time_series.query to return an empty DataFrame
         # This is needed for SymbolSizeEstimator, but we're not actually using BMLL data
-        mock_bmll_query.return_value = pl.DataFrame({
-            "ObjectId": [], "TradeCount|Lit": []
-        }, schema={"ObjectId": pl.Int64, "TradeCount|Lit": pl.Int64}).to_pandas()
+        mock_bmll_query.return_value = pl.DataFrame(
+            {"ObjectId": [], "TradeCount|Lit": []},
+            schema={"ObjectId": pl.Int64, "TradeCount|Lit": pl.Int64},
+        ).to_pandas()
 
         transform_fns = {name: lambda x: x for name in self.source_files.keys()}
-        
+
         # Mock get_universe for SymbolSizeEstimator
         def mock_get_universe(date):
             return pl.DataFrame({SYMBOL_COL: [self.listing_id], "MIC": ["XAMS"]})
 
         # Instantiate SymbolSizeEstimator and HeuristicBatchingStrategy
         estimator = SymbolSizeEstimator(self.date_str, mock_get_universe)
-        max_rows_per_table = {name: 1_000_000 for name in self.source_files.keys()} # Dummy max rows
+        max_rows_per_table = {
+            name: 1_000_000 for name in self.source_files.keys()
+        }  # Dummy max rows
         batching_strategy = HeuristicBatchingStrategy(estimator, max_rows_per_table)
 
         # Instantiate S3SymbolBatcher with LOCAL files
@@ -256,21 +336,21 @@ class TestPipelineEquivalence(unittest.TestCase):
             transform_fns=transform_fns,
             batching_strategy=batching_strategy,
             temp_dir=self.temp_dir,
-            storage_options={}, # Empty storage options for local files
+            storage_options={},  # Empty storage options for local files
             date=self.date_str,
             get_universe=mock_get_universe,
         )
 
         # Run the ACTUAL shredding process
-        # Use num_workers=1 to avoid multiprocessing complexity in tests, 
+        # Use num_workers=1 to avoid multiprocessing complexity in tests,
         # but still exercise the threading logic in S3SymbolBatcher
         s3_batcher.process(num_workers=1)
 
         # Read the output from the temp directory
         # S3SymbolBatcher writes to: temp_dir/batch-{name}-{b_id}.parquet
         s3_batcher_output_tables = {}
-        batch_id = 0 # We expect one batch
-        
+        batch_id = 0  # We expect one batch
+
         for table_name in self.tables_for_pipeline.keys():
             path = Path(self.temp_dir) / f"batch-{table_name}-{batch_id}.parquet"
             if path.exists():
@@ -280,11 +360,15 @@ class TestPipelineEquivalence(unittest.TestCase):
                 s3_batcher_output_tables[table_name] = pl.DataFrame()
 
         # Run the pipeline with the S3Batcher's output
-        s3_batcher_result = self.pipeline.run_on_multi_tables(**s3_batcher_output_tables)
+        s3_batcher_result = self.pipeline.run_on_multi_tables(
+            **s3_batcher_output_tables
+        )
         logging.info("S3Batcher-driven path complete.")
 
-        self.assertIsNotNone(s3_batcher_result, "S3Batcher path did not produce a result.")
-        
+        self.assertIsNotNone(
+            s3_batcher_result, "S3Batcher path did not produce a result."
+        )
+
         # Sort both results before comparing to ensure row order doesn't matter
         # (though check_row_order=False should handle it, sorting is safer for debugging)
         naive_sorted = self.naive_result.sort(["ListingId", "TimeBucket"])
@@ -293,6 +377,9 @@ class TestPipelineEquivalence(unittest.TestCase):
         pl.testing.assert_frame_equal(naive_sorted, s3_sorted, check_row_order=False)
         logging.info("Naive and S3Batcher paths produced equivalent results.")
 
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
     unittest.main()

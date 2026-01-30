@@ -15,11 +15,11 @@ class DataTable(ABC):
     s3_file_prefix: str
     source_id_col: str = "BMLLObjectId"
 
-
     @abstractmethod
     def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
         """Loads the table from the data source."""
         import bmll2
+
         return bmll2.get_market_data_range(
             markets=markets,
             table_name=self.bmll_table_name,
@@ -39,25 +39,24 @@ class DataTable(ABC):
             TimeBucket=(
                 pl.when(
                     pl.col(self.timestamp_col)
-                    == pl.col(self.timestamp_col).dt.truncate(
-                        f"{nanoseconds}ns"
-                    )
+                    == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
                 )
                 .then(pl.col(self.timestamp_col))
                 .otherwise(
-                    pl.col(self.timestamp_col).dt.truncate(
-                        f"{nanoseconds}ns"
-                    )
+                    pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
                     + pl.duration(nanoseconds=nanoseconds)
                 )
             ).cast(pl.Datetime("ns"))
         )
 
-    def get_s3_paths(self, mics: List[str], year: int, month: int, day: int) -> List[str]:
+    def get_s3_paths(
+        self, mics: List[str], year: int, month: int, day: int
+    ) -> List[str]:
         """
         Generates S3 paths for this table.
         """
         import bmll2
+
         ap = bmll2._configure.L2_ACCESS_POINT_ALIAS
         yyyy = "%04d" % (year,)
         mm = "%02d" % (month,)
@@ -69,7 +68,9 @@ class DataTable(ABC):
         ]
 
     @abstractmethod
-    def get_transform_fn(self, ref: pl.DataFrame, nanoseconds: int) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
+    def get_transform_fn(
+        self, ref: pl.DataFrame, nanoseconds: int
+    ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         """
         Returns a transformation function for this table, including filtering and resampling.
         Subclasses must implement this method to define their specific transformation logic.
@@ -94,13 +95,17 @@ class TradesPlusTable(DataTable):
             EPrice=pl.col("TradeNotionalEUR") / pl.col("Size"),
         )
 
-    def get_transform_fn(self, ref: pl.DataFrame, nanoseconds: int) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
+    def get_transform_fn(
+        self, ref: pl.DataFrame, nanoseconds: int
+    ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
-            lf_filtered = lf.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
+            lf_filtered = lf.filter(
+                pl.col("ListingId").is_in(ref["ListingId"].to_list())
+            )
             lf_filtered = lf_filtered.with_columns(
                 LPrice=pl.col("TradeNotional") / pl.col("Size"),
                 EPrice=pl.col("TradeNotionalEUR") / pl.col("Size"),
-                TradeTimestamp=pl.col(self.timestamp_col).cast(pl.Datetime("ns"))
+                TradeTimestamp=pl.col(self.timestamp_col).cast(pl.Datetime("ns")),
             )
             return lf_filtered.with_columns(
                 TimeBucket=(
@@ -115,6 +120,7 @@ class TradesPlusTable(DataTable):
                     )
                 ).cast(pl.Datetime("ns"))
             )
+
         return select_and_resample
 
 
@@ -131,10 +137,14 @@ class L2Table(DataTable):
     def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
         return super().load(markets, start_date, end_date)
 
-    def get_transform_fn(self, ref: pl.DataFrame, nanoseconds: int) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
+    def get_transform_fn(
+        self, ref: pl.DataFrame, nanoseconds: int
+    ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
             lf_renamed = lf.rename({self.source_id_col: "ListingId"})
-            lf_filtered = lf_renamed.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
+            lf_filtered = lf_renamed.filter(
+                pl.col("ListingId").is_in(ref["ListingId"].to_list())
+            )
             return lf_filtered.with_columns(
                 TimeBucket=(
                     pl.when(
@@ -148,6 +158,7 @@ class L2Table(DataTable):
                     )
                 ).cast(pl.Datetime("ns"))
             )
+
         return select_and_resample
 
 
@@ -165,15 +176,29 @@ class L3Table(DataTable):
         lf = super().load(markets, start_date, end_date)
         return lf.with_columns(pl.col("TimestampNanoseconds").alias("EventTimestamp"))
 
-    def get_transform_fn(self, ref: pl.DataFrame, nanoseconds: int) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
+    def get_transform_fn(
+        self, ref: pl.DataFrame, nanoseconds: int
+    ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
-            lf_filtered = lf.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
+            lf_filtered = lf.filter(
+                pl.col("ListingId").is_in(ref["ListingId"].to_list())
+            )
             lf_filtered = lf_filtered.select(
-                ["TimestampNanoseconds", "ListingId", "LobAction",
-                 "Price", "Size", "OldSize", "OldPrice",
-                 "Side", "ExecutionSize", "ExecutionPrice"
+                [
+                    "TimestampNanoseconds",
+                    "ListingId",
+                    "LobAction",
+                    "Price",
+                    "Size",
+                    "OldSize",
+                    "OldPrice",
+                    "Side",
+                    "ExecutionSize",
+                    "ExecutionPrice",
                 ]
-            ).with_columns(EventTimestamp=pl.col("TimestampNanoseconds").cast(pl.Datetime("ns")))
+            ).with_columns(
+                EventTimestamp=pl.col("TimestampNanoseconds").cast(pl.Datetime("ns"))
+            )
             return lf_filtered.with_columns(
                 TimeBucket=(
                     pl.when(
@@ -187,6 +212,7 @@ class L3Table(DataTable):
                     )
                 ).cast(pl.Datetime("ns"))
             )
+
         return select_and_resample
 
 
@@ -202,10 +228,16 @@ class MarketStateTable(DataTable):
     def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
         return super().load(markets, start_date, end_date)
 
-    def get_transform_fn(self, ref: pl.DataFrame, nanoseconds: int) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
+    def get_transform_fn(
+        self, ref: pl.DataFrame, nanoseconds: int
+    ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
-            lf_filtered = lf.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
-            lf_filtered = lf_filtered.with_columns(EventTimestamp=pl.col("TimestampNanoseconds").cast(pl.Datetime("ns")))
+            lf_filtered = lf.filter(
+                pl.col("ListingId").is_in(ref["ListingId"].to_list())
+            )
+            lf_filtered = lf_filtered.with_columns(
+                EventTimestamp=pl.col("TimestampNanoseconds").cast(pl.Datetime("ns"))
+            )
             return lf_filtered.with_columns(
                 TimeBucket=(
                     pl.when(
@@ -219,6 +251,7 @@ class MarketStateTable(DataTable):
                     )
                 ).cast(pl.Datetime("ns"))
             )
+
         return select_and_resample
 
 

@@ -2,29 +2,32 @@ import polars as pl
 import unittest
 from intraday_analytics.tables import L3Table
 
+
 class TestL3TableTransform(unittest.TestCase):
     def test_transform_fn_with_int64_timestamp(self):
         # Create a mock L3 dataframe with Int64 TimestampNanoseconds
         # simulating raw parquet data
-        df = pl.DataFrame({
-            "TimestampNanoseconds": [1609491600000000000], # 2021-01-01 09:00:00
-            "ListingId": [123],
-            "LobAction": [2],
-            "Price": [100.0],
-            "Size": [100],
-            "OldSize": [0],
-            "OldPrice": [0.0],
-            "Side": [1],
-            "ExecutionSize": [0],
-            "ExecutionPrice": [0.0]
-        }).lazy()
+        df = pl.DataFrame(
+            {
+                "TimestampNanoseconds": [1609491600000000000],  # 2021-01-01 09:00:00
+                "ListingId": [123],
+                "LobAction": [2],
+                "Price": [100.0],
+                "Size": [100],
+                "OldSize": [0],
+                "OldPrice": [0.0],
+                "Side": [1],
+                "ExecutionSize": [0],
+                "ExecutionPrice": [0.0],
+            }
+        ).lazy()
 
         ref = pl.DataFrame({"ListingId": [123]})
-        nanoseconds = 60_000_000_000 # 1 minute
+        nanoseconds = 60_000_000_000  # 1 minute
 
         table = L3Table()
         transform_fn = table.get_transform_fn(ref, nanoseconds)
-        
+
         # Apply transformation
         result_lf = transform_fn(df)
         result_df = result_lf.collect()
@@ -32,10 +35,11 @@ class TestL3TableTransform(unittest.TestCase):
         # Check if EventTimestamp exists and is of correct type
         self.assertIn("EventTimestamp", result_df.columns)
         self.assertEqual(result_df["EventTimestamp"].dtype, pl.Datetime("ns"))
-        
+
         # Check if TimeBucket exists and is of correct type
         self.assertIn("TimeBucket", result_df.columns)
         self.assertEqual(result_df["TimeBucket"].dtype, pl.Datetime("ns"))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
