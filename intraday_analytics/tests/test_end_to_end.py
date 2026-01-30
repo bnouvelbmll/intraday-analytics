@@ -79,8 +79,9 @@ class TestEndToEnd(unittest.TestCase):
             FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(
                 self.temp_dir, "final_{start_date}_{end_date}.parquet"
             ),
-            TABLES_TO_LOAD=["trades"],  # Only load trades for this test
+            TABLES_TO_LOAD=["trades"], # Only load trades for this test
             BATCH_FREQ=None,
+            OVERWRITE_TEMP_DIR=True
         )
 
         # Create dummy source files

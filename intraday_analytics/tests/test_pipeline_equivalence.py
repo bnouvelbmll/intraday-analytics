@@ -78,7 +78,7 @@ def create_mock_trades(
             "MIC": ["XAMS"] * len(times),
             "Ticker": ["ABC"] * len(times),
             "CurrencyCode": ["EUR"] * len(times),
-            "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
+            "TimeBucket": times.dt.truncate(f"{int(time_bucket_seconds)}s"),
             "Classification": [
                 classifications[i % len(classifications)] for i in range(len(times))
             ],  # Added Classification
@@ -131,7 +131,7 @@ def create_mock_l2(
             "MIC": ["XAMS"] * len(times),
             "Ticker": ["ABC"] * len(times),
             "CurrencyCode": ["EUR"] * len(times),
-            "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
+            "TimeBucket": times.dt.truncate(f"{int(time_bucket_seconds)}s"),
             "MarketState": ["CONTINUOUS_TRADING"]
             * len(times),  # Added for L2AnalyticsLast
         }
@@ -165,7 +165,7 @@ def create_mock_l3(
             "MIC": ["XAMS"] * len(times),
             "Ticker": ["ABC"] * len(times),
             "CurrencyCode": ["EUR"] * len(times),
-            "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
+            "TimeBucket": times.dt.truncate(f"{int(time_bucket_seconds)}s"),
             "Side": [
                 sides[i % len(sides)] for i in range(len(times))
             ],  # Added Side, now as int
@@ -197,7 +197,7 @@ def create_mock_marketstate(
             "MIC": ["XAMS"] * len(times),
             "Ticker": ["ABC"] * len(times),
             "CurrencyCode": ["EUR"] * len(times),
-            "TimeBucket": times.dt.truncate(f"{time_bucket_seconds}s"),
+            "TimeBucket": times.dt.truncate(f"{int(time_bucket_seconds)}s"),
         }
     )
 

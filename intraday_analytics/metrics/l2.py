@@ -1,12 +1,11 @@
 import polars as pl
 from intraday_analytics import BaseAnalytics, BaseTWAnalytics
-from dataclasses import dataclass
+from pydantic import BaseModel, Field
+from typing import Optional
 
-
-@dataclass
-class L2AnalyticsConfig:
+class L2AnalyticsConfig(BaseModel):
     levels: int = 10
-    time_bucket_seconds: float = None
+    time_bucket_seconds: Optional[float] = None
 
 
 class L2AnalyticsLast(BaseAnalytics):

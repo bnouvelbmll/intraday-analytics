@@ -3,17 +3,16 @@ import pandas as pd
 import datetime as dt
 import logging
 from intraday_analytics import BaseAnalytics, SYMBOL_COL
-from dataclasses import dataclass
-from typing import List
+import logging
+from pydantic import BaseModel, Field
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class DenseAnalyticsConfig:
+class DenseAnalyticsConfig(BaseModel):
     mode: str = "adaptative"
-    time_interval: List[str] = None
-    time_bucket_seconds: float = None
+    time_interval: Optional[List[str]] = None
+    time_bucket_seconds: Optional[float] = None
 
 
 class DenseAnalytics(BaseAnalytics):

@@ -1,10 +1,8 @@
 import polars as pl
 from intraday_analytics import BaseAnalytics, dc
-from dataclasses import dataclass
+from pydantic import BaseModel
 
-
-@dataclass
-class L3AnalyticsConfig:
+class L3AnalyticsConfig(BaseModel):
     """
     These need review before they can be enabled
     """

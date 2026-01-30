@@ -3,3 +3,4 @@ polars
 pyarrow
 viztracer
 joblib
+pydantic==2.7.1

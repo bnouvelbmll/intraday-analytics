@@ -1,10 +1,8 @@
 import polars as pl
 from intraday_analytics import BaseAnalytics
-from dataclasses import dataclass
+from pydantic import BaseModel
 
-
-@dataclass
-class TradeAnalyticsConfig:
+class TradeAnalyticsConfig(BaseModel):
     pass
 
 

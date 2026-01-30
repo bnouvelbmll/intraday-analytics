@@ -117,6 +117,7 @@ class TestEagerExecution(unittest.TestCase):
             TABLES_TO_LOAD=["trades"],
             EAGER_EXECUTION=eager_execution,
             BATCH_FREQ=None,
+            OVERWRITE_TEMP_DIR=True
         )
 
         with patch(
