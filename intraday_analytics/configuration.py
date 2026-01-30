@@ -10,7 +10,6 @@ from .metrics.execution import ExecutionAnalyticsConfig
 class PrepareDataMode(str, Enum):
     NAIVE = "naive"
     S3_SHREDDING = "s3_shredding"
-    S3_SYMB = "s3symb"
 
 class BatchingStrategyType(str, Enum):
     HEURISTIC = "heuristic"
@@ -25,7 +24,6 @@ class AnalyticsConfig:
     # --- Date & Scope ---
     START_DATE: Optional[str] = None
     END_DATE: Optional[str] = None
-    PART_DAYS: int = 7
     EXCLUDE_WEEKENDS: bool = True
     DATASETNAME: str = "sample2d"
     UNIVERSE: Optional[Dict[str, str]] = None
@@ -55,16 +53,13 @@ class AnalyticsConfig:
     DEFAULT_FFILL: bool = False
     DENSE_OUTPUT: bool = True
     MEMORY_PER_WORKER: int = 20
-    METRIC_COMPUTATION: str = "parallel"
-    SEPARATE_METRIC_PROCESS: bool = True
     RUN_ONE_SYMBOL_AT_A_TIME: bool = False
     EAGER_EXECUTION: bool = False
-    DEFAULT_FREQ: Optional[str] = None
+    BATCH_FREQ: Optional[str] = "W"
     LOGGING_LEVEL: str = "INFO"
     TABLES_TO_LOAD: List[str] = field(default_factory=lambda: ["trades", "l2", "l3", "marketstate"])
     
     # --- Profiling ---
-    ENABLE_PROFILER_TOOL: bool = False
     ENABLE_PERFORMANCE_LOGS: bool = True
     ENABLE_POLARS_PROFILING: bool = False
     

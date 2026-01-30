@@ -36,6 +36,11 @@ def process_batch_task(i, temp_dir, current_date, config, pipe):
     Worker function to process a single batch in a separate process.
     """
     try:
+        with open("/tmp/debug_worker.txt", "a") as f:
+            f.write(f"Worker {os.getpid()} processing batch {i} for {current_date}\n")
+            f.write(f"Config TABLES_TO_LOAD: {config.TABLES_TO_LOAD}\n")
+            f.write(f"Temp dir: {temp_dir}\n")
+
         # Load batch data
         batch_data = {}
         for table_name in config.TABLES_TO_LOAD:
@@ -220,7 +225,9 @@ class ProcessInterval(Process):
                 logging.info(f"📊 Computing metrics for date: {current_date.date()}")
                 
                 # Find batches
+                logging.info(f"Listing {TEMP_DIR}: {os.listdir(TEMP_DIR)}")
                 batch_files = glob.glob(os.path.join(TEMP_DIR, "batch-trades-*.parquet"))
+                logging.info(f"Found batch files in {TEMP_DIR}: {batch_files}")
                 batch_indices = sorted([int(f.split("-")[-1].split(".")[0]) for f in batch_files])
                 
                 # Determine max_workers
@@ -281,7 +288,7 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
     )
 
     date_batches = create_date_batches(
-        config.START_DATE, config.END_DATE, config.DEFAULT_FREQ
+        config.START_DATE, config.END_DATE, config.BATCH_FREQ
     )
     logging.info(f"📅 Created {len(date_batches)} date batches.")
 

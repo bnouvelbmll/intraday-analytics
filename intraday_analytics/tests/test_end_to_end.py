@@ -1,5 +1,6 @@
 import unittest
 import polars as pl
+import pandas as pd
 import os
 import shutil
 import tempfile
@@ -61,7 +62,8 @@ class TestEndToEnd(unittest.TestCase):
             MAX_ROWS_PER_TABLE={"trades": 1000},
             CLEAN_UP_TEMP_DIR=False, # Keep for inspection
             FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(self.temp_dir, "final_{start_date}_{end_date}.parquet"),
-            TABLES_TO_LOAD=["trades"] # Only load trades for this test
+            TABLES_TO_LOAD=["trades"], # Only load trades for this test
+            BATCH_FREQ=None
         )
         
         # Create dummy source files
@@ -69,7 +71,7 @@ class TestEndToEnd(unittest.TestCase):
         self.trades_file = os.path.join(self.source_dir, "trades.parquet")
         pl.DataFrame({
             "ListingId": ["A"],
-            "TradeTimestamp": [1],
+            "TradeTimestamp": [pd.Timestamp("2025-01-01 10:00:00").value],
             "Price": [10.0],
             "Size": [100],
             "TradeNotional": [1000.0],
@@ -86,7 +88,7 @@ class TestEndToEnd(unittest.TestCase):
             "AggressorSide": [1],
             "MarketState": ["OPEN"]
         }).with_columns(
-             pl.col("TradeTimestamp").cast(pl.Datetime("ns")).alias("TimeBucket")
+             pl.col("TradeTimestamp").cast(pl.Datetime("ns"))
         ).write_parquet(self.trades_file)
 
     def tearDown(self):

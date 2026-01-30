@@ -24,20 +24,25 @@ We partition the universe of symbols into "batches" such that the data for each 
 -   **Shredding:** We read S3 files in chunks, filter them, join with a `batch_id` map, and write to local partitioned datasets (`/tmp/.../batch_id=X/`).
 -   **Why it works:** This converts the data layout from "Time-partitioned S3 files" (where reading one symbol requires reading the whole file) to "Symbol-batch-partitioned local files". This allows us to load *only* the data needed for the current batch into memory.
 
-## 3. Process Isolation for Computation (The "Spawn" Trick)
+## 3. Process Isolation (The "Spawn" Trick)
 
 **The Trick:**
-We execute the metric computation pipeline for each batch in a **separate, freshly spawned process**.
+We execute both the **S3 shredding** and the **metric computation** phases in **separate, freshly spawned processes**.
 
 **Implementation:**
--   **Location:** `intraday_analytics.execution.ProcessInterval.run` and `process_batch_task`
+-   **Location:** `intraday_analytics.execution.ProcessInterval.run`
 -   **Mechanism:**
     ```python
+    # For Shredding
+    with ProcessPoolExecutor(max_workers=1, mp_context=get_context('spawn')) as executor:
+        executor.submit(shred_data_task, ...)
+
+    # For Computation
     with ProcessPoolExecutor(max_workers=..., mp_context=get_context('spawn')) as executor:
         executor.submit(process_batch_task, ...)
     ```
 -   **Why it works:**
-    1.  **Memory Reclaiming:** Polars (and the underlying Arrow/jemalloc allocators) may not immediately return memory to the OS after a DataFrame is dropped, leading to "memory bloat" over time in a long-running process. By running each batch in a short-lived process, we rely on the OS to reclaim *all* resources (RAM, file descriptors) when the process terminates. This is the only way to guarantee 100% memory cleanup.
+    1.  **Memory Reclaiming:** Polars (and the underlying Arrow/jemalloc allocators) may not immediately return memory to the OS after a DataFrame is dropped, leading to "memory bloat" over time in a long-running process. By running each phase (shredding and computation) in short-lived processes, we rely on the OS to reclaim *all* resources (RAM, file descriptors) when the process terminates. This is the only way to guarantee 100% memory cleanup between days and batches.
     2.  **Deadlock Prevention:** Using `mp_context='spawn'` (instead of the default `fork` on Linux) ensures that the worker process starts with a clean slate. Forking a process that has already initialized a multi-threaded library like Polars (which uses OpenMP or Rust thread pools) can lead to deadlocks. `spawn` avoids this completely.
 
 ## 4. Immediate Cleanup

@@ -24,11 +24,7 @@ import os
 import sys
 import shutil
 import logging
-try:
-    import viztracer
-    from viztracer import VizLoggingHandler, get_tracer
-except ImportError:
-    viztracer = None
+
 
 from intraday_analytics import (
     AnalyticsPipeline, # Re-add AnalyticsPipeline import
@@ -226,20 +222,7 @@ if __name__ == "__main__":
         force=True,
     )
 
-    tracer = None
     ret_code = 0 
-    if CONFIG.ENABLE_PROFILER_TOOL:
-        try:
-            tracer = viztracer.VizTracer(log_multiprocess=True)
-            tracer.start()
-            handler = VizLoggingHandler()
-            handler.setTracer(get_tracer())
-            logging.getLogger().addHandler(handler)
-            logging.info("📊 VizTracer started in main process.")
-        except Exception as e:
-            logging.error(f"Failed to start VizTracer in main process: {e}")
-            tracer = None
-
     try:
         from intraday_analytics.execution import run_metrics_pipeline
         run_metrics_pipeline(CONFIG, get_pipeline, get_universe)
@@ -247,11 +230,5 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"Pipeline failed: {e}", exc_info=True)
         ret_code=1
-
-    finally:
-        if tracer:
-            tracer.stop()
-            logging.info("📊 VizTracer stopped in main process.")
-            tracer.save()
     
     sys.exit(ret_code)

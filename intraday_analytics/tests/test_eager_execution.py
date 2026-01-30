@@ -1,5 +1,6 @@
 import unittest
 import polars as pl
+import pandas as pd
 import os
 import shutil
 import tempfile
@@ -59,7 +60,7 @@ class TestEagerExecution(unittest.TestCase):
         self.trades_file = os.path.join(self.source_dir, "trades.parquet")
         pl.DataFrame({
             "ListingId": ["A"],
-            "TradeTimestamp": [1],
+            "TradeTimestamp": [pd.Timestamp("2025-01-01 10:00:00").value],
             "Price": [10.0],
             "Size": [100],
             "TradeNotional": [1000.0],
@@ -76,7 +77,7 @@ class TestEagerExecution(unittest.TestCase):
             "AggressorSide": [1],
             "MarketState": ["OPEN"]
         }).with_columns(
-             pl.col("TradeTimestamp").cast(pl.Datetime("ns")).alias("TimeBucket")
+             pl.col("TradeTimestamp").cast(pl.Datetime("ns"))
         ).write_parquet(self.trades_file)
 
     def tearDown(self):
@@ -94,7 +95,8 @@ class TestEagerExecution(unittest.TestCase):
             CLEAN_UP_TEMP_DIR=False,
             FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(self.temp_dir, f"final_{eager_execution}_{{start_date}}_{{end_date}}.parquet"),
             TABLES_TO_LOAD=["trades"],
-            EAGER_EXECUTION=eager_execution
+            EAGER_EXECUTION=eager_execution,
+            BATCH_FREQ=None
         )
 
         with patch('intraday_analytics.batching.pl.scan_parquet') as mock_scan_parquet, \
