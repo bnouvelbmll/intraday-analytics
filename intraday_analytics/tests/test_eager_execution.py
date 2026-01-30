@@ -33,6 +33,17 @@ class SyncProcessInterval(ProcessInterval):
     def exitcode(self):
         return self._exitcode
 
+# Helper functions for pickling
+def mock_get_universe(date):
+    return pl.DataFrame({"ListingId": ["A"], "MIC": ["X"], "ISIN": ["I"], "IsPrimary": [True], "IsAlive": [True]})
+
+class MockPipelineFactory:
+    def __init__(self, config):
+        self.config = config
+    
+    def __call__(self, symbols=None, ref=None, date=None):
+        return AnalyticsPipeline([TradeAnalytics(self.config.trade_analytics)], self.config)
+
 class TestEagerExecution(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -109,13 +120,10 @@ class TestEagerExecution(unittest.TestCase):
             # Mock bmll2 storage paths
             mock_storage_paths.return_value = {"user": {"bucket": "b", "prefix": "p"}}
 
-            # Mock get_universe
-            def mock_get_universe(date):
-                return pl.DataFrame({"ListingId": ["A"], "MIC": ["X"], "ISIN": ["I"], "IsPrimary": [True], "IsAlive": [True]})
-
-            # Mock get_pipeline
-            def mock_get_pipeline(symbols=None, ref=None, date=None):
-                 return AnalyticsPipeline([TradeAnalytics(config.trade_analytics)], config)
+            # Use module-level mock_get_universe
+            
+            # Use module-level MockPipelineFactory
+            mock_get_pipeline = MockPipelineFactory(config)
 
             run_metrics_pipeline(config, mock_get_pipeline, mock_get_universe)
             

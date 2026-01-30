@@ -65,6 +65,47 @@ def process_batch_task(i, temp_dir, current_date, config, pipe):
         raise e
 
 
+def shred_data_task(
+    s3_file_lists,
+    table_definitions,
+    ref,
+    nanoseconds,
+    config,
+    current_date,
+    temp_dir,
+    get_universe,
+):
+    """
+    Worker function to run S3 shredding in a separate process.
+    """
+    try:
+        # Reconstruct transform_fns inside the worker
+        transform_fns = {
+            table.name: table.get_transform_fn(ref, nanoseconds)
+            for table in table_definitions
+        }
+
+        sbs = S3SymbolBatcher(
+            s3_file_lists=s3_file_lists,
+            transform_fns=transform_fns,
+            batching_strategy=HeuristicBatchingStrategy(
+                SymbolSizeEstimator(current_date, get_universe),
+                config.MAX_ROWS_PER_TABLE,
+            ),
+            temp_dir=temp_dir,
+            storage_options=config.S3_STORAGE_OPTIONS,
+            date=current_date,
+            get_universe=get_universe,
+            memory_per_worker=config.MEMORY_PER_WORKER,
+        )
+
+        sbs.process(num_workers=config.NUM_WORKERS)
+        return True
+    except Exception as e:
+        logging.error(f"Shredding task failed: {e}", exc_info=True)
+        raise e
+
+
 class ProcessInterval(Process):
     """
     A multiprocessing.Process subclass for preparing data for the analytics pipeline.
@@ -142,7 +183,7 @@ class ProcessInterval(Process):
                             )
 
                 elif MODE == "s3_shredding":
-                    logging.info("🚚 Starting S3 Shredding...")
+                    logging.info("🚚 Starting S3 Shredding (Spawned Process)...")
 
                     tables_to_load_names = self.config.TABLES_TO_LOAD
 
@@ -155,26 +196,21 @@ class ProcessInterval(Process):
                         )
 
                     table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
-                    transform_fns = {
-                        table.name: table.get_transform_fn(ref, nanoseconds)
-                        for table in table_definitions
-                    }
                     
-                    sbs = S3SymbolBatcher(
-                        s3_file_lists=s3_file_lists,
-                        transform_fns=transform_fns,
-                        batching_strategy=HeuristicBatchingStrategy(
-                            SymbolSizeEstimator(current_date, self.get_universe),
-                            self.config.MAX_ROWS_PER_TABLE,
-                        ),
-                        temp_dir=TEMP_DIR,
-                        storage_options=self.config.S3_STORAGE_OPTIONS,
-                        date=current_date, 
-                        get_universe=self.get_universe,
-                        memory_per_worker=self.config.MEMORY_PER_WORKER,
-                    )
-
-                    sbs.process(num_workers=self.config.NUM_WORKERS)
+                    # Run shredding in a separate process to ensure memory cleanup
+                    with ProcessPoolExecutor(max_workers=1, mp_context=get_context('spawn')) as executor:
+                        future = executor.submit(
+                            shred_data_task,
+                            s3_file_lists,
+                            table_definitions,
+                            ref,
+                            nanoseconds,
+                            self.config,
+                            current_date,
+                            TEMP_DIR,
+                            self.get_universe
+                        )
+                        future.result() # Wait for completion and raise exceptions
 
                 else:
                     logging.error(f"Unknown PREPARE_DATA_MODE: {MODE}")
