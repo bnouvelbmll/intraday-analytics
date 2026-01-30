@@ -80,7 +80,7 @@ class AnalyticsConfig:
     """
 
     MAX_ROWS_PER_TABLE: Dict[str, int] = field(
-        default_factory=lambda: {"trades": 500_000, "l2": 2_000_000, "l3": 10_000_000}
+        default_factory=lambda: {"trades": 250_000, "l2": 1_000_000, "l3": 5_000_000}
     )
     """
     The maximum number of rows per table to load into memory for a single batch.

@@ -25,7 +25,6 @@ import sys
 import shutil
 import logging
 
-
 from intraday_analytics import (
     AnalyticsPipeline,  # Re-add AnalyticsPipeline import
     DEFAULT_CONFIG,
@@ -66,6 +65,9 @@ USER_CONFIG = {
     # Example: "FINAL_OUTPUT_PATH_TEMPLATE": "s3://custom-bucket/analytics/{datasetname}/{start_date}_{end_date}.parquet"
     "S3_STORAGE_OPTIONS": {"region": "us-east-1"},  # Example S3 storage options
     # "LOGGING_LEVEL": "debug",
+    "EAGER_EXECUTION": True,
+    "ENABLE_PROFILER_TOOL": False,
+    "MEMORY_PER_WORKER": 35,
 }
 
 config_data = {**DEFAULT_CONFIG, **USER_CONFIG}
