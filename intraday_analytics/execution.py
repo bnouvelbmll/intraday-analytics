@@ -2,6 +2,7 @@ import os
 import pickle
 from multiprocessing import Process, get_context
 import logging
+import inspect
 from joblib import Parallel, delayed
 import glob
 import polars as pl
@@ -45,6 +46,49 @@ class _GetUniverseWrapper:
 
     def __call__(self, date_value):
         return self._func(_coerce_to_iso_date(date_value))
+
+
+def _derive_tables_to_load(pass_config, user_tables):
+    from .analytics.dense import DenseAnalytics
+    from .analytics.trade import TradeAnalytics
+    from .analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
+    from .analytics.l3 import L3Analytics
+    from .analytics.execution import ExecutionAnalytics
+    from .analytics.generic import GenericAnalytics
+
+    module_requires = {
+        "dense": DenseAnalytics.REQUIRES,
+        "trade": TradeAnalytics.REQUIRES,
+        "l2": L2AnalyticsLast.REQUIRES,
+        "l2tw": L2AnalyticsTW.REQUIRES,
+        "l3": L3Analytics.REQUIRES,
+        "execution": ExecutionAnalytics.REQUIRES,
+        "generic": GenericAnalytics.REQUIRES,
+    }
+
+    tables = []
+
+    def add_table(name):
+        if name not in tables:
+            tables.append(name)
+
+    if user_tables:
+        for name in user_tables:
+            add_table(name)
+
+    for module in pass_config.modules:
+        for name in module_requires.get(module, []):
+            add_table(name)
+
+    return tables
+
+
+def _call_get_pipeline(get_pipeline, **kwargs):
+    sig = inspect.signature(get_pipeline)
+    if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
+        return get_pipeline(**kwargs)
+    filtered = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    return get_pipeline(**filtered)
 
 
 def process_batch_task(i, temp_dir, current_date, config, pipe):
@@ -286,6 +330,10 @@ class ProcessInterval(Process):
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         )
 
+        self.config.TABLES_TO_LOAD = _derive_tables_to_load(
+            self.pass_config, self.config.TABLES_TO_LOAD
+        )
+
         context = {}
         if os.path.exists(self.context_path):
             with open(self.context_path, "rb") as f:
@@ -312,12 +360,14 @@ class ProcessInterval(Process):
                     raise e
 
                 symbols = ref["ListingId"].unique().to_list()
-                pipe = self.get_pipeline(
+                pipe = _call_get_pipeline(
+                    self.get_pipeline,
                     pass_config=self.pass_config,
                     context=context,
                     ref=ref,
                     date=current_date.date().isoformat(),
                     symbols=symbols,
+                    config=self.config,
                 )
                 nanoseconds = int(self.pass_config.time_bucket_seconds * 1e9)
 

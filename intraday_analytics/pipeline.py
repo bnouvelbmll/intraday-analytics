@@ -345,4 +345,8 @@ def create_pipeline(
         else:
             logging.warning(f"Module '{module_name}' not recognized in factory.")
 
-    return AnalyticsPipeline(modules, pass_config, context)
+    config = kwargs.get("config")
+    if config is None:
+        raise ValueError("create_pipeline requires config=AnalyticsConfig")
+
+    return AnalyticsPipeline(modules, config, pass_config, context)

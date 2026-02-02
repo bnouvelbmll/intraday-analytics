@@ -11,8 +11,6 @@ from intraday_analytics.configuration import (
     PassConfig,
     PrepareDataMode,
 )
-from intraday_analytics.pipeline import AnalyticsPipeline
-from intraday_analytics.analytics.trade import TradeAnalytics
 
 # Capture real scan_parquet before any patching
 REAL_SCAN_PARQUET = pl.scan_parquet
@@ -44,23 +42,15 @@ class SyncProcessInterval(ProcessInterval):
 def mock_get_universe(date):
     return pl.DataFrame(
         {
-            "ListingId": ["A"],
+            "ListingId": [1],
             "MIC": ["X"],
             "ISIN": ["I"],
+            "Ticker": ["ABC"],
+            "CurrencyCode": ["EUR"],
             "IsPrimary": [True],
             "IsAlive": [True],
         }
     )
-
-
-class MockPipelineFactory:
-    def __init__(self, config):
-        self.config = config
-
-    def __call__(self, symbols=None, ref=None, date=None):
-        return AnalyticsPipeline(
-            [TradeAnalytics(self.config.trade_analytics)], self.config
-        )
 
 
 class TestEndToEnd(unittest.TestCase):
@@ -79,13 +69,12 @@ class TestEndToEnd(unittest.TestCase):
             PASSES=[
                 PassConfig(
                     name="pass1",
-                    modules=["trade"],
+                    modules=["dense", "trade"],
                 )
             ],
             FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(
                 self.temp_dir, "final_{datasetname}_{start_date}_{end_date}.parquet"
             ),
-            TABLES_TO_LOAD=["trades"],
             CLEAN_UP_TEMP_DIR=False,
             BATCH_FREQ=None,
         )
@@ -93,9 +82,10 @@ class TestEndToEnd(unittest.TestCase):
         # Create dummy source files
         self.source_dir = tempfile.mkdtemp()
         self.trades_file = os.path.join(self.source_dir, "trades.parquet")
+        self.marketstate_file = os.path.join(self.source_dir, "marketstate.parquet")
         pl.DataFrame(
             {
-                "ListingId": ["A"],
+                "ListingId": [1],
                 "TradeTimestamp": [pd.Timestamp("2025-01-01 10:00:00").value],
                 "Price": [10.0],
                 "Size": [100],
@@ -112,6 +102,17 @@ class TestEndToEnd(unittest.TestCase):
             }
         ).write_parquet(self.trades_file)
 
+        pl.DataFrame(
+            {
+                "ListingId": [1, 1],
+                "TimestampNanoseconds": [
+                    pd.Timestamp("2025-01-01 10:00:00").value,
+                    pd.Timestamp("2025-01-01 10:05:00").value,
+                ],
+                "MarketState": ["CONTINUOUS_TRADING", "CLOSED"],
+            }
+        ).write_parquet(self.marketstate_file)
+
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
         shutil.rmtree(self.source_dir)
@@ -119,17 +120,36 @@ class TestEndToEnd(unittest.TestCase):
     @patch(
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
+    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
     @patch("intraday_analytics.execution.get_files_for_date_range")
-    def test_run_pipeline(self, mock_get_files, mock_process_interval):
-        mock_get_files.return_value = [self.trades_file]
+    @patch("intraday_analytics.execution.ProcessPoolExecutor")
+    def test_run_pipeline(
+        self,
+        mock_process_pool_executor,
+        mock_get_files,
+        mock_as_completed,
+        mock_process_interval,
+    ):
+        def mock_files(sd, ed, mics, table_name, **kwargs):
+            if table_name == "trades":
+                return [self.trades_file]
+            if table_name == "marketstate":
+                return [self.marketstate_file]
+            return []
 
-        def get_pipeline(pass_config, context, symbols=None, ref=None, date=None):
-            modules = [TradeAnalytics(pass_config.trade_analytics)]
-            return AnalyticsPipeline(modules, self.config, pass_config, context)
+        mock_get_files.side_effect = mock_files
 
-        run_metrics_pipeline(
-            config=self.config, get_universe=mock_get_universe, get_pipeline=get_pipeline
+        def mock_submit(fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            mock_future = MagicMock()
+            mock_future.result.return_value = True
+            return mock_future
+
+        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = (
+            mock_submit
         )
+
+        run_metrics_pipeline(config=self.config, get_universe=mock_get_universe)
 
         expected_out = os.path.join(
             self.temp_dir, "final_sample2d_pass1_2025-01-01_2025-01-01.parquet"
@@ -137,8 +157,9 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(os.path.exists(expected_out))
 
         df = pl.read_parquet(expected_out)
-        self.assertEqual(len(df), 1)
-        self.assertEqual(df["ListingId"][0], "A")
+        self.assertGreater(len(df), 0)
+        self.assertEqual(df["ListingId"].dtype, pl.Int64)
+        self.assertIn(1, df["ListingId"].to_list())
 
 
 if __name__ == "__main__":

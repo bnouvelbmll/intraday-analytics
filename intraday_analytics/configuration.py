@@ -86,9 +86,7 @@ class AnalyticsConfig(BaseModel):
     EAGER_EXECUTION: bool = False
     BATCH_FREQ: Optional[str] = "W"
     LOGGING_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    TABLES_TO_LOAD: List[str] = Field(
-        default_factory=lambda: ["trades", "l2", "l3", "marketstate"], min_length=1
-    )
+    TABLES_TO_LOAD: Optional[List[str]] = None
 
     # --- Profiling ---
     ENABLE_PERFORMANCE_LOGS: bool = True
