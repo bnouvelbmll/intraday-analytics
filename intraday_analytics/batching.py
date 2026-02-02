@@ -12,7 +12,11 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.dataset as ds
 
-from intraday_analytics.utils import SYMBOL_COL, get_total_system_memory_gb
+from intraday_analytics.utils import (
+    SYMBOL_COL,
+    get_total_system_memory_gb,
+    filter_existing_s3_files,
+)
 
 
 class SymbolBatcherStreaming:
@@ -213,6 +217,42 @@ class SymbolSizeEstimator:
                 },
             )
 
+        if "ListingId" not in universe.columns or "MIC" not in universe.columns:
+            logging.warning(
+                f"Universe for size estimates on {self.date} is missing required columns "
+                f"(ListingId, MIC). Got columns: {universe.columns}"
+            )
+            return pl.DataFrame(
+                {SYMBOL_COL: [], "table_name": [], "estimated_rows": []},
+                schema={
+                    SYMBOL_COL: pl.Utf8,
+                    "table_name": pl.Utf8,
+                    "estimated_rows": pl.UInt64,
+                },
+            )
+
+        universe_pd = universe.to_pandas()
+        before_count = len(universe_pd)
+        universe_pd = universe_pd.dropna(subset=["ListingId", "MIC"])
+        dropped = before_count - len(universe_pd)
+        if dropped:
+            logging.warning(
+                f"Dropped {dropped} universe rows with null ListingId/MIC for size estimates on {self.date}."
+            )
+
+        if universe_pd.empty:
+            logging.warning(
+                f"No valid ListingId/MIC rows available for size estimates on {self.date}."
+            )
+            return pl.DataFrame(
+                {SYMBOL_COL: [], "table_name": [], "estimated_rows": []},
+                schema={
+                    SYMBOL_COL: pl.Utf8,
+                    "table_name": pl.Utf8,
+                    "estimated_rows": pl.UInt64,
+                },
+            )
+
         end_date_m2w = (
             (pd.Timestamp(self.date) - pd.Timedelta(days=14)).date().isoformat()
         )
@@ -234,13 +274,15 @@ class SymbolSizeEstimator:
                 return res
             except Exception as e:
                 logging.warning(
-                    f"Could not load size estimates for mic {mic}. Error: {e}"
+                    f"Could not load size estimates for mic {mic} "
+                    f"(listings={len(group)}, date_range={end_date_m2w}->{self.date}). "
+                    f"Error: {e}"
                 )
                 return None
 
         all_res = []
         # Assuming 'mic' column exists in the universe dataframe
-        mic_groups = list(universe.to_pandas().groupby("MIC"))
+        mic_groups = list(universe_pd.groupby("MIC"))
 
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {
@@ -253,7 +295,10 @@ class SymbolSizeEstimator:
                     all_res.append(res)
 
         if not all_res:
-            logging.warning("Could not load size estimates for any mic.")
+            logging.warning(
+                f"Could not load size estimates for any mic "
+                f"(mics={len(mic_groups)}, listings={len(universe_pd)})."
+            )
             return pl.DataFrame(
                 {SYMBOL_COL: [], "table_name": [], "estimated_rows": []},
                 schema={
@@ -460,6 +505,12 @@ def _process_s3_chunk(
     the data with a batch ID map, and writes the results to local partitioned
     folders. This is a core part of the distributed data processing workflow.
     """
+    s3_files = filter_existing_s3_files(s3_files, storage_options)
+    if not s3_files:
+        logging.warning(
+            f"No readable files found for table {table_name} (worker {worker_id})."
+        )
+        return
     try:
         # Optimistic path: Try reading all files at once
         lf = pl.scan_parquet(s3_files, storage_options=storage_options)
@@ -649,9 +700,15 @@ class S3SymbolBatcher:
                     # transform_fn = self.transform_fns.get(name, lambda x: x)
 
                     if path.exists():
+                        parquet_files = glob.glob(str(path / "*.parquet"))
+                        if not parquet_files:
+                            logging.warning(f"{path} has no parquet files...")
+                            batch_data[name] = pl.DataFrame()
+                            continue
+
                         # Read the local parquet shards
                         lf = pl.scan_parquet(
-                            str(path / "*.parquet"),
+                            parquet_files,
                             storage_options={"region": "us-east-1"},
                         )
 

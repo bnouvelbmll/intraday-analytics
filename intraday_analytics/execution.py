@@ -223,12 +223,19 @@ class ProcessInterval(Process):
         # 1. Identify input files and create LazyFrames
         lf_dict = {}
         mics = ref["MIC"].unique().to_list()
-        for table_name in self.config.TABLES_TO_LOAD:
+            for table_name in self.config.TABLES_TO_LOAD:
             files = get_files_for_date_range(
                 current_date, current_date, mics, table_name
             )
             if files:
-                lf = pl.scan_parquet(files)
+                try:
+                    lf = pl.scan_parquet(files)
+                except Exception as e:
+                    logging.warning(
+                        f"Skipping table {table_name} for {current_date.date()} due to "
+                        f"read error: {e}"
+                    )
+                    continue
                 table = ALL_TABLES.get(table_name)
                 if table:
                     lf = table.post_load_process(lf, ref, nanoseconds)

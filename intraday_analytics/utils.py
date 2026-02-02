@@ -161,6 +161,60 @@ def retry_s3(fn, *, attempts=4, base_delay=1.0, factor=5.0, max_delay=300.0, des
             time.sleep(delay)
 
 
+def filter_existing_s3_files(paths, storage_options=None):
+    if not paths:
+        return []
+    if not all(is_s3_path(p) for p in paths):
+        return paths
+
+    storage_options = storage_options or {}
+    existing = []
+
+    try:
+        import fsspec
+
+        fs = fsspec.filesystem("s3", **storage_options)
+        for p in paths:
+            try:
+                if fs.exists(p):
+                    existing.append(p)
+            except Exception:
+                existing.append(p)
+        return existing
+    except Exception:
+        pass
+
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        client = boto3.client(
+            "s3",
+            region_name=storage_options.get("region"),
+            aws_access_key_id=storage_options.get("key"),
+            aws_secret_access_key=storage_options.get("secret"),
+            aws_session_token=storage_options.get("token"),
+        )
+
+        for p in paths:
+            try:
+                _, _, rest = p.partition("s3://")
+                bucket, _, key = rest.partition("/")
+                client.head_object(Bucket=bucket, Key=key)
+                existing.append(p)
+            except ClientError as e:
+                code = e.response.get("Error", {}).get("Code", "")
+                if code in {"404", "NoSuchKey", "NotFound"}:
+                    continue
+                existing.append(p)
+            except Exception:
+                existing.append(p)
+        return existing
+    except Exception:
+        logging.warning("S3 existence checks unavailable; proceeding without prefilter.")
+        return paths
+
+
 def preload(
     sd, ed, ref, nanoseconds, tables: list[DataTable]
 ) -> dict[str, pl.LazyFrame]:
