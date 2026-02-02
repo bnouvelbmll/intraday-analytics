@@ -87,21 +87,19 @@ class TestMultiPassPipeline(unittest.TestCase):
         self.trades_file = os.path.join(self.source_dir, "trades.parquet")
         pl.DataFrame(
             {
-                "ListingId": ["A", "A"],
-                "TradeTimestamp": [
-                    pd.Timestamp("2025-01-01 10:00:00").value,
-                    pd.Timestamp("2025-01-01 10:01:00").value,
-                ],
-                "Size": [100, 200],
-                "Classification": ["LIT_CONTINUOUS", "LIT_CONTINUOUS"],
-                "LocalPrice": [10.0, 10.1],
-                "MarketState": ["OPEN", "OPEN"],
-                "Ticker": ["ABC", "ABC"],
-                "MIC": ["X", "X"],
-                "PricePoint": [0.5, 0.5],
-                "BMLLParticipantType": ["RETAIL", "RETAIL"],
-                "AggressorSide": [1, 2],
-                "TradeNotionalEUR": [1000.0, 2000.0],
+                "ListingId": ["A"],
+                "TradeTimestamp": [pd.Timestamp("2025-01-01 10:00:00").value],
+                "Size": [100],
+                "Classification": ["LIT_CONTINUOUS"],
+                "LocalPrice": [100.0],
+                "MarketState": ["OPEN"],
+                "Ticker": ["ABC"],
+                "MIC": ["X"],
+                "PricePoint": [0.5],
+                "BMLLParticipantType": ["RETAIL"],
+                "AggressorSide": [1],
+                "TradeNotional": [10000.0],
+                "TradeNotionalEUR": [10000.0],
             }
         ).write_parquet(self.trades_file)
 
@@ -127,7 +125,9 @@ class TestMultiPassPipeline(unittest.TestCase):
             modules = [TradeAnalytics(pass_config.trade_analytics)]
             return AnalyticsPipeline(modules, self.config, pass_config, context)
 
-        run_metrics_pipeline(self.config, get_pipeline, mock_get_universe)
+        run_metrics_pipeline(
+            config=self.config, get_universe=mock_get_universe, get_pipeline=get_pipeline
+        )
 
         # Verify output of the first pass
         expected_out_pass1 = os.path.join(

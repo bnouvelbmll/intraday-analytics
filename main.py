@@ -244,10 +244,10 @@ if __name__ == "__main__":
             logging.info(f"Starting pass: {pass_config.name}")
             run_metrics_pipeline(
                 CONFIG,
-                lambda symbols, ref, date: get_pipeline(
+                get_pipeline=lambda symbols, ref, date: get_pipeline(
                     pass_config, context, symbols, ref, date
                 ),
-                get_universe,
+                get_universe=get_universe,
             )
 
     except Exception as e:

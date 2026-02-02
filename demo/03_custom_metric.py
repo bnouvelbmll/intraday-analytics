@@ -14,7 +14,8 @@ import os
 import logging
 import bmll.reference
 import polars as pl
-from intraday_analytics.pipeline import BaseAnalytics, AnalyticsPipeline
+from intraday_analytics.bases import BaseAnalytics
+from intraday_analytics.pipeline import AnalyticsPipeline, create_pipeline
 from intraday_analytics.execution import run_metrics_pipeline
 from intraday_analytics.analytics.dense import DenseAnalytics, DenseAnalyticsConfig
 from intraday_analytics.analytics.trade import TradeAnalytics, TradeAnalyticsConfig
@@ -107,8 +108,8 @@ if __name__ == "__main__":
     config = AnalyticsConfig(**USER_CONFIG)
 
     run_metrics_pipeline(
-        config,
-        get_universe,
+        config=config,
+        get_universe=get_universe,
         get_pipeline=get_pipeline,
     )
 

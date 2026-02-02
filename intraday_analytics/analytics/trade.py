@@ -1,7 +1,7 @@
 import polars as pl
-from intraday_analytics.pipeline import BaseAnalytics
+from intraday_analytics.bases import BaseAnalytics
 from pydantic import BaseModel, Field
-from typing import List, Union, Literal, Optional, Dict, Callable
+from typing import List, Union, Literal, Optional
 from .common import CombinatorialMetricConfig, Side, AggregationMethod
 from .utils import apply_market_state_filter, apply_alias, MetricGenerator
 

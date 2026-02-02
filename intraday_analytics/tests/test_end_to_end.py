@@ -107,6 +107,7 @@ class TestEndToEnd(unittest.TestCase):
                 "PricePoint": [0.5],
                 "BMLLParticipantType": ["RETAIL"],
                 "AggressorSide": [1],
+                "TradeNotional": [1000.0],                
                 "TradeNotionalEUR": [1000.0],
             }
         ).write_parquet(self.trades_file)
@@ -126,7 +127,9 @@ class TestEndToEnd(unittest.TestCase):
             modules = [TradeAnalytics(pass_config.trade_analytics)]
             return AnalyticsPipeline(modules, self.config, pass_config, context)
 
-        run_metrics_pipeline(self.config, get_pipeline, mock_get_universe)
+        run_metrics_pipeline(
+            config=self.config, get_universe=mock_get_universe, get_pipeline=get_pipeline
+        )
 
         expected_out = os.path.join(
             self.temp_dir, "final_sample2d_pass1_2025-01-01_2025-01-01.parquet"

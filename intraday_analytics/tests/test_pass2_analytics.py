@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import shutil
 import tempfile
+import pickle
 from unittest.mock import MagicMock, patch
 
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig
@@ -34,11 +35,16 @@ class SyncProcessInterval(ProcessInterval):
     def exitcode(self):
         return self._exitcode
 
+    def update_and_persist_context(self, pipe, final_path):
+        # Persist in-memory context for tests to avoid filesystem dependency.
+        with open(self.context_path, "wb") as f:
+            pickle.dump(pipe.context, f)
+
 
 def mock_get_universe(date):
     return pl.DataFrame(
         {
-            "ListingId": ["A", "B"],
+            "ListingId": [1, 2],
             "MIC": ["X", "X"],
             "InstrumentId": [1, 1],  # Both listings belong to same instrument
             "Ticker": ["ABC", "DEF"],
@@ -67,7 +73,7 @@ class TestPass2Analytics(unittest.TestCase):
 
         pl.DataFrame(
             {
-                "ListingId": ["A", "A", "A", "B", "B", "B"],
+                "ListingId": [1, 1, 1, 2, 2, 2],
                 "TradeTimestamp": [
                     ts_base.value,
                     (ts_base + pd.Timedelta(minutes=1)).value,
@@ -86,6 +92,43 @@ class TestPass2Analytics(unittest.TestCase):
                 "PricePoint": [0.5] * 6,
                 "BMLLParticipantType": ["RETAIL"] * 6,
                 "AggressorSide": [1] * 6,
+                "TradeNotional": [1000.0, 1100.0, 1200.0, 2000.0, 2100.0, 2200.0],
+                "TradeNotionalEUR": [1000.0, 1100.0, 1200.0, 2000.0, 2100.0, 2200.0],
+            }
+        ).write_parquet(self.trades_file)
+
+        self.temp_dir = tempfile.mkdtemp()
+        self.source_dir = tempfile.mkdtemp()
+        self.trades_file = os.path.join(self.source_dir, "trades.parquet")
+
+        # Create dummy trades for 2 listings of same instrument
+        # Listing A: Price 10, 11, 12
+        # Listing B: Price 20, 21, 22
+        # Timestamps: 10:00, 10:01, 10:02
+        ts_base = pd.Timestamp("2025-01-01 10:00:00")
+
+        pl.DataFrame(
+            {
+                "ListingId": [1, 1, 1, 2, 2, 2],
+                "TradeTimestamp": [
+                    ts_base.value,
+                    (ts_base + pd.Timedelta(minutes=1)).value,
+                    (ts_base + pd.Timedelta(minutes=2)).value,
+                    ts_base.value,
+                    (ts_base + pd.Timedelta(minutes=1)).value,
+                    (ts_base + pd.Timedelta(minutes=2)).value,
+                ],
+                "Price": [10.0, 11.0, 12.0, 20.0, 21.0, 22.0],
+                "Size": [100, 100, 100, 100, 100, 100],
+                "Classification": ["LIT_CONTINUOUS"] * 6,
+                "LocalPrice": [10.0, 11.0, 12.0, 20.0, 21.0, 22.0],
+                "MarketState": ["OPEN"] * 6,
+                "Ticker": ["ABC", "ABC", "ABC", "DEF", "DEF", "DEF"],
+                "MIC": ["X"] * 6,
+                "PricePoint": [0.5] * 6,
+                "BMLLParticipantType": ["RETAIL"] * 6,
+                "AggressorSide": [1] * 6,
+                "TradeNotional": [1000.0, 1100.0, 1200.0, 2000.0, 2100.0, 2200.0],
                 "TradeNotionalEUR": [1000.0, 1100.0, 1200.0, 2000.0, 2100.0, 2200.0],
             }
         ).write_parquet(self.trades_file)
@@ -109,8 +152,14 @@ class TestPass2Analytics(unittest.TestCase):
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
     @patch("intraday_analytics.execution.get_files_for_date_range")
+    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
+    @patch("bmll.time_series.query")
+    @patch("intraday_analytics.execution.ProcessPoolExecutor")
     def test_pass2_aggregation_by_instrument(
         self,
+        mock_process_pool_executor,
+        mock_api_timeseries_query,
+        mock_as_completed,
         mock_get_files,
         mock_process_interval,
         mock_get_s3_path_process,
@@ -127,6 +176,23 @@ class TestPass2Analytics(unittest.TestCase):
 
         mock_get_s3_path_process.side_effect = side_effect_s3_path
         mock_get_s3_path_exec.side_effect = side_effect_s3_path
+
+        # Mock ProcessPoolExecutor to run shred_data_task synchronously
+        def mock_submit(fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            mock_future = MagicMock()
+            mock_future.result.return_value = True
+            return mock_future
+
+        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = mock_submit
+
+        # Mock bmll.time_series.query for SymbolSizeEstimator
+        mock_api_timeseries_query.return_value = pl.DataFrame(
+            {
+                "ObjectId": [1, 2],
+                "TradeCount|Lit": [100, 100],
+            }
+        ).to_pandas()
 
         # Pass 1: Trade Analytics (1 min buckets)
         # Pass 2: Aggregate by InstrumentId
@@ -161,7 +227,11 @@ class TestPass2Analytics(unittest.TestCase):
                 modules.append(ga)
             return AnalyticsPipeline(modules, self.config, pass_config, context)
 
-        run_metrics_pipeline(self.config, get_pipeline, mock_get_universe)
+        run_metrics_pipeline(
+            config=self.config,
+            get_universe=mock_get_universe,
+            get_pipeline=get_pipeline,
+        )
 
         expected_out = os.path.join(
             self.temp_dir, "final_sample2d_pass2_2025-01-01_2025-01-01.parquet"
@@ -181,8 +251,14 @@ class TestPass2Analytics(unittest.TestCase):
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
     @patch("intraday_analytics.execution.get_files_for_date_range")
+    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
+    @patch("bmll.time_series.query")
+    @patch("intraday_analytics.execution.ProcessPoolExecutor")
     def test_pass2_resampling(
         self,
+        mock_process_pool_executor,
+        mock_api_timeseries_query,
+        mock_as_completed,
         mock_get_files,
         mock_process_interval,
         mock_get_s3_path_process,
@@ -199,6 +275,23 @@ class TestPass2Analytics(unittest.TestCase):
 
         mock_get_s3_path_process.side_effect = side_effect_s3_path
         mock_get_s3_path_exec.side_effect = side_effect_s3_path
+
+        # Mock ProcessPoolExecutor to run shred_data_task synchronously
+        def mock_submit(fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            mock_future = MagicMock()
+            mock_future.result.return_value = True
+            return mock_future
+
+        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = mock_submit
+
+        # Mock bmll.time_series.query for SymbolSizeEstimator
+        mock_api_timeseries_query.return_value = pl.DataFrame(
+            {
+                "ObjectId": [1, 2],
+                "TradeCount|Lit": [100, 100],
+            }
+        ).to_pandas()
 
         self.config.PASSES = [
             PassConfig(name="pass1", modules=["trade"], time_bucket_seconds=60),
@@ -227,7 +320,11 @@ class TestPass2Analytics(unittest.TestCase):
                 modules.append(ga)
             return AnalyticsPipeline(modules, self.config, pass_config, context)
 
-        run_metrics_pipeline(self.config, get_pipeline, mock_get_universe)
+        run_metrics_pipeline(
+            config=self.config,
+            get_universe=mock_get_universe,
+            get_pipeline=get_pipeline,
+        )
 
         expected_out = os.path.join(
             self.temp_dir, "final_sample2d_pass2_2025-01-01_2025-01-01.parquet"
@@ -246,8 +343,14 @@ class TestPass2Analytics(unittest.TestCase):
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
     @patch("intraday_analytics.execution.get_files_for_date_range")
+    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
+    @patch("bmll.time_series.query")
+    @patch("intraday_analytics.execution.ProcessPoolExecutor")
     def test_pass2_talib(
         self,
+        mock_process_pool_executor,
+        mock_api_timeseries_query,
+        mock_as_completed,
         mock_get_files,
         mock_process_interval,
         mock_get_s3_path_process,
@@ -264,6 +367,23 @@ class TestPass2Analytics(unittest.TestCase):
 
         mock_get_s3_path_process.side_effect = side_effect_s3_path
         mock_get_s3_path_exec.side_effect = side_effect_s3_path
+
+        # Mock ProcessPoolExecutor to run shred_data_task synchronously
+        def mock_submit(fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            mock_future = MagicMock()
+            mock_future.result.return_value = True
+            return mock_future
+
+        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = mock_submit
+
+        # Mock bmll.time_series.query for SymbolSizeEstimator
+        mock_api_timeseries_query.return_value = pl.DataFrame(
+            {
+                "ObjectId": [1, 2],
+                "TradeCount|Lit": [100, 100],
+            }
+        ).to_pandas()
 
         self.config.PASSES = [
             PassConfig(name="pass1", modules=["trade"], time_bucket_seconds=60),
@@ -293,7 +413,11 @@ class TestPass2Analytics(unittest.TestCase):
                 modules.append(ga)
             return AnalyticsPipeline(modules, self.config, pass_config, context)
 
-        run_metrics_pipeline(self.config, get_pipeline, mock_get_universe)
+        run_metrics_pipeline(
+            config=self.config,
+            get_universe=mock_get_universe,
+            get_pipeline=get_pipeline,
+        )
 
         expected_out = os.path.join(
             self.temp_dir, "final_sample2d_pass2_2025-01-01_2025-01-01.parquet"
@@ -303,7 +427,7 @@ class TestPass2Analytics(unittest.TestCase):
         df = pl.read_parquet(expected_out)
         # Check SMA
         # Listing A: Close 10, 11, 12. SMA(2): NaN, 10.5, 11.5
-        df_a = df.filter(pl.col("ListingId") == "A").sort("TimeBucket")
+        df_a = df.filter(pl.col("ListingId") == 1).sort("TimeBucket")
         sma = df_a["SMA_2"].to_list()
         self.assertTrue(pd.isna(sma[0]))
         self.assertEqual(sma[1], 10.5)

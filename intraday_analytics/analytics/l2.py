@@ -1,5 +1,5 @@
 import polars as pl
-from intraday_analytics.pipeline import BaseAnalytics, BaseTWAnalytics
+from intraday_analytics.bases import BaseAnalytics, BaseTWAnalytics
 from pydantic import BaseModel, Field
 from typing import Optional, List, Union, Literal
 from .common import CombinatorialMetricConfig, Side, AggregationMethod

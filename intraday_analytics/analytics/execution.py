@@ -1,5 +1,5 @@
 import polars as pl
-from intraday_analytics.pipeline import BaseAnalytics
+from intraday_analytics.bases import BaseAnalytics
 from intraday_analytics.utils import dc
 from pydantic import BaseModel, Field
 from typing import List, Union, Literal, Dict

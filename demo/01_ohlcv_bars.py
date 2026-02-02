@@ -73,8 +73,8 @@ if __name__ == "__main__":
 
     # Run the pipeline
     run_metrics_pipeline(
-        config,
-        get_universe,
+        config=config,
+        get_universe=get_universe,
     )
 
     logging.info("Pipeline finished successfully.")

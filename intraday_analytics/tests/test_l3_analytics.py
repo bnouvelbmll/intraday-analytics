@@ -1,11 +1,12 @@
 import polars as pl
 import unittest
+from intraday_analytics import BaseAnalytics
 from intraday_analytics.analytics.l3 import (
     L3Analytics,
     L3AnalyticsConfig,
+    L3MetricConfig,
     L3AdvancedConfig,
 )
-from intraday_analytics import BaseAnalytics
 from datetime import datetime
 
 

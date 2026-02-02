@@ -62,6 +62,47 @@ def process_batch_task(i, temp_dir, current_date, config, pipe):
         raise e
 
 
+def shred_data_task(
+    s3_file_lists,
+    table_definitions,
+    ref,
+    nanoseconds,
+    config,
+    current_date,
+    temp_dir,
+    get_universe,
+):
+    """
+    Worker function to run S3 shredding in a separate process.
+    """
+    try:
+        # Reconstruct transform_fns inside the worker
+        transform_fns = {
+            table.name: table.get_transform_fn(ref, nanoseconds)
+            for table in table_definitions
+        }
+
+        sbs = S3SymbolBatcher(
+            s3_file_lists=s3_file_lists,
+            transform_fns=transform_fns,
+            batching_strategy=HeuristicBatchingStrategy(
+                SymbolSizeEstimator(current_date, get_universe),
+                config.MAX_ROWS_PER_TABLE,
+            ),
+            temp_dir=temp_dir,
+            storage_options=config.S3_STORAGE_OPTIONS,
+            date=current_date,
+            get_universe=get_universe,
+            memory_per_worker=config.MEMORY_PER_WORKER,
+        )
+
+        sbs.process(num_workers=config.NUM_WORKERS)
+        return True
+    except Exception as e:
+        logging.error(f"Shredding task failed: {e}", exc_info=True)
+        raise e
+
+
 class ProcessInterval(Process):
     """
     A multiprocessing.Process subclass for preparing data and running a single pass of the analytics pipeline.
@@ -96,6 +137,114 @@ class ProcessInterval(Process):
         with open(self.context_path, "wb") as f:
             pickle.dump(pipe.context, f)
 
+
+    def run_naive(self, pipe, nanoseconds, ref, current_date):
+        logging.info("🚚 Creating batch files (Streaming)...")
+
+        # 1. Identify input files and create LazyFrames
+        lf_dict = {}
+        mics = ref["MIC"].unique().to_list()
+        for table_name in self.config.TABLES_TO_LOAD:
+            files = get_files_for_date_range(
+                current_date, current_date, mics, table_name
+            )
+            if files:
+                lf = pl.scan_parquet(files)
+                table = ALL_TABLES.get(table_name)
+                if table:
+                    lf = table.post_load_process(lf, ref, nanoseconds)
+                lf_dict[table_name] = lf
+
+        if not lf_dict:
+            logging.warning(f"No data found for {current_date}")
+            return
+
+        # 2. Batching from LazyFrames
+        batcher = SymbolBatcherStreaming(lf_dict, self.config.MAX_ROWS_PER_TABLE)
+
+        tasks = []
+        for i, batch_data in enumerate(batcher.stream_batches()):
+            for table_name, df in batch_data.items():
+                out_path = os.path.join(
+                    self.config.TEMP_DIR, f"batch-{table_name}-{i}.parquet"
+                )
+                df.write_parquet(out_path)
+            tasks.append(i)
+
+        # 3. Process batches in parallel
+        n_jobs = self.config.NUM_WORKERS
+        if n_jobs == -1:
+            n_jobs = os.cpu_count()
+
+        Parallel(n_jobs=n_jobs)(
+            delayed(process_batch_task)(
+                i, self.config.TEMP_DIR, current_date, self.config, pipe
+            )
+            for i in tasks
+        )
+
+    def run_shredding(self, pipe, nanoseconds, ref, current_date):
+        logging.info("🚚 Starting S3 Shredding (Spawned Process)...")
+
+        tables_to_load_names = self.config.TABLES_TO_LOAD
+        s3_file_lists = {
+            name: get_files_for_date_range(
+                current_date,
+                current_date,
+                ref["MIC"].unique().to_list(),
+                name,
+                exclude_weekends=self.config.EXCLUDE_WEEKENDS,
+            )
+            for name in tables_to_load_names
+        }
+
+        table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
+
+        with ProcessPoolExecutor(
+            max_workers=1, mp_context=get_context("spawn")
+        ) as executor:
+            future = executor.submit(
+                shred_data_task,
+                s3_file_lists,
+                table_definitions,
+                ref,
+                nanoseconds,
+                self.config,
+                current_date,
+                self.config.TEMP_DIR,
+                self.get_universe,
+            )
+            future.result()
+
+        batch_files = glob.glob(
+            os.path.join(self.config.TEMP_DIR, "batch-trades-*.parquet")
+        )
+        batch_indices = sorted(
+            [int(f.split("-")[-1].split(".")[0]) for f in batch_files]
+        )
+
+        max_workers = self.config.NUM_WORKERS
+        if max_workers <= 0:
+            max_workers = os.cpu_count()
+
+        with ProcessPoolExecutor(
+            max_workers=max_workers, mp_context=get_context("spawn")
+        ) as executor:
+            futures = [
+                executor.submit(
+                    process_batch_task,
+                    i,
+                    self.config.TEMP_DIR,
+                    current_date,
+                    self.config,
+                    pipe,
+                )
+                for i in batch_indices
+            ]
+            for future in as_completed(futures):
+                future.result()
+
+
     def run(self):
         logging.basicConfig(
             level=self.config.LOGGING_LEVEL.upper(),
@@ -111,8 +260,6 @@ class ProcessInterval(Process):
             date_range = pd.date_range(self.sd, self.ed, freq="D")
             TEMP_DIR = self.config.TEMP_DIR
             MODE = self.config.PREPARE_DATA_MODE
-
-            ref_partition = self.get_universe(self.sd.date().isoformat())
 
             for current_date in date_range:
                 logging.info(
@@ -137,63 +284,14 @@ class ProcessInterval(Process):
                     date=current_date.date().isoformat(),
                     symbols=symbols,
                 )
-
-                if MODE == "s3_shredding":
-                    # ... (S3 shredding logic remains the same)
-                    pass
-
-                # Metric computation logic
-
-                # 1. Identify input files
-                lf_dict = {}
-                mics = ref["MIC"].unique().to_list()
                 nanoseconds = int(self.pass_config.time_bucket_seconds * 1e9)
 
-                for table_name in self.config.TABLES_TO_LOAD:
-                    files = get_files_for_date_range(
-                        current_date, current_date, mics, table_name
-                    )
-                    if files:
-                        lf = pl.scan_parquet(files)
-                        # Apply post_load_process
-                        table = ALL_TABLES.get(table_name)
-                        if table:
-                            lf = table.post_load_process(lf, ref, nanoseconds)
-                        lf_dict[table_name] = lf
-
-                if not lf_dict:
-                    logging.warning(f"No data found for {current_date}")
-                    continue
-
-                # 2. Batching
-                batcher = SymbolBatcherStreaming(
-                    lf_dict, self.config.MAX_ROWS_PER_TABLE
-                )
-
-                tasks = []
-                for i, batch_data in enumerate(batcher.stream_batches()):
-                    # Write batch inputs
-                    for table_name, df in batch_data.items():
-                        out_path = os.path.join(
-                            TEMP_DIR, f"batch-{table_name}-{i}.parquet"
-                        )
-                        df.write_parquet(out_path)
-
-                    tasks.append(i)
-
-                # 3. Process batches
-                n_jobs = self.config.NUM_WORKERS
-                if n_jobs == -1:
-                    n_jobs = os.cpu_count()
-
-                # Use Parallel to run process_batch_task
-                # We need to ensure pipe is picklable. It should be.
-                Parallel(n_jobs=n_jobs)(
-                    delayed(process_batch_task)(
-                        i, TEMP_DIR, current_date, self.config, pipe
-                    )
-                    for i in tasks
-                )
+                if MODE == "naive":
+                    self.run_naive(pipe, nanoseconds, ref, current_date)
+                elif MODE == "s3_shredding":
+                    self.run_shredding(pipe, nanoseconds, ref, current_date)
+                else:
+                    raise ValueError(f"Unknown PREPARE_DATA_MODE: {MODE}")
 
             # Determine sort keys based on modules
             sort_keys = ["ListingId", "TimeBucket"]
@@ -239,6 +337,8 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
 
     # If no custom pipeline function is provided, use the default factory
     if get_pipeline is None:
+        from .pipeline import create_pipeline
+
         get_pipeline = create_pipeline
 
     temp_dir = config.TEMP_DIR

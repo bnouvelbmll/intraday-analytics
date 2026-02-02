@@ -112,6 +112,7 @@ class BatchWriter:
                 # Ensure the directory exists
                 os.makedirs(os.path.dirname(self.out_path), exist_ok=True)
                 self.writer = pq.ParquetWriter(self.out_path, tbl.schema)
+                logging.info(f"Opened ParquetWriter for {self.out_path}")
             self.writer.write_table(tbl)
 
     def close(self):

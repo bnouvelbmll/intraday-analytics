@@ -69,8 +69,8 @@ if __name__ == "__main__":
     config = AnalyticsConfig(**USER_CONFIG)
 
     run_metrics_pipeline(
-        config,
-        get_universe,
+        config=config,
+        get_universe=get_universe,
     )
 
     logging.info("Pipeline finished successfully.")

@@ -2,7 +2,11 @@ import polars as pl
 import pandas as pd
 import datetime as dt
 import logging
-from intraday_analytics.pipeline import BaseAnalytics
+from pydantic import BaseModel, Field
+from typing import List
+import polars as pl
+
+from intraday_analytics.bases import BaseAnalytics
 from intraday_analytics.utils import SYMBOL_COL
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
