@@ -21,6 +21,25 @@ from .tables import ALL_TABLES
 from .process import aggregate_and_write_final_output, BatchWriter, get_final_s3_path
 
 
+def _coerce_to_iso_date(value):
+    if isinstance(value, str):
+        try:
+            return pd.Timestamp(value).date().isoformat()
+        except Exception:
+            return value
+    try:
+        return pd.Timestamp(value).date().isoformat()
+    except Exception:
+        return value
+
+
+def _wrap_get_universe(get_universe):
+    def _wrapped(date_value):
+        return get_universe(_coerce_to_iso_date(date_value))
+
+    return _wrapped
+
+
 def process_batch_task(i, temp_dir, current_date, config, pipe):
     """
     Worker function to process a single batch in a separate process.
@@ -347,6 +366,8 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
     os.makedirs(temp_dir, exist_ok=True)
 
     context_path = os.path.join(temp_dir, "context.pkl")
+
+    get_universe = _wrap_get_universe(get_universe)
 
     try:
         for pass_config in config.PASSES:
