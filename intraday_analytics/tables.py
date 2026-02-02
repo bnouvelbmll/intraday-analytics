@@ -33,22 +33,22 @@ class DataTable(ABC):
         self, lf: pl.LazyFrame, ref: pl.DataFrame, nanoseconds: int
     ) -> pl.LazyFrame:
         """Applies post-loading transformations, like resampling."""
-        return lf.filter(
-            pl.col("ListingId").is_in(ref["ListingId"].to_list())
-        ).with_columns(
-            pl.col(self.timestamp_col).cast(pl.Datetime("ns"))
-        ).with_columns(
-            TimeBucket=(
-                pl.when(
-                    pl.col(self.timestamp_col)
-                    == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                )
-                .then(pl.col(self.timestamp_col))
-                .otherwise(
-                    pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                    + pl.duration(nanoseconds=nanoseconds)
-                )
-            ).cast(pl.Datetime("ns"))
+        return (
+            lf.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
+            .with_columns(pl.col(self.timestamp_col).cast(pl.Datetime("ns")))
+            .with_columns(
+                TimeBucket=(
+                    pl.when(
+                        pl.col(self.timestamp_col)
+                        == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
+                    )
+                    .then(pl.col(self.timestamp_col))
+                    .otherwise(
+                        pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
+                        + pl.duration(nanoseconds=nanoseconds)
+                    )
+                ).cast(pl.Datetime("ns"))
+            )
         )
 
     def get_s3_paths(

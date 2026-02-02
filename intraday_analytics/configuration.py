@@ -37,7 +37,9 @@ class PassConfig(BaseModel):
     execution_analytics: ExecutionAnalyticsConfig = Field(
         default_factory=ExecutionAnalyticsConfig
     )
-    generic_analytics: GenericAnalyticsConfig = Field(default_factory=GenericAnalyticsConfig)
+    generic_analytics: GenericAnalyticsConfig = Field(
+        default_factory=GenericAnalyticsConfig
+    )
 
     @model_validator(mode="after")
     def propagate_pass_settings(self) -> "PassConfig":

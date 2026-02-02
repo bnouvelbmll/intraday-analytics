@@ -457,12 +457,15 @@ class L2AnalyticsTW(BaseTWAnalytics):
             if "Std" in req.aggregations:
                 for variant in req.expand():
                     source = variant["source"]
-                    
+
                     # Define price expression
                     if source == "Mid":
                         p = (pl.col("AskPrice1") + pl.col("BidPrice1")) / 2
                     elif source == "WeightedMid":
-                        p = (pl.col("BidPrice1") * pl.col("AskQuantity1") + pl.col("AskPrice1") * pl.col("BidQuantity1")) / (pl.col("AskQuantity1") + pl.col("BidQuantity1"))
+                        p = (
+                            pl.col("BidPrice1") * pl.col("AskQuantity1")
+                            + pl.col("AskPrice1") * pl.col("BidQuantity1")
+                        ) / (pl.col("AskQuantity1") + pl.col("BidQuantity1"))
                     elif source == "Bid":
                         p = pl.col("BidPrice1")
                     elif source == "Ask":
@@ -472,10 +475,10 @@ class L2AnalyticsTW(BaseTWAnalytics):
 
                     # Log Returns: ln(p_t / p_{t-1})
                     log_ret = (p / p.shift(1)).log()
-                    
+
                     # Standard Deviation of Log Returns
                     std_dev = log_ret.std()
-                    
+
                     # Annualization Factor
                     # We estimate frequency as Count / TimeBucketSeconds
                     # Annualized Vol = Std * Sqrt(SecondsInYear * Frequency)
@@ -483,12 +486,12 @@ class L2AnalyticsTW(BaseTWAnalytics):
                     # SecondsInYear = 252 * 24 * 60 * 60 (Trading Year assumption)
                     seconds_in_year = 252 * 24 * 60 * 60
                     bucket_seconds = self.config.time_bucket_seconds
-                    
+
                     # Avoid division by zero if bucket_seconds is somehow 0 (unlikely)
                     factor = (seconds_in_year * pl.len() / bucket_seconds).sqrt()
-                    
+
                     expr = std_dev * factor
-                    
+
                     alias = (
                         req.output_name_pattern.format(**variant)
                         if req.output_name_pattern

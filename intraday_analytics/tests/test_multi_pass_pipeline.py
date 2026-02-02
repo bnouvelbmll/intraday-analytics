@@ -11,6 +11,7 @@ from intraday_analytics.execution import run_metrics_pipeline, ProcessInterval
 from intraday_analytics.pipeline import AnalyticsPipeline, BaseAnalytics
 from intraday_analytics.analytics.trade import TradeAnalytics
 
+
 # Helper class to run ProcessInterval synchronously
 class SyncProcessInterval(ProcessInterval):
     def __init__(self, *args, **kwargs):
@@ -44,8 +45,10 @@ class SimpleAggregation(BaseAnalytics):
 
     def compute(self, **kwargs) -> pl.LazyFrame:
         pass1_result = self.context["pass1"]
-        return pass1_result.lazy().group_by("ListingId").agg(
-            pl.col("TradeVolume").mean().alias("MeanTradeVolume")
+        return (
+            pass1_result.lazy()
+            .group_by("ListingId")
+            .agg(pl.col("TradeVolume").mean().alias("MeanTradeVolume"))
         )
 
 
@@ -106,7 +109,9 @@ class TestMultiPassPipeline(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
         shutil.rmtree(self.source_dir)
 
-    @patch("intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval)
+    @patch(
+        "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
+    )
     @patch("intraday_analytics.execution.get_files_for_date_range")
     def test_selective_pass_execution(self, mock_get_files, mock_process_interval):
         mock_get_files.return_value = [self.trades_file]

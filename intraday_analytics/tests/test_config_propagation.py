@@ -5,12 +5,17 @@ import shutil
 import tempfile
 from unittest.mock import MagicMock, patch, ANY
 from intraday_analytics.execution import ProcessInterval
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig, PrepareDataMode
+from intraday_analytics.configuration import (
+    AnalyticsConfig,
+    PassConfig,
+    PrepareDataMode,
+)
 
 
 class MockPipeline:
     def __init__(self):
         self.context = {}
+
 
 class TestConfigPropagation(unittest.TestCase):
 
@@ -84,9 +89,9 @@ class TestConfigPropagation(unittest.TestCase):
                 self.custom_table_name: pl.DataFrame({"ListingId": [], "ts": []})
             }
             mock_sbs_instance = MagicMock()
-            mock_sbs_instance.stream_batches.return_value = (
-                [{"my_custom_table": pl.DataFrame()}]
-            )
+            mock_sbs_instance.stream_batches.return_value = [
+                {"my_custom_table": pl.DataFrame()}
+            ]
             mock_sbs.return_value = mock_sbs_instance
             mock_glob.return_value = [
                 os.path.join(self.temp_dir, "batch-my_custom_table-0.parquet")

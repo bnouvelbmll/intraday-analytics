@@ -88,7 +88,9 @@ class ProcessInterval(Process):
             # This allows subsequent passes to use it as input
             pipe.context[self.pass_config.name] = pl.scan_parquet(final_path)
         except Exception as e:
-            logging.warning(f"Could not load output of pass {self.pass_config.name} into context: {e}")
+            logging.warning(
+                f"Could not load output of pass {self.pass_config.name} into context: {e}"
+            )
 
         # After the pass is complete, save the context
         with open(self.context_path, "wb") as f:
@@ -113,7 +115,9 @@ class ProcessInterval(Process):
             ref_partition = self.get_universe(self.sd)
 
             for current_date in date_range:
-                logging.info(f"Processing date: {current_date.date()} (Pass {self.pass_config.name})")
+                logging.info(
+                    f"Processing date: {current_date.date()} (Pass {self.pass_config.name})"
+                )
 
                 try:
                     ref = self.get_universe(current_date)
@@ -137,12 +141,12 @@ class ProcessInterval(Process):
                     pass
 
                 # Metric computation logic
-                
+
                 # 1. Identify input files
                 lf_dict = {}
                 mics = ref["MIC"].unique().to_list()
                 nanoseconds = int(self.pass_config.time_bucket_seconds * 1e9)
-                
+
                 for table_name in self.config.TABLES_TO_LOAD:
                     files = get_files_for_date_range(
                         current_date, current_date, mics, table_name
@@ -154,32 +158,38 @@ class ProcessInterval(Process):
                         if table:
                             lf = table.post_load_process(lf, ref, nanoseconds)
                         lf_dict[table_name] = lf
-                
+
                 if not lf_dict:
                     logging.warning(f"No data found for {current_date}")
                     continue
 
                 # 2. Batching
-                batcher = SymbolBatcherStreaming(lf_dict, self.config.MAX_ROWS_PER_TABLE)
-                
+                batcher = SymbolBatcherStreaming(
+                    lf_dict, self.config.MAX_ROWS_PER_TABLE
+                )
+
                 tasks = []
                 for i, batch_data in enumerate(batcher.stream_batches()):
                     # Write batch inputs
                     for table_name, df in batch_data.items():
-                        out_path = os.path.join(TEMP_DIR, f"batch-{table_name}-{i}.parquet")
+                        out_path = os.path.join(
+                            TEMP_DIR, f"batch-{table_name}-{i}.parquet"
+                        )
                         df.write_parquet(out_path)
-                    
+
                     tasks.append(i)
 
                 # 3. Process batches
                 n_jobs = self.config.NUM_WORKERS
                 if n_jobs == -1:
                     n_jobs = os.cpu_count()
-                
+
                 # Use Parallel to run process_batch_task
                 # We need to ensure pipe is picklable. It should be.
                 Parallel(n_jobs=n_jobs)(
-                    delayed(process_batch_task)(i, TEMP_DIR, current_date, self.config, pipe)
+                    delayed(process_batch_task)(
+                        i, TEMP_DIR, current_date, self.config, pipe
+                    )
                     for i in tasks
                 )
 
@@ -189,14 +199,19 @@ class ProcessInterval(Process):
                 sort_keys = self.pass_config.generic_analytics.group_by
 
             aggregate_and_write_final_output(
-                self.sd, self.ed, self.config, self.pass_config, TEMP_DIR, sort_keys=sort_keys
+                self.sd,
+                self.ed,
+                self.config,
+                self.pass_config,
+                TEMP_DIR,
+                sort_keys=sort_keys,
             )
 
             # Update context with the result of this pass
             final_path = get_final_s3_path(
                 self.sd, self.ed, self.config, self.pass_config.name
             )
-            
+
             self.update_and_persist_context(pipe, final_path)
 
         except Exception as e:
@@ -234,13 +249,13 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
             date_batches = create_date_batches(
                 config.START_DATE, config.END_DATE, config.BATCH_FREQ
             )
-            logging.info(f"📅 Created {len(date_batches)} date batches for Pass {pass_config.name}.")
+            logging.info(
+                f"📅 Created {len(date_batches)} date batches for Pass {pass_config.name}."
+            )
 
             for sd, ed in date_batches:
                 if config.SKIP_EXISTING_OUTPUT:
-                    final_s3_path = get_final_s3_path(
-                        sd, ed, config, pass_config.name
-                    )
+                    final_s3_path = get_final_s3_path(sd, ed, config, pass_config.name)
                     if bmll2.file_exists(final_s3_path, area=config.AREA):
                         logging.info(
                             f"✅ Output already exists for {sd.date()} -> {ed.date()} (Pass {pass_config.name}). Skipping."

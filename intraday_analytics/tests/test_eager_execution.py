@@ -6,7 +6,11 @@ import shutil
 import tempfile
 from unittest.mock import MagicMock, patch
 from intraday_analytics.execution import run_metrics_pipeline, ProcessInterval
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig, PrepareDataMode
+from intraday_analytics.configuration import (
+    AnalyticsConfig,
+    PassConfig,
+    PrepareDataMode,
+)
 from intraday_analytics.pipeline import AnalyticsPipeline
 from intraday_analytics.analytics.trade import TradeAnalytics
 

@@ -192,7 +192,7 @@ class AnalyticsPipeline:
                         setattr(module, key, tables_for_sym[key].lazy())
                     else:
                         setattr(module, key, tables_for_sym[key])
-            
+
             # Ensure all required tables are present
             for r in module.REQUIRES:
                 assert getattr(module, r) is not None

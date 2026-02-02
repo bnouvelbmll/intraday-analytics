@@ -172,15 +172,27 @@ class TradeAnalytics(BaseAnalytics):
         # Base filter: LIT_CONTINUOUS is standard
         base_df = self.trades.filter(pl.col("Classification") == "LIT_CONTINUOUS")
         gcols = ["MIC", "ListingId", "Ticker", "TimeBucket"]
-        
+
         generator = MetricGenerator(base_df)
         expressions = []
 
-        expressions.extend(generator.generate(self.config.generic_metrics, self._compute_generic))
-        expressions.extend(generator.generate(self.config.discrepancy_metrics, self._compute_discrepancy))
-        expressions.extend(generator.generate(self.config.flag_metrics, self._compute_flag))
-        expressions.extend(generator.generate(self.config.change_metrics, self._compute_change))
-        expressions.extend(generator.generate(self.config.impact_metrics, self._compute_impact))
+        expressions.extend(
+            generator.generate(self.config.generic_metrics, self._compute_generic)
+        )
+        expressions.extend(
+            generator.generate(
+                self.config.discrepancy_metrics, self._compute_discrepancy
+            )
+        )
+        expressions.extend(
+            generator.generate(self.config.flag_metrics, self._compute_flag)
+        )
+        expressions.extend(
+            generator.generate(self.config.change_metrics, self._compute_change)
+        )
+        expressions.extend(
+            generator.generate(self.config.impact_metrics, self._compute_impact)
+        )
 
         # --- Legacy / Default Metrics (if config is empty) ---
         if not expressions:
@@ -202,24 +214,26 @@ class TradeAnalytics(BaseAnalytics):
     def _compute_generic(self, req, variant):
         side = variant["sides"]
         measure = variant["measures"]
-        
+
         # Filter by Side
         cond = pl.lit(True)
         if side == "Bid":
             cond = pl.col("AggressorSide") == 2
         elif side == "Ask":
             cond = pl.col("AggressorSide") == 1
-            
+
         # Apply MarketState filter to condition if needed
         if req.market_states:
             cond = cond & pl.col("MarketState").is_in(req.market_states)
 
         # Helper to apply condition
         def filtered(col):
-            return pl.when(cond).then(col).otherwise(None) # Use None for aggregations that ignore nulls like mean/median
-        
+            return (
+                pl.when(cond).then(col).otherwise(None)
+            )  # Use None for aggregations that ignore nulls like mean/median
+
         def filtered_zero(col):
-             return pl.when(cond).then(col).otherwise(0)
+            return pl.when(cond).then(col).otherwise(0)
 
         expr = None
         if measure == "Volume":
@@ -231,18 +245,30 @@ class TradeAnalytics(BaseAnalytics):
         elif measure == "NotionalUSD":
             expr = filtered_zero(pl.col("TradeNotionalUSD")).sum()
         elif measure == "RetailCount":
-            expr = filtered_zero(pl.when(pl.col("BMLLParticipantType") == "RETAIL").then(1).otherwise(0)).sum()
+            expr = filtered_zero(
+                pl.when(pl.col("BMLLParticipantType") == "RETAIL").then(1).otherwise(0)
+            ).sum()
         elif measure == "BlockCount":
-            expr = filtered_zero(pl.when(pl.col("IsBlock") == "Y").then(1).otherwise(0)).sum()
+            expr = filtered_zero(
+                pl.when(pl.col("IsBlock") == "Y").then(1).otherwise(0)
+            ).sum()
         elif measure == "AuctionNotional":
-            expr = filtered_zero(pl.when(pl.col("Classification").str.contains("AUCTION")).then(pl.col("TradeNotionalEUR")).otherwise(0)).sum()
+            expr = filtered_zero(
+                pl.when(pl.col("Classification").str.contains("AUCTION"))
+                .then(pl.col("TradeNotionalEUR"))
+                .otherwise(0)
+            ).sum()
         elif measure == "OTCVolume":
-            expr = filtered_zero(pl.when(pl.col("Classification").str.contains("OTC")).then(pl.col("Size")).otherwise(0)).sum()
+            expr = filtered_zero(
+                pl.when(pl.col("Classification").str.contains("OTC"))
+                .then(pl.col("Size"))
+                .otherwise(0)
+            ).sum()
         elif measure == "VWAP":
             # VWAP = Sum(Price * Size) / Sum(Size)
             # We need to filter both numerator and denominator
-            # Note: This simple aggregation assumes we can do it in one go. 
-            # But VWAP is (Sum(P*V) / Sum(V)). 
+            # Note: This simple aggregation assumes we can do it in one go.
+            # But VWAP is (Sum(P*V) / Sum(V)).
             # If we return a single expression, it must be the result.
             num = filtered_zero(pl.col("LocalPrice") * pl.col("Size")).sum()
             den = filtered_zero(pl.col("Size")).sum()
@@ -254,7 +280,7 @@ class TradeAnalytics(BaseAnalytics):
         elif measure == "OHLC":
             # OHLC returns a list of expressions, but generator expects one.
             # We handle this special case by returning a struct or we need to change generator.
-            # Or we can just return None here and handle OHLC separately? 
+            # Or we can just return None here and handle OHLC separately?
             # Or better, we can return a list of expressions?
             # The generator currently expects a single expression.
             # Let's hack it: return a list, and update generator to handle lists.
@@ -265,13 +291,13 @@ class TradeAnalytics(BaseAnalytics):
             )
             if side == "Total" and not req.output_name_pattern:
                 prefix = ""
-            
+
             price_col = filtered(pl.col("LocalPrice")).drop_nans()
             return [
                 price_col.first().alias(f"{prefix}Open"),
                 price_col.max().alias(f"{prefix}High"),
                 price_col.min().alias(f"{prefix}Low"),
-                price_col.last().alias(f"{prefix}Close")
+                price_col.last().alias(f"{prefix}Close"),
             ]
 
         if expr is not None:
@@ -295,12 +321,14 @@ class TradeAnalytics(BaseAnalytics):
         if col_name:
             price_col = pl.col("LocalPrice")
             ref_col = pl.col(col_name)
-            expr = (10000 * (price_col - ref_col) / ref_col)
-            
+            expr = 10000 * (price_col - ref_col) / ref_col
+
             expr = apply_market_state_filter(expr, req.market_states)
-            
+
             default_name = f"DiscrepancyTo{ref_name}"
-            return apply_alias(expr.mean(), req.output_name_pattern, variant, default_name)
+            return apply_alias(
+                expr.mean(), req.output_name_pattern, variant, default_name
+            )
         return None
 
     def _compute_flag(self, req, variant):
@@ -316,18 +344,18 @@ class TradeAnalytics(BaseAnalytics):
             "AlgorithmicTrade": pl.col("AlgorithmicTrade") == "Y",
         }
         flag = flag_map.get(flag_name)
-        
+
         cond = flag
         if side == "Bid":
             cond = cond & (pl.col("AggressorSide") == 2)
         elif side == "Ask":
             cond = cond & (pl.col("AggressorSide") == 1)
-            
+
         if req.market_states:
             cond = cond & pl.col("MarketState").is_in(req.market_states)
 
         def filtered_zero(col):
-             return pl.when(cond).then(col).otherwise(0)
+            return pl.when(cond).then(col).otherwise(0)
 
         expr = None
         if measure == "Volume":
@@ -355,39 +383,46 @@ class TradeAnalytics(BaseAnalytics):
         elif scope == "Venue":
             suffix = "AtVenue"
         col_name = f"{base_measure}{suffix}"
-        
+
         expr = pl.col(col_name)
         expr = apply_market_state_filter(expr, req.market_states)
-        
+
         return apply_alias(expr.mean(), req.output_name_pattern, variant, col_name)
 
     def _compute_impact(self, req, variant):
         metric_type = variant["variant"]
         horizon = variant["horizon"]
-        
+
         side_sign = pl.when(pl.col("AggressorSide") == 1).then(1).otherwise(-1)
         price = pl.col("LocalPrice")
-        future_mid = pl.col("PostTradeMid") 
+        future_mid = pl.col("PostTradeMid")
         current_mid = pl.col(req.reference_price_col)
-        
+
         expr = None
         if metric_type == "EffectiveSpread":
-            expr = (2 * (price - current_mid).abs())
+            expr = 2 * (price - current_mid).abs()
         elif metric_type == "RealizedSpread":
-            expr = (2 * side_sign * (price - future_mid))
+            expr = 2 * side_sign * (price - future_mid)
         elif metric_type == "PriceImpact":
-            expr = (2 * side_sign * (future_mid - current_mid))
-        
+            expr = 2 * side_sign * (future_mid - current_mid)
+
         if expr is not None:
             expr = apply_market_state_filter(expr, req.market_states)
             default_name = f"{metric_type}{horizon}"
-            return apply_alias(expr.mean(), req.output_name_pattern, variant, default_name)
+            return apply_alias(
+                expr.mean(), req.output_name_pattern, variant, default_name
+            )
         return None
 
     def _get_default_metrics(self):
         return [
-            ((pl.col("LocalPrice") * pl.col("Size")).sum() / pl.col("Size").sum()).alias("VWAP"),
-            (((pl.col("PricePoint").clip(0, 1) * 2 - 1) * pl.col("Size")).sum() / pl.col("Size").sum()).alias("VolumeWeightedPricePlacement"),
+            (
+                (pl.col("LocalPrice") * pl.col("Size")).sum() / pl.col("Size").sum()
+            ).alias("VWAP"),
+            (
+                ((pl.col("PricePoint").clip(0, 1) * 2 - 1) * pl.col("Size")).sum()
+                / pl.col("Size").sum()
+            ).alias("VolumeWeightedPricePlacement"),
             pl.col("Size").sum().alias("Volume"),
             pl.col("LocalPrice").drop_nans().first().alias("Open"),
             pl.col("LocalPrice").drop_nans().last().alias("Close"),

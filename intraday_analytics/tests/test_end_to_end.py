@@ -6,7 +6,11 @@ import shutil
 import tempfile
 from unittest.mock import MagicMock, patch
 from intraday_analytics.execution import run_metrics_pipeline, ProcessInterval
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig, PrepareDataMode
+from intraday_analytics.configuration import (
+    AnalyticsConfig,
+    PassConfig,
+    PrepareDataMode,
+)
 from intraday_analytics.pipeline import AnalyticsPipeline
 from intraday_analytics.analytics.trade import TradeAnalytics
 
@@ -111,7 +115,9 @@ class TestEndToEnd(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
         shutil.rmtree(self.source_dir)
 
-    @patch("intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval)
+    @patch(
+        "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
+    )
     @patch("intraday_analytics.execution.get_files_for_date_range")
     def test_run_pipeline(self, mock_get_files, mock_process_interval):
         mock_get_files.return_value = [self.trades_file]
