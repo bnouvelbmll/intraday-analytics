@@ -97,6 +97,7 @@ class AnalyticsConfig(BaseModel):
         "s3://{bucket}/{prefix}/data/{datasetname}/{start_date}_{end_date}.parquet"
     )
     S3_STORAGE_OPTIONS: Dict[str, str] = Field(default_factory=dict)
+    DEFAULT_S3_REGION: str = "us-east-1"
     CLEAN_UP_BATCH_FILES: bool = True
     CLEAN_UP_TEMP_DIR: bool = True
     OVERWRITE_TEMP_DIR: bool = False

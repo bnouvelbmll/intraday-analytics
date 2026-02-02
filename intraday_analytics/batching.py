@@ -593,6 +593,7 @@ class S3SymbolBatcher:
         self.date = date
         self.get_universe = get_universe
         self.memory_per_worker = memory_per_worker
+        self.last_total_rows = 0
 
         # 1. Create batches using the chosen strategy and the provided symbols
         logging.info("Computing Batches...")
@@ -691,6 +692,7 @@ class S3SymbolBatcher:
         and writing the final output for each batch.
         """
         logging.info(f"Finalizing {len(self.batches)} batches...")
+        total_rows = 0
         for b_id in range(len(self.batches)):
             batch_data = {}
             try:
@@ -709,7 +711,7 @@ class S3SymbolBatcher:
                         # Read the local parquet shards
                         lf = pl.scan_parquet(
                             parquet_files,
-                            storage_options={"region": "us-east-1"},
+                            storage_options=self.storage_options,
                         )
 
                         # Sort - This is now fast because dataset is small & local
@@ -723,12 +725,16 @@ class S3SymbolBatcher:
 
                 # Write final output
                 self._write_output(b_id, batch_data)
+                batch_rows = sum(len(df) for df in batch_data.values())
+                total_rows += batch_rows
+                logging.info(f"Batch {b_id}: wrote {batch_rows} rows.")
             finally:
                 for name in self.s3_file_lists.keys():
                     path = self.temp_dir / name / f"{b_id}"
                     if path.exists():
                         for g in glob.glob(str(path / "*.parquet")):
                             os.unlink(g)
+        self.last_total_rows = total_rows
 
     def _write_output(self, b_id, batch_data):
         """Writes the data for a single batch to a Parquet file."""

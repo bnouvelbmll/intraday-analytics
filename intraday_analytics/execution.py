@@ -118,8 +118,12 @@ def process_batch_task(i, temp_dir, current_date, config, pipe):
         writer = BatchWriter(out_path)
 
         runner = AnalyticsRunner(pipe, writer.write, config)
-        runner.run_batch(batch_data)
+        result = runner.run_batch(batch_data)
         writer.close()
+        if result is not None:
+            logging.info(
+                f"Batch {i} for {current_date.date()} produced {len(result)} rows."
+            )
 
         # Clean up batch input files immediately to save space
         for table_name in config.TABLES_TO_LOAD:
@@ -167,6 +171,9 @@ def shred_data_task(
         )
 
         sbs.process(num_workers=config.NUM_WORKERS)
+        logging.info(
+            f"Shredding complete for {current_date.date()}: {sbs.last_total_rows} rows."
+        )
         return True
     except Exception as e:
         logging.error(f"Shredding task failed: {e}", exc_info=True)
@@ -348,6 +355,11 @@ class ProcessInterval(Process):
             MODE = self.config.PREPARE_DATA_MODE
 
             for current_date in date_range:
+                if self.config.EXCLUDE_WEEKENDS and current_date.weekday() >= 5:
+                    logging.info(
+                        f"Skipping weekend date: {current_date.date()} (Pass {self.pass_config.name})"
+                    )
+                    continue
                 logging.info(
                     f"Processing date: {current_date.date()} (Pass {self.pass_config.name})"
                 )
@@ -428,6 +440,9 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
         from .pipeline import create_pipeline
 
         get_pipeline = create_pipeline
+
+    if "region" not in config.S3_STORAGE_OPTIONS and config.DEFAULT_S3_REGION:
+        config.S3_STORAGE_OPTIONS["region"] = config.DEFAULT_S3_REGION
 
     temp_dir = config.TEMP_DIR
     if os.path.exists(temp_dir) and config.OVERWRITE_TEMP_DIR:

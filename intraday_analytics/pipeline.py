@@ -281,11 +281,11 @@ class AnalyticsRunner:
         # RUN SYMBOL BY SYMBOL
         if self.config.RUN_ONE_SYMBOL_AT_A_TIME:
             for sym in sorted(
-                set().union(
-                    *[
-                        df.select(SYMBOL_COL).collect()[SYMBOL_COL].to_list()
-                        for df in batch_data.values()
-                        if len(df) > 0
+                    set().union(
+                        *[
+                            df.select(SYMBOL_COL).collect()[SYMBOL_COL].to_list()
+                            for df in batch_data.values()
+                            if len(df) > 0
                     ]
                 )
             ):
@@ -295,9 +295,11 @@ class AnalyticsRunner:
                 }
                 result = self.pipeline.run_on_multi_tables(**tables_for_sym)
                 self.out_writer(result, sym)
+            return result if "result" in locals() else None
         else:
             result = self.pipeline.run_on_multi_tables(**batch_data)
             self.out_writer(result, "batch")
+            return result
 
 
 # --- Generic Pipeline Factory ---

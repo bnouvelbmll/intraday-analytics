@@ -169,6 +169,7 @@ def filter_existing_s3_files(paths, storage_options=None):
 
     storage_options = storage_options or {}
     existing = []
+    missing = 0
 
     try:
         import fsspec
@@ -178,8 +179,12 @@ def filter_existing_s3_files(paths, storage_options=None):
             try:
                 if fs.exists(p):
                     existing.append(p)
+                else:
+                    missing += 1
             except Exception:
                 existing.append(p)
+        if missing:
+            logging.warning(f"Filtered out {missing} missing S3 files (fsspec).")
         return existing
     except Exception:
         pass
@@ -205,10 +210,13 @@ def filter_existing_s3_files(paths, storage_options=None):
             except ClientError as e:
                 code = e.response.get("Error", {}).get("Code", "")
                 if code in {"404", "NoSuchKey", "NotFound"}:
+                    missing += 1
                     continue
                 existing.append(p)
             except Exception:
                 existing.append(p)
+        if missing:
+            logging.warning(f"Filtered out {missing} missing S3 files (boto3).")
         return existing
     except Exception:
         logging.warning("S3 existence checks unavailable; proceeding without prefilter.")
