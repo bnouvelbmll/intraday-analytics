@@ -59,8 +59,11 @@ def get_output_schema(config: AnalyticsConfig) -> Dict[str, List[str]]:
         "BMLLTradeType": pl.Utf8,  # LIT, DARK
         "BMLLParticipantType": pl.Utf8,  # RETAIL, etc.
         "TradeNotionalEUR": pl.Float64,
+        "TradeNotionalUSD": pl.Float64,
         "PricePoint": pl.Float64,
         # New columns for advanced metrics
+        "PreTradeMid": pl.Float64,
+        "MidPrice": pl.Float64,
         "PostTradeMidAtPrimary": pl.Float64,
         "PostTradeMid": pl.Float64,
         "BestBidPrice": pl.Float64,
