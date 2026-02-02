@@ -223,7 +223,7 @@ class ProcessInterval(Process):
         # 1. Identify input files and create LazyFrames
         lf_dict = {}
         mics = ref["MIC"].unique().to_list()
-            for table_name in self.config.TABLES_TO_LOAD:
+        for table_name in self.config.TABLES_TO_LOAD:
             files = get_files_for_date_range(
                 current_date, current_date, mics, table_name
             )
@@ -335,10 +335,6 @@ class ProcessInterval(Process):
         logging.basicConfig(
             level=self.config.LOGGING_LEVEL.upper(),
             format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        )
-
-        self.config.TABLES_TO_LOAD = _derive_tables_to_load(
-            self.pass_config, self.config.TABLES_TO_LOAD
         )
 
         context = {}
@@ -464,6 +460,12 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
 
                 logging.info(
                     f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()} (Pass {pass_config.name})"
+                )
+                pass_tables_to_load = _derive_tables_to_load(
+                    pass_config, config.TABLES_TO_LOAD
+                )
+                config = config.copy(
+                    update={"TABLES_TO_LOAD": pass_tables_to_load}
                 )
                 p = ProcessInterval(
                     sd=sd,

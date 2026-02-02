@@ -111,8 +111,26 @@ class TestMultiPassPipeline(unittest.TestCase):
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
     @patch("intraday_analytics.execution.get_files_for_date_range")
-    def test_selective_pass_execution(self, mock_get_files, mock_process_interval):
+    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
+    @patch("intraday_analytics.execution.ProcessPoolExecutor")
+    def test_selective_pass_execution(
+        self,
+        mock_process_pool_executor,
+        mock_as_completed,
+        mock_get_files,
+        mock_process_interval,
+    ):
         mock_get_files.return_value = [self.trades_file]
+
+        def mock_submit(fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            mock_future = MagicMock()
+            mock_future.result.return_value = True
+            return mock_future
+
+        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = (
+            mock_submit
+        )
 
         self.config.PASSES = [
             PassConfig(
