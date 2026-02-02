@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import time
 import polars as pl
 import pandas as pd
 import pyarrow.parquet as pq
@@ -90,6 +91,74 @@ def get_total_system_memory_gb():
             pass
 
     raise NotImplementedError
+
+
+def is_s3_path(path: str) -> bool:
+    return str(path).startswith("s3://")
+
+
+def is_retryable_s3_error(exc: Exception) -> bool:
+    try:
+        from polars.exceptions import ComputeError, PolarsError
+    except Exception:
+        ComputeError = PolarsError = Exception
+
+    msg = str(exc)
+    s3_markers = (
+        "s3://",
+        "S3",
+        "NoSuchKey",
+        "AccessDenied",
+        "SlowDown",
+        "InternalError",
+        "RequestTimeout",
+        "ServiceUnavailable",
+        "Connection reset",
+        "Connection aborted",
+        "timed out",
+        "Temporary failure",
+        "503",
+        "500",
+        "504",
+    )
+    if isinstance(exc, (ComputeError, PolarsError)):
+        return any(marker in msg for marker in s3_markers)
+
+    try:
+        from botocore.exceptions import ClientError
+
+        if isinstance(exc, ClientError):
+            code = exc.response.get("Error", {}).get("Code", "")
+            return code in {
+                "InternalError",
+                "SlowDown",
+                "ServiceUnavailable",
+                "RequestTimeout",
+                "Throttling",
+                "ProvisionedThroughputExceededException",
+                "RequestLimitExceeded",
+            }
+    except Exception:
+        pass
+
+    return False
+
+
+def retry_s3(fn, *, attempts=4, base_delay=1.0, factor=5.0, max_delay=300.0, desc=""):
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except Exception as e:
+            if not is_retryable_s3_error(e):
+                raise
+            if attempt == attempts - 1:
+                raise
+            delay = min(max_delay, base_delay * (factor ** attempt))
+            logging.warning(
+                f"S3 operation failed{f' ({desc})' if desc else ''}: {e}. "
+                f"Retrying in {delay:.1f}s (attempt {attempt + 1}/{attempts})."
+            )
+            time.sleep(delay)
 
 
 def preload(

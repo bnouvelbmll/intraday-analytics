@@ -5,12 +5,7 @@ import glob
 import polars as pl
 import pyarrow.parquet as pq
 
-import os
-import logging
-import threading
-import glob
-import polars as pl
-import pyarrow.parquet as pq
+from intraday_analytics.utils import is_s3_path, retry_s3
 
 
 def get_final_s3_path(start_date, end_date, config, pass_name):
@@ -81,7 +76,17 @@ def aggregate_and_write_final_output(
     logging.info(
         f"Writing aggregated analytics for Pass {pass_config.name} to {final_s3_path}"
     )
-    final_df.sink_parquet(final_s3_path, compression="snappy")
+    def _write_output():
+        return final_df.sink_parquet(final_s3_path, compression="snappy")
+
+    if is_s3_path(final_s3_path):
+        retry_s3(
+            _write_output,
+            desc=f"write final output for pass {pass_config.name}",
+        )
+    else:
+        _write_output()
+
     logging.info(f"Aggregation and final write for Pass {pass_config.name} complete.")
 
     for f in all_metrics_files:

@@ -16,7 +16,13 @@ from .batching import (
     SymbolSizeEstimator,
 )
 from .pipeline import AnalyticsRunner
-from .utils import preload, get_files_for_date_range, create_date_batches
+from .utils import (
+    preload,
+    get_files_for_date_range,
+    create_date_batches,
+    is_s3_path,
+    retry_s3,
+)
 from .tables import ALL_TABLES
 from .process import aggregate_and_write_final_output, BatchWriter, get_final_s3_path
 
@@ -33,11 +39,12 @@ def _coerce_to_iso_date(value):
         return value
 
 
-def _wrap_get_universe(get_universe):
-    def _wrapped(date_value):
-        return get_universe(_coerce_to_iso_date(date_value))
+class _GetUniverseWrapper:
+    def __init__(self, func):
+        self._func = func
 
-    return _wrapped
+    def __call__(self, date_value):
+        return self._func(_coerce_to_iso_date(date_value))
 
 
 def process_batch_task(i, temp_dir, current_date, config, pipe):
@@ -146,7 +153,16 @@ class ProcessInterval(Process):
         try:
             # Store the result as a LazyFrame in the context
             # This allows subsequent passes to use it as input
-            pipe.context[self.pass_config.name] = pl.scan_parquet(final_path)
+            def _scan_output():
+                return pl.scan_parquet(final_path)
+
+            if is_s3_path(final_path):
+                pipe.context[self.pass_config.name] = retry_s3(
+                    _scan_output,
+                    desc=f"scan final output for pass {self.pass_config.name}",
+                )
+            else:
+                pipe.context[self.pass_config.name] = _scan_output()
         except Exception as e:
             logging.warning(
                 f"Could not load output of pass {self.pass_config.name} into context: {e}"
@@ -367,7 +383,7 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
 
     context_path = os.path.join(temp_dir, "context.pkl")
 
-    get_universe = _wrap_get_universe(get_universe)
+    get_universe = _GetUniverseWrapper(get_universe)
 
     try:
         for pass_config in config.PASSES:
