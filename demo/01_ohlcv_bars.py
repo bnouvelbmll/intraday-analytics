@@ -19,12 +19,7 @@ from intraday_analytics.analytics.trade import (
     TradeAnalyticsConfig,
     TradeGenericConfig,
 )
-from intraday_analytics.config import (
-    AnalyticsConfig,
-    BatchingConfig,
-    S3Config,
-    PassConfig,
-)
+from intraday_analytics.configuration import AnalyticsConfig, PassConfig
 
 # --- Configuration ---
 

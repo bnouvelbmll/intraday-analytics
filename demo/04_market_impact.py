@@ -20,7 +20,7 @@ from intraday_analytics.analytics.trade import (
     TradeAnalyticsConfig,
     TradeImpactConfig,
 )
-from intraday_analytics.config import AnalyticsConfig, PassConfig
+from intraday_analytics.configuration import AnalyticsConfig, PassConfig
 
 # --- Configuration ---
 
