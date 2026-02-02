@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from unittest.mock import MagicMock, patch
 from intraday_analytics.execution import run_metrics_pipeline, ProcessInterval
-from intraday_analytics.configuration import AnalyticsConfig, PrepareDataMode
+from intraday_analytics.configuration import AnalyticsConfig, PassConfig, PrepareDataMode
 from intraday_analytics.pipeline import AnalyticsPipeline
 from intraday_analytics.analytics.trade import TradeAnalytics
 
@@ -70,18 +70,20 @@ class TestEndToEnd(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.config = AnalyticsConfig(
             START_DATE="2025-01-01",
-            END_DATE="2025-01-02",
+            END_DATE="2025-01-01",
             TEMP_DIR=self.temp_dir,
-            PREPARE_DATA_MODE=PrepareDataMode.S3_SHREDDING.value,
-            BATCHING_STRATEGY="heuristic",
-            MAX_ROWS_PER_TABLE={"trades": 1000},
-            CLEAN_UP_TEMP_DIR=False,  # Keep for inspection
+            PASSES=[
+                PassConfig(
+                    name="pass1",
+                    modules=["trade"],
+                )
+            ],
             FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(
-                self.temp_dir, "final_{start_date}_{end_date}.parquet"
+                self.temp_dir, "final_{datasetname}_{start_date}_{end_date}.parquet"
             ),
-            TABLES_TO_LOAD=["trades"],  # Only load trades for this test
+            TABLES_TO_LOAD=["trades"],
+            CLEAN_UP_TEMP_DIR=False,
             BATCH_FREQ=None,
-            OVERWRITE_TEMP_DIR=True,
         )
 
         # Create dummy source files
@@ -93,80 +95,37 @@ class TestEndToEnd(unittest.TestCase):
                 "TradeTimestamp": [pd.Timestamp("2025-01-01 10:00:00").value],
                 "Price": [10.0],
                 "Size": [100],
-                "TradeNotional": [1000.0],
-                "TradeNotionalEUR": [1000.0],
-                "LocalPrice": [10.0],
-                "PriceEUR": [10.0],
-                "PricePoint": [0.0],
-                "MIC": ["X"],
-                "Ticker": ["T"],
-                "CurrencyCode": ["EUR"],
                 "Classification": ["LIT_CONTINUOUS"],
-                "BMLLTradeType": ["LIT"],
+                "LocalPrice": [10.0],
+                "MarketState": ["OPEN"],
+                "Ticker": ["ABC"],
+                "MIC": ["X"],
+                "PricePoint": [0.5],
                 "BMLLParticipantType": ["RETAIL"],
                 "AggressorSide": [1],
-                "MarketState": ["OPEN"],
+                "TradeNotionalEUR": [1000.0],
             }
-        ).with_columns(pl.col("TradeTimestamp").cast(pl.Datetime("ns"))).write_parquet(
-            self.trades_file
-        )
+        ).write_parquet(self.trades_file)
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
         shutil.rmtree(self.source_dir)
 
-    @patch("intraday_analytics.batching.pl.scan_parquet")
-    @patch(
-        "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
-    )
+    @patch("intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval)
     @patch("intraday_analytics.execution.get_files_for_date_range")
-    @patch("intraday_analytics.batching.SymbolSizeEstimator")
-    @patch("bmll2.storage_paths")  # Mock bmll2 used in aggregate_and_write_final_output
-    def test_run_pipeline(
-        self,
-        mock_storage_paths,
-        mock_estimator_cls,
-        mock_get_files,
-        mock_process_interval,
-        mock_scan_parquet,
-    ):
-        # Mock scan_parquet to strip storage_options
-        def safe_scan_parquet(*args, **kwargs):
-            kwargs.pop("storage_options", None)
-            return REAL_SCAN_PARQUET(*args, **kwargs)
-
-        mock_scan_parquet.side_effect = safe_scan_parquet
-
-        # Mock S3 file listing to return our local file
+    def test_run_pipeline(self, mock_get_files, mock_process_interval):
         mock_get_files.return_value = [self.trades_file]
 
-        # Mock Estimator
-        mock_estimator = MagicMock()
-        mock_estimator.get_estimates_for_symbols.return_value = {"trades": {"A": 1}}
-        mock_estimator_cls.return_value = mock_estimator
+        def get_pipeline(pass_config, context, symbols=None, ref=None, date=None):
+            modules = [TradeAnalytics(pass_config.trade_analytics)]
+            return AnalyticsPipeline(modules, self.config, pass_config, context)
 
-        # Mock bmll2 storage paths (though we override template, it might still be called)
-        mock_storage_paths.return_value = {"user": {"bucket": "b", "prefix": "p"}}
+        run_metrics_pipeline(self.config, get_pipeline, mock_get_universe)
 
-        # Use module-level MockPipelineFactory
-        mock_get_pipeline = MockPipelineFactory(self.config)
-
-        run_metrics_pipeline(self.config, mock_get_pipeline, mock_get_universe)
-
-        # Verify output
-        # Expected output file based on template
-        # Note: create_date_batches might create multiple batches or one depending on logic
-        # 2025-01-01 to 2025-01-02 is < 7 days, so 1 batch.
         expected_out = os.path.join(
-            self.temp_dir, "final_2025-01-01_2025-01-02.parquet"
+            self.temp_dir, "final_sample2d_pass1_2025-01-01_2025-01-01.parquet"
         )
-
-        if not os.path.exists(expected_out):
-            print(f"Listing {self.temp_dir}:")
-            for root, dirs, files in os.walk(self.temp_dir):
-                print(root, dirs, files)
-
-        self.assertTrue(os.path.exists(expected_out), "Final output file not found")
+        self.assertTrue(os.path.exists(expected_out))
 
         df = pl.read_parquet(expected_out)
         self.assertEqual(len(df), 1)

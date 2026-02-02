@@ -1,6 +1,6 @@
 import unittest
 from pydantic import ValidationError
-from intraday_analytics.configuration import AnalyticsConfig, PrepareDataMode
+from intraday_analytics.configuration import AnalyticsConfig, PassConfig, PrepareDataMode
 from intraday_analytics.analytics.dense import DenseAnalyticsConfig
 from intraday_analytics.analytics.l2 import L2AnalyticsConfig
 
@@ -8,9 +8,9 @@ from intraday_analytics.analytics.l2 import L2AnalyticsConfig
 class TestConfiguration(unittest.TestCase):
     def test_default_config_valid(self):
         """Ensure the default configuration is valid."""
-        config = AnalyticsConfig()
+        config = AnalyticsConfig(PASSES=[PassConfig(name="default")])
         self.assertEqual(config.PREPARE_DATA_MODE, PrepareDataMode.S3_SHREDDING)
-        self.assertEqual(config.TIME_BUCKET_SECONDS, 60)
+        self.assertEqual(config.PASSES[0].time_bucket_seconds, 60)
 
     def test_invalid_prepare_data_mode(self):
         """Ensure invalid PREPARE_DATA_MODE raises ValidationError."""
@@ -38,24 +38,33 @@ class TestConfiguration(unittest.TestCase):
         from dictionaries and propagates global settings.
         """
         config_data = {
-            "TIME_BUCKET_SECONDS": 30,
-            "dense_analytics": {"mode": "uniform", "time_interval": ["08:00", "16:00"]},
-            "l2_analytics": {"levels": 5},
+            "PASSES": [
+                {
+                    "name": "pass1",
+                    "time_bucket_seconds": 30,
+                    "dense_analytics": {
+                        "mode": "uniform",
+                        "time_interval": ["08:00", "16:00"],
+                    },
+                    "l2_analytics": {"levels": 5},
+                }
+            ]
         }
 
         config = AnalyticsConfig(**config_data)
+        pass_config = config.PASSES[0]
 
         # Check that the dict was converted to a model instance
-        self.assertIsInstance(config.dense_analytics, DenseAnalyticsConfig)
-        self.assertIsInstance(config.l2_analytics, L2AnalyticsConfig)
+        self.assertIsInstance(pass_config.dense_analytics, DenseAnalyticsConfig)
+        self.assertIsInstance(pass_config.l2_analytics, L2AnalyticsConfig)
 
         # Check that values from the dict were set correctly
-        self.assertEqual(config.dense_analytics.mode, "uniform")
-        self.assertEqual(config.l2_analytics.levels, 5)
+        self.assertEqual(pass_config.dense_analytics.mode, "uniform")
+        self.assertEqual(pass_config.l2_analytics.levels, 5)
 
         # Check that the global setting was propagated by the model_validator
-        self.assertEqual(config.dense_analytics.time_bucket_seconds, 30)
-        self.assertEqual(config.l2_analytics.time_bucket_seconds, 30)
+        self.assertEqual(pass_config.dense_analytics.time_bucket_seconds, 30)
+        self.assertEqual(pass_config.l2_analytics.time_bucket_seconds, 30)
 
     def test_nested_config_from_instance(self):
         """
@@ -63,14 +72,20 @@ class TestConfiguration(unittest.TestCase):
         already model instances.
         """
         config_data = {
-            "TIME_BUCKET_SECONDS": 10,
-            "dense_analytics": DenseAnalyticsConfig(mode="uniform"),
+            "PASSES": [
+                {
+                    "name": "pass1",
+                    "time_bucket_seconds": 10,
+                    "dense_analytics": DenseAnalyticsConfig(mode="uniform"),
+                }
+            ]
         }
 
         config = AnalyticsConfig(**config_data)
-        self.assertIsInstance(config.dense_analytics, DenseAnalyticsConfig)
-        self.assertEqual(config.dense_analytics.mode, "uniform")
-        self.assertEqual(config.dense_analytics.time_bucket_seconds, 10)
+        pass_config = config.PASSES[0]
+        self.assertIsInstance(pass_config.dense_analytics, DenseAnalyticsConfig)
+        self.assertEqual(pass_config.dense_analytics.mode, "uniform")
+        self.assertEqual(pass_config.dense_analytics.time_bucket_seconds, 10)
 
 
 if __name__ == "__main__":

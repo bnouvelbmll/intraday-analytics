@@ -4,9 +4,13 @@ import os
 import shutil
 import tempfile
 from unittest.mock import MagicMock, patch, ANY
-from intraday_analytics.execution import ProcessInterval, process_batch_task
-from intraday_analytics.configuration import AnalyticsConfig, PrepareDataMode
+from intraday_analytics.execution import ProcessInterval
+from intraday_analytics.configuration import AnalyticsConfig, PassConfig, PrepareDataMode
 
+
+class MockPipeline:
+    def __init__(self):
+        self.context = {}
 
 class TestConfigPropagation(unittest.TestCase):
 
@@ -35,6 +39,12 @@ class TestConfigPropagation(unittest.TestCase):
             START_DATE="2025-01-01",
             END_DATE="2025-01-01",  # Single day
             TEMP_DIR=self.temp_dir,
+            PASSES=[
+                PassConfig(
+                    name="pass1",
+                    modules=["trade"],
+                )
+            ],
             PREPARE_DATA_MODE=PrepareDataMode.NAIVE.value,
             BATCHING_STRATEGY="heuristic",
             MAX_ROWS_PER_TABLE={"trades": 1000},
@@ -46,17 +56,11 @@ class TestConfigPropagation(unittest.TestCase):
 
         # Mock dependencies
         mock_get_pipeline = MagicMock()
+        mock_get_pipeline.return_value = MockPipeline()
         mock_get_universe = MagicMock()
         mock_get_universe.return_value = pl.DataFrame(
             {"ListingId": ["A"], "MIC": ["X"]}
         )
-
-        # We need to patch:
-        # 1. preload: to avoid actual data loading
-        # 2. SymbolBatcherStreaming: to avoid actual batching logic
-        # 3. glob: to simulate finding batch files
-        # 4. ProcessPoolExecutor: to capture the submit call
-        # 5. aggregate_and_write_final_output: to avoid final step
 
         mock_table = MagicMock(timestamp_col="ts")
         mock_table.name = self.custom_table_name
@@ -66,79 +70,44 @@ class TestConfigPropagation(unittest.TestCase):
         ) as mock_sbs, patch(
             "intraday_analytics.execution.glob.glob"
         ) as mock_glob, patch(
-            "intraday_analytics.execution.ProcessPoolExecutor"
-        ) as mock_executor_cls, patch(
-            "intraday_analytics.execution.as_completed"
-        ) as mock_as_completed, patch(
+            "intraday_analytics.execution.process_batch_task"
+        ) as mock_process_batch_task, patch(
             "intraday_analytics.execution.aggregate_and_write_final_output"
         ), patch(
             "intraday_analytics.execution.ALL_TABLES",
             {self.custom_table_name: mock_table},
+        ), patch(
+            "intraday_analytics.utils.ALL_TABLES",
+            {self.custom_table_name: mock_table},
         ):
-
-            # Mock preload
             mock_preload.return_value = {
                 self.custom_table_name: pl.DataFrame({"ListingId": [], "ts": []})
             }
-
-            # Mock SBS
             mock_sbs_instance = MagicMock()
             mock_sbs_instance.stream_batches.return_value = (
-                []
-            )  # No batches written by SBS
+                [{"my_custom_table": pl.DataFrame()}]
+            )
             mock_sbs.return_value = mock_sbs_instance
-
-            # Mock glob to return one batch file
-            # This simulates that a batch file exists (even if SBS didn't write it, we pretend it's there)
             mock_glob.return_value = [
-                os.path.join(self.temp_dir, "batch-trades-0.parquet")
+                os.path.join(self.temp_dir, "batch-my_custom_table-0.parquet")
             ]
 
-            # Mock Executor
-            mock_executor = MagicMock()
-            mock_executor_cls.return_value.__enter__.return_value = mock_executor
-
-            # Mock Future
-            mock_future = MagicMock()
-            mock_executor.submit.return_value = mock_future
-
-            # Mock as_completed to return the list of futures immediately
-            mock_as_completed.side_effect = lambda futures: futures
-
-            # Instantiate ProcessInterval directly
             p = ProcessInterval(
                 sd=pd.Timestamp("2025-01-01"),
                 ed=pd.Timestamp("2025-01-01"),
                 config=config,
+                pass_config=config.PASSES[0],
                 get_pipeline=mock_get_pipeline,
                 get_universe=mock_get_universe,
+                context_path=os.path.join(self.temp_dir, "context.pkl"),
             )
 
-            # Run it synchronously
             p.run()
 
-            # Verify that executor.submit was called with the correct config
-            # Call signature: submit(process_batch_task, i, temp_dir, current_date, config, pipe)
-
-            # We expect one call because glob returned one file (batch 0)
-            self.assertTrue(
-                mock_executor.submit.called, "ProcessPoolExecutor.submit was not called"
-            )
-
-            args, _ = mock_executor.submit.call_args
-
-            # args[0] is the function (process_batch_task)
-            # args[1] is i (0)
-            # args[2] is temp_dir
-            # args[3] is current_date
-            # args[4] is config <--- This is what we want to check
-
-            passed_func = args[0]
-            passed_config = args[4]
-
-            self.assertEqual(passed_func, process_batch_task)
+            self.assertTrue(mock_process_batch_task.called)
+            args, _ = mock_process_batch_task.call_args
+            passed_config = args[3]
             self.assertEqual(passed_config.TABLES_TO_LOAD, [self.custom_table_name])
-            print("Config correctly propagated to process_batch_task!")
 
 
 import pandas as pd

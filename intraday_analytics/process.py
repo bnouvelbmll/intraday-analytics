@@ -5,60 +5,75 @@ import glob
 import polars as pl
 import pyarrow.parquet as pq
 
+import os
+import logging
+import threading
+import glob
+import polars as pl
+import pyarrow.parquet as pq
 
-def aggregate_and_write_final_output(start_date, end_date, config, temp_dir):
-    """
-    Aggregates all processed batch-metrics files into a single final output file
-    and writes it to the specified S3 location.
-    """
+
+def get_final_s3_path(start_date, end_date, config, pass_name):
+    """Constructs the final S3 output path for a given date range and pass."""
     import bmll2
 
-    logging.info(f"Aggregating metrics for {start_date} to {end_date}...")
-
-    all_metrics_files = glob.glob(os.path.join(temp_dir, "batch-metrics-*.parquet"))
-
-    if not all_metrics_files:
-        logging.warning(f"No batch-metrics files found in {temp_dir} to aggregate.")
-        return
-
-    # Read all batch-metrics files into a single LazyFrame
-    combined_df = pl.scan_parquet(all_metrics_files)
-
-    # Collect and sort the final DataFrame
-    final_df = combined_df.sort(["ListingId", "TimeBucket"])
-
-    # Define the final output path
     dataset_name = config.DATASETNAME
     output_bucket = bmll2.storage_paths()[config.AREA]["bucket"]
     output_prefix = bmll2.storage_paths()[config.AREA]["prefix"]
 
-    # Construct the final S3 path using the template from config
-    # Format dates to ensure only the date part is used in the filename
+    # Append pass_name to the datasetname to distinguish pass outputs
+    final_dataset_name = f"{dataset_name}_{pass_name}"
+
     final_s3_path = config.FINAL_OUTPUT_PATH_TEMPLATE.format(
         bucket=output_bucket,
         prefix=output_prefix,
-        datasetname=dataset_name,
+        datasetname=final_dataset_name,
         start_date=start_date.date(),
         end_date=end_date.date(),
     )
 
-    # Sanitize path to remove double slashes which Polars dislikes (except for s3://)
     if final_s3_path.startswith("s3://"):
         protocol = "s3://"
         path_part = final_s3_path[5:]
         final_s3_path = protocol + path_part.replace("//", "/")
     else:
         final_s3_path = final_s3_path.replace("//", "/")
+    return final_s3_path
 
-    logging.info(f"Writing aggregated analytics to {final_s3_path}")
+
+def aggregate_and_write_final_output(start_date, end_date, config, pass_config, temp_dir):
+    """
+    Aggregates all processed batch-metrics files for a single pass into a final
+    output file and writes it to the specified S3 location.
+    """
+    import bmll2
+
+    logging.info(
+        f"Aggregating metrics for {start_date} to {end_date} (Pass {pass_config.name})..."
+    )
+
+    all_metrics_files = glob.glob(os.path.join(temp_dir, "batch-metrics-*.parquet"))
+
+    if not all_metrics_files:
+        logging.warning(
+            f"No batch-metrics files found in {temp_dir} to aggregate for Pass {pass_config.name}."
+        )
+        return
+
+    combined_df = pl.scan_parquet(all_metrics_files)
+    final_df = combined_df.sort(["ListingId", "TimeBucket"])
+
+    final_s3_path = get_final_s3_path(start_date, end_date, config, pass_config.name)
+
+    logging.info(
+        f"Writing aggregated analytics for Pass {pass_config.name} to {final_s3_path}"
+    )
     final_df.sink_parquet(final_s3_path, compression="snappy")
-    logging.info("Aggregation and final write complete.")
+    logging.info(f"Aggregation and final write for Pass {pass_config.name} complete.")
 
-    # Clean up the temporary batch-metrics files
     for f in all_metrics_files:
         try:
             os.remove(f)
-            logging.debug(f"Removed temporary aggregated file: {f}")
         except OSError as e:
             logging.error(f"Error removing temporary aggregated file {f}: {e}")
 

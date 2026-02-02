@@ -25,12 +25,8 @@ import sys
 import shutil
 import logging
 
-from intraday_analytics import (
-    AnalyticsPipeline,  # Re-add AnalyticsPipeline import
-    DEFAULT_CONFIG,
-    AnalyticsConfig,
-    cache_universe,
-)
+from intraday_analytics.execution import run_metrics_pipeline
+
 from intraday_analytics.utils import create_date_batches
 
 # Re-add direct imports for analytics modules
@@ -50,9 +46,21 @@ USER_CONFIG = {
     "END_DATE": "2025-12-31",
     "UNIVERSE": {"Index": "bepacp"},
     "DATASETNAME": "sample2d",
-    # --- Analytics Parameters ---
-    "TIME_BUCKET_SECONDS": 60,
-    "DENSE_OUTPUT": True,
+    # --- Analytics Passes ---
+    "PASSES": [
+        {
+            "name": "pass1",
+            "time_bucket_seconds": 60,
+            "modules": [
+                "dense",
+                "l2_last",
+                "l2_tw",
+                "trade",
+                "l3",
+                "execution",
+            ],
+        }
+    ],
     # --- Batching & Performance ---
     "PREPARE_DATA_MODE": "s3_shredding",  # "naive" or "s3_shredding"
     "SEPARATE_METRIC_PROCESS": True,
@@ -177,16 +185,16 @@ def get_universe(date):
     return ref
 
 
-def get_pipeline(symbols=None, ref=None, date=None):
+def get_pipeline(pass_config, context, symbols=None, ref=None, date=None):
     """
-    Constructs the analytics pipeline.
+    Constructs the analytics pipeline for a single pass.
 
     This function creates an `AnalyticsPipeline` instance and adds the desired
-    analytics modules to it. The modules are added in the order they should be
-    executed.
+    analytics modules to it based on the pass configuration.
 
     Args:
-        N: The number of L2 order book levels to compute metrics for.
+        pass_config: The configuration for the analytics pass.
+        context: A dictionary for sharing data between passes.
         symbols: An optional list of symbols to filter the universe by.
         ref: An optional reference DataFrame.
         date: The date for which the pipeline is being constructed.
@@ -197,21 +205,24 @@ def get_pipeline(symbols=None, ref=None, date=None):
     assert date is not None
     modules = []
 
-    if CONFIG.DENSE_OUTPUT:
-        cref = ref if ref is not None else get_universe(date)
-        if symbols is not None:
-            cref = cref.filter(pl.col("ListingId").is_in(list(symbols)))
-        modules += [DenseAnalytics(cref, CONFIG.dense_analytics)]
+    for module_name in pass_config.modules:
+        if module_name == "dense":
+            cref = ref if ref is not None else get_universe(date)
+            if symbols is not None:
+                cref = cref.filter(pl.col("ListingId").is_in(list(symbols)))
+            modules.append(DenseAnalytics(cref, pass_config.dense_analytics))
+        elif module_name == "l2_last":
+            modules.append(L2AnalyticsLast(pass_config.l2_analytics))
+        elif module_name == "l2_tw":
+            modules.append(L2AnalyticsTW(pass_config.l2_analytics))
+        elif module_name == "trade":
+            modules.append(TradeAnalytics(pass_config.trade_analytics))
+        elif module_name == "l3":
+            modules.append(L3Analytics(pass_config.l3_analytics))
+        elif module_name == "execution":
+            modules.append(ExecutionAnalytics(pass_config.execution_analytics))
 
-    modules += [
-        L2AnalyticsLast(CONFIG.l2_analytics),
-        L2AnalyticsTW(CONFIG.l2_analytics),
-        TradeAnalytics(CONFIG.trade_analytics),
-        L3Analytics(CONFIG.l3_analytics),
-        ExecutionAnalytics(CONFIG.execution_analytics),
-    ]
-
-    return AnalyticsPipeline(modules, CONFIG)
+    return AnalyticsPipeline(modules, CONFIG, pass_config, context)
 
 
 if __name__ == "__main__":
@@ -228,7 +239,16 @@ if __name__ == "__main__":
     try:
         from intraday_analytics.execution import run_metrics_pipeline
 
-        run_metrics_pipeline(CONFIG, get_pipeline, get_universe)
+        context = {}
+        for pass_config in CONFIG.PASSES:
+            logging.info(f"Starting pass: {pass_config.name}")
+            run_metrics_pipeline(
+                CONFIG,
+                lambda symbols, ref, date: get_pipeline(
+                    pass_config, context, symbols, ref, date
+                ),
+                get_universe,
+            )
 
     except Exception as e:
         logging.error(f"Pipeline failed: {e}", exc_info=True)

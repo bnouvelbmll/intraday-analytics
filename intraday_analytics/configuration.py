@@ -23,6 +23,28 @@ class DenseOutputMode(str, Enum):
     UNIFORM = "uniform"
 
 
+class PassConfig(BaseModel):
+    """Configuration for a single analytics pass."""
+
+    name: str
+    time_bucket_seconds: float = Field(60, gt=0)
+    modules: List[str] = Field(default_factory=list)
+    dense_analytics: DenseAnalyticsConfig = Field(default_factory=DenseAnalyticsConfig)
+    l2_analytics: L2AnalyticsConfig = Field(default_factory=L2AnalyticsConfig)
+    l3_analytics: L3AnalyticsConfig = Field(default_factory=L3AnalyticsConfig)
+    trade_analytics: TradeAnalyticsConfig = Field(default_factory=TradeAnalyticsConfig)
+    execution_analytics: ExecutionAnalyticsConfig = Field(
+        default_factory=ExecutionAnalyticsConfig
+    )
+
+    @model_validator(mode="after")
+    def propagate_pass_settings(self) -> "PassConfig":
+        """Propagate pass-level settings to sub-configs."""
+        self.dense_analytics.time_bucket_seconds = self.time_bucket_seconds
+        self.l2_analytics.time_bucket_seconds = self.time_bucket_seconds
+        return self
+
+
 class AnalyticsConfig(BaseModel):
     # --- Date & Scope ---
     START_DATE: Optional[str] = None
@@ -31,15 +53,8 @@ class AnalyticsConfig(BaseModel):
     DATASETNAME: str = "sample2d"
     UNIVERSE: Optional[Dict[str, str]] = None
 
-    # --- Analytics Parameters ---
-    TIME_BUCKET_SECONDS: float = Field(60, gt=0)
-    dense_analytics: DenseAnalyticsConfig = Field(default_factory=DenseAnalyticsConfig)
-    l2_analytics: L2AnalyticsConfig = Field(default_factory=L2AnalyticsConfig)
-    l3_analytics: L3AnalyticsConfig = Field(default_factory=L3AnalyticsConfig)
-    trade_analytics: TradeAnalyticsConfig = Field(default_factory=TradeAnalyticsConfig)
-    execution_analytics: ExecutionAnalyticsConfig = Field(
-        default_factory=ExecutionAnalyticsConfig
-    )
+    # --- Analytics Passes ---
+    PASSES: List[PassConfig] = Field(default_factory=list)
 
     # --- Batching & Performance ---
     BATCHING_STRATEGY: BatchingStrategyType = BatchingStrategyType.HEURISTIC
@@ -84,13 +99,6 @@ class AnalyticsConfig(BaseModel):
     CLEAN_UP_TEMP_DIR: bool = True
     OVERWRITE_TEMP_DIR: bool = False
     SKIP_EXISTING_OUTPUT: bool = False
-
-    @model_validator(mode="after")
-    def propagate_global_settings(self) -> "AnalyticsConfig":
-        """Propagate global settings to sub-configs."""
-        self.dense_analytics.time_bucket_seconds = self.TIME_BUCKET_SECONDS
-        self.l2_analytics.time_bucket_seconds = self.TIME_BUCKET_SECONDS
-        return self
 
     def to_dict(self):
         return self.model_dump()

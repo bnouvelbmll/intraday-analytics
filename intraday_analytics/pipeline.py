@@ -12,10 +12,6 @@ logger = logging.getLogger(__name__)
 class BaseAnalytics(ABC):
     """
     Abstract base class for all analytics modules.
-
-    This class defines the basic structure and interface for analytics modules.
-    Each module is responsible for computing a specific set of metrics from the
-    input data. The `compute` method must be implemented by all subclasses.
     """
 
     def __init__(
@@ -32,14 +28,12 @@ class BaseAnalytics(ABC):
         self.trades = None
         self.marketstate = None
         self.specific_fill_cols = specific_fill_cols or {}
+        self.context: Dict[str, Any] = {}
 
     @abstractmethod
     def compute(self, **kwargs) -> pl.LazyFrame:
         """
         Computes the analytics for the module.
-
-        This method must be implemented by subclasses. It should perform the
-        necessary computations and return a LazyFrame with the results.
         """
         raise NotImplementedError
 
@@ -158,113 +152,79 @@ class BaseTWAnalytics(BaseAnalytics):
 
 class AnalyticsPipeline:
     """
-    Orchestrates the execution of a series of analytics modules.
-
-    This class manages the entire analytics pipeline, from running individual
-    modules to joining their results into a final, comprehensive DataFrame.
-    It takes a list of `BaseAnalytics` instances and runs them sequentially,
-    passing the output of one module as the input to the next.
+    Orchestrates the execution of a series of analytics modules for a single pass.
     """
 
-    def __init__(self, modules, config):
+    def __init__(self, modules, config, pass_config, context=None):
         """
         Initializes the AnalyticsPipeline.
 
         Args:
             modules: A list of `BaseAnalytics` instances to be run.
-            config: A dictionary of configuration settings for the pipeline.
+            config: The global `AnalyticsConfig` instance.
+            pass_config: The configuration for the specific analytics pass.
+            context: A dictionary for sharing data between passes.
         """
         self.modules = modules
         self.config = config
+        self.pass_config = pass_config
+        self.context = context if context is not None else {}
 
-    # ----------------------------
     def run_on_multi_tables(
         self, **tables_for_sym: Dict[str, pl.DataFrame]
     ) -> pl.DataFrame:
         """
-        Runs the analytics pipeline on a set of data tables.
-
-        This method is the core of the pipeline's execution logic. It iterates
-        through the analytics modules, provides them with the necessary data
-        tables, and joins their results.
-
-        Args:
-            **tables_for_sym: A dictionary where keys are table names (e.g.,
-                              'l2', 'l3') and values are the corresponding
-                              DataFrames.
-
-        Returns:
-            A DataFrame containing the final, combined analytics results.
+        Runs the analytics pipeline on a set of data tables for a single pass.
         """
         base: pl.LazyFrame | None = None
-
         prev_specific_cols = {}
+
         for module in self.modules:
+            # Provide the context to the module
+            module.context = self.context
+
+            # Provide the necessary data tables to the module
             for key in self.config.TABLES_TO_LOAD:
-                # print(module, module.REQUIRES, key, tables_for_sym.keys())
                 if (
                     (key in module.REQUIRES) or (key in ["marketstate"])
                 ) and key in tables_for_sym:
-                    # print(module, key)
                     if hasattr(tables_for_sym[key], "lazy"):
                         setattr(module, key, tables_for_sym[key].lazy())
                     else:
                         setattr(module, key, tables_for_sym[key])
+            
+            # Ensure all required tables are present
             for r in module.REQUIRES:
-                # print(module, r)
                 assert getattr(module, r) is not None
+
+            # Compute the analytics for the module
             lf_result = module.compute()
 
             if self.config.EAGER_EXECUTION:
-                # Force materialization of the module result
-                # We must update module.df because that's what join uses
                 module.df = lf_result.collect().lazy()
                 lf_result = module.df
 
+            # Assert uniqueness of the result
             lf_result = assert_unique_lazy(
                 lf_result, ["ListingId", "TimeBucket"], name=str(module)
             )
 
             if self.config.EAGER_EXECUTION:
-                # Force the check to run now
                 lf_result = lf_result.collect().lazy()
 
+            # Join the result with the base DataFrame
             if base is None:
                 base = lf_result
                 prev_specific_cols = module.specific_fill_cols
-                logger.debug(f"Initial base schema: {base.collect_schema().names()}")
             else:
-                logger.debug(
-                    f"Base schema before join with {module.name}: {base.collect_schema().names()}"
-                )
-                logger.debug(f"Current module ({module.name}) result will be joined.")
                 base = module.join(base, prev_specific_cols, self.config.DEFAULT_FFILL)
                 if self.config.EAGER_EXECUTION:
                     base = base.collect().lazy()
-                logger.debug(
-                    f"Base schema after join with {module.name}: {base.collect_schema().names()}"
-                )
                 prev_specific_cols.update(module.specific_fill_cols)
-            if self.config.ENABLE_PERFORMANCE_LOGS:
-                # Many null listing ids
-                try:
-                    # Force ListingId selection to prevent optimization issues in map_batches
-                    logger.info(
-                        f"{module} SHAPE {base.select(pl.len(), pl.col('ListingId').first()).collect()}"
-                    )
-                except Exception as e:
-                    logger.error(e, exc_info=True)
 
-        # finally collect as eager DataFrame
-        if self.config.ENABLE_PERFORMANCE_LOGS and not self.config.EAGER_EXECUTION:
-            r = base.profile(show_plot=False)
-            logger.info(f"/PERFORMANCE_LOGS - output shape = {r[0].shape}")
-            logger.info(
-                f"{r[1].with_columns(dt=pl.col('end') - pl.col('start')).sort('dt')}"
-            )
-            return r[0]
-        else:
-            return base.collect()
+        # Store the result in the context for subsequent passes
+        self.context[self.pass_config.name] = base.collect()
+        return self.context[self.pass_config.name]
 
     def save(self, df: pl.DataFrame, path: str, profile: bool = False):
         """

@@ -36,6 +36,8 @@ class DataTable(ABC):
         return lf.filter(
             pl.col("ListingId").is_in(ref["ListingId"].to_list())
         ).with_columns(
+            pl.col(self.timestamp_col).cast(pl.Datetime("ns"))
+        ).with_columns(
             TimeBucket=(
                 pl.when(
                     pl.col(self.timestamp_col)
