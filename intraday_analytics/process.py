@@ -41,7 +41,7 @@ def get_final_s3_path(start_date, end_date, config, pass_name):
     return final_s3_path
 
 
-def aggregate_and_write_final_output(start_date, end_date, config, pass_config, temp_dir):
+def aggregate_and_write_final_output(start_date, end_date, config, pass_config, temp_dir, sort_keys=None):
     """
     Aggregates all processed batch-metrics files for a single pass into a final
     output file and writes it to the specified S3 location.
@@ -61,7 +61,18 @@ def aggregate_and_write_final_output(start_date, end_date, config, pass_config, 
         return
 
     combined_df = pl.scan_parquet(all_metrics_files)
-    final_df = combined_df.sort(["ListingId", "TimeBucket"])
+    
+    if sort_keys is None:
+        sort_keys = ["ListingId", "TimeBucket"]
+    
+    # Filter sort_keys to only those present in the dataframe
+    schema_keys = combined_df.collect_schema().names()
+    valid_sort_keys = [k for k in sort_keys if k in schema_keys]
+    
+    if valid_sort_keys:
+        final_df = combined_df.sort(valid_sort_keys)
+    else:
+        final_df = combined_df
 
     final_s3_path = get_final_s3_path(start_date, end_date, config, pass_config.name)
 

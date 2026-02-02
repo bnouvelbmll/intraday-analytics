@@ -79,6 +79,21 @@ class ProcessInterval(Process):
         self.get_universe = get_universe
         self.context_path = context_path
 
+    def update_and_persist_context(self, pipe, final_path):
+        """
+        Updates the pipeline context with the result of the current pass and persists it to disk.
+        """
+        try:
+            # Store the result as a LazyFrame in the context
+            # This allows subsequent passes to use it as input
+            pipe.context[self.pass_config.name] = pl.scan_parquet(final_path)
+        except Exception as e:
+            logging.warning(f"Could not load output of pass {self.pass_config.name} into context: {e}")
+
+        # After the pass is complete, save the context
+        with open(self.context_path, "wb") as f:
+            pickle.dump(pipe.context, f)
+
     def run(self):
         logging.basicConfig(
             level=self.config.LOGGING_LEVEL.upper(),
@@ -168,13 +183,21 @@ class ProcessInterval(Process):
                     for i in tasks
                 )
 
+            # Determine sort keys based on modules
+            sort_keys = ["ListingId", "TimeBucket"]
+            if "generic" in self.pass_config.modules:
+                sort_keys = self.pass_config.generic_analytics.group_by
+
             aggregate_and_write_final_output(
-                self.sd, self.ed, self.config, self.pass_config, TEMP_DIR
+                self.sd, self.ed, self.config, self.pass_config, TEMP_DIR, sort_keys=sort_keys
             )
 
-            # After the pass is complete, save the context
-            with open(self.context_path, "wb") as f:
-                pickle.dump(pipe.context, f)
+            # Update context with the result of this pass
+            final_path = get_final_s3_path(
+                self.sd, self.ed, self.config, self.pass_config.name
+            )
+            
+            self.update_and_persist_context(pipe, final_path)
 
         except Exception as e:
             logging.error(

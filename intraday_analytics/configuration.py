@@ -6,6 +6,7 @@ from .analytics.l2 import L2AnalyticsConfig
 from .analytics.l3 import L3AnalyticsConfig
 from .analytics.trade import TradeAnalyticsConfig
 from .analytics.execution import ExecutionAnalyticsConfig
+from .analytics.generic import GenericAnalyticsConfig
 
 
 class PrepareDataMode(str, Enum):
@@ -36,6 +37,7 @@ class PassConfig(BaseModel):
     execution_analytics: ExecutionAnalyticsConfig = Field(
         default_factory=ExecutionAnalyticsConfig
     )
+    generic_analytics: GenericAnalyticsConfig = Field(default_factory=GenericAnalyticsConfig)
 
     @model_validator(mode="after")
     def propagate_pass_settings(self) -> "PassConfig":

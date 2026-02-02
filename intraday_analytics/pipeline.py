@@ -206,7 +206,7 @@ class AnalyticsPipeline:
 
             # Assert uniqueness of the result
             lf_result = assert_unique_lazy(
-                lf_result, ["ListingId", "TimeBucket"], name=str(module)
+                lf_result, module.join_keys, name=str(module)
             )
 
             if self.config.EAGER_EXECUTION:
