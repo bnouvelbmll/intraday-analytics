@@ -3,8 +3,15 @@ from typing import List, Dict, Optional, Callable, Any
 from abc import ABC, abstractmethod
 import logging
 
-from intraday_analytics.utils import dc, ffill_with_shifts, assert_unique_lazy
-from intraday_analytics.utils import SYMBOL_COL
+from .analytics.dense import DenseAnalytics
+from .analytics.trade import TradeAnalytics
+from .analytics.l2 import L2Analytics
+from .analytics.l3 import L3Analytics
+from .analytics.execution import ExecutionAnalytics
+from .analytics.generic import GenericAnalytics
+from .configuration import PassConfig
+from .utils import dc, ffill_with_shifts, assert_unique_lazy
+from .utils import SYMBOL_COL
 
 logger = logging.getLogger(__name__)
 
@@ -297,3 +304,53 @@ class AnalyticsRunner:
         else:
             result = self.pipeline.run_on_multi_tables(**batch_data)
             self.out_writer(result, "batch")
+
+
+# --- Generic Pipeline Factory ---
+
+
+def create_pipeline(
+    pass_config: PassConfig,
+    context: dict,
+    ref: pl.DataFrame,
+    custom_modules: Dict[str, BaseAnalytics] = None,
+    **kwargs,
+) -> AnalyticsPipeline:
+    """
+    Constructs an analytics pipeline from a configuration using a module registry.
+
+    Args:
+        pass_config: The configuration for the specific analytics pass.
+        context: The shared context dictionary.
+        ref: The reference data DataFrame.
+        custom_modules: A dictionary of custom analytics modules to register.
+        **kwargs: Additional arguments (e.g., symbols, date) that are ignored by
+                  this factory but might be passed by the executor.
+
+    Returns:
+        An `AnalyticsPipeline` instance.
+    """
+    # Default registry of framework modules
+    module_registry = {
+        "dense": lambda: DenseAnalytics(ref, pass_config.dense_analytics),
+        "trade": lambda: TradeAnalytics(pass_config.trade_analytics),
+        "l2": lambda: L2Analytics(pass_config.l2_analytics),
+        "l3": lambda: L3Analytics(pass_config.l3_analytics),
+        "execution": lambda: ExecutionAnalytics(pass_config.execution_analytics),
+        "generic": lambda: GenericAnalytics(pass_config.generic_analytics),
+    }
+
+    # Add any custom modules provided by the user
+    if custom_modules:
+        module_registry.update(custom_modules)
+
+    # Build the list of module instances for this pass
+    modules = []
+    for module_name in pass_config.modules:
+        factory = module_registry.get(module_name)
+        if factory:
+            modules.append(factory())
+        else:
+            logging.warning(f"Module '{module_name}' not recognized in factory.")
+
+    return AnalyticsPipeline(modules, pass_config, context)

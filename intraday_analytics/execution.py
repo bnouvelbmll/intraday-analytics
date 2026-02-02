@@ -224,7 +224,7 @@ class ProcessInterval(Process):
             raise
 
 
-def run_metrics_pipeline(config, get_pipeline, get_universe):
+def run_metrics_pipeline(config, get_universe, get_pipeline=None):
     """
     Runs the full intraday analytics pipeline for all configured passes.
     """
@@ -236,6 +236,10 @@ def run_metrics_pipeline(config, get_pipeline, get_universe):
         format="%(asctime)s - %(levelname)s - %(message)s",
         force=True,
     )
+
+    # If no custom pipeline function is provided, use the default factory
+    if get_pipeline is None:
+        get_pipeline = create_pipeline
 
     temp_dir = config.TEMP_DIR
     if os.path.exists(temp_dir) and config.OVERWRITE_TEMP_DIR:

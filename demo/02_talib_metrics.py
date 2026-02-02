@@ -97,20 +97,22 @@ def get_pipeline(
     pass_config: PassConfig, context: dict, symbols: list, ref: pl.DataFrame, date: str
 ):
     """
-    Constructs the analytics pipeline for each pass.
+    Constructs the analytics pipeline for each pass using a factory pattern.
     """
-    modules = []
-    pass_name = pass_config.name
+    # A factory pattern to build the analytics modules based on the config
+    module_factories = {
+        "dense": lambda: DenseAnalytics(ref, pass_config.dense_analytics),
+        "trade": lambda: TradeAnalytics(pass_config.trade_analytics),
+        "talib_metrics": lambda: TALibAnalytics(),
+    }
 
-    if pass_name == "ohlcv_pass":
-        if "dense" in pass_config.modules:
-            modules.append(DenseAnalytics(ref, DenseAnalyticsConfig()))
-        if "trade" in pass_config.modules:
-            trade_config = TradeAnalyticsConfig(**pass_config.trade_analytics)
-            modules.append(TradeAnalytics(trade_config))
-    elif pass_name == "talib_pass":
-        if "talib_metrics" in pass_config.modules:
-            modules.append(TALibAnalytics())
+    modules = []
+    for module_name in pass_config.modules:
+        factory = module_factories.get(module_name)
+        if factory:
+            modules.append(factory())
+        else:
+            logging.warning(f"Module '{module_name}' not recognized in get_pipeline.")
 
     return AnalyticsPipeline(modules, pass_config, context)
 
@@ -126,8 +128,8 @@ if __name__ == "__main__":
 
     run_metrics_pipeline(
         config,
-        get_pipeline,
         get_universe,
+        get_pipeline=get_pipeline,
     )
 
     logging.info("Pipeline finished successfully.")

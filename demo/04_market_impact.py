@@ -59,25 +59,6 @@ def get_universe(date):
     return pl.DataFrame(universe_query)
 
 
-# --- Pipeline Definition ---
-
-
-def get_pipeline(
-    pass_config: PassConfig, context: dict, symbols: list, ref: pl.DataFrame, date: str
-):
-    """
-    Constructs the analytics pipeline.
-    """
-    modules = []
-    if "dense" in pass_config.modules:
-        modules.append(DenseAnalytics(ref, DenseAnalyticsConfig()))
-    if "trade" in pass_config.modules:
-        trade_config = TradeAnalyticsConfig(**pass_config.trade_analytics)
-        modules.append(TradeAnalytics(trade_config))
-
-    return AnalyticsPipeline(modules, pass_config, context)
-
-
 # --- Main Execution ---
 
 if __name__ == "__main__":
@@ -89,7 +70,6 @@ if __name__ == "__main__":
 
     run_metrics_pipeline(
         config,
-        get_pipeline,
         get_universe,
     )
 
