@@ -50,7 +50,7 @@ def get_universe(date):
     Retrieves the universe of instruments for a given date.
     """
     universe_query = bmll.reference.query(
-        Index="bezacp", object_types="Instrument"
+        Index="bezacp", object_types="Instrument", start_date=date
     ).query("IsAlive")
 
     return pl.DataFrame(universe_query)

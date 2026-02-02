@@ -55,18 +55,11 @@ def get_universe(date):
     This example uses a query to the BMLL reference data service to get a list of
     instruments. You can replace this with your own logic to define the universe.
     """
-    # This is the reference universe as requested by the user.
-    # Note: This is a placeholder and will not be executed by this script.
-    # The actual universe will be determined by the data available in the environment.
     universe_query = bmll.reference.query(
-        Index="bezacp", object_types="Instrument"
+        Index="bezacp", object_type="Instrument", start_date=date.date()
     ).query("IsAlive")
 
-    # For the purpose of this demo, we will return an empty dataframe,
-    # as we cannot execute the query. The pipeline will use the symbols
-    # available in the data source.
-    return pl.DataFrame()
-
+    return pl.DataFrame(universe_query)
 
 # --- Pipeline Definition ---
 
