@@ -54,10 +54,11 @@ def get_universe(date):
 
     This example uses a query to the BMLL reference data service to get a list of
     instruments. You can replace this with your own logic to define the universe.
-    """
+    """ 
+    blacklist=['@ALP','SGMX','SGMU','ALP']
     universe_query = bmll.reference.query(
         Index="bezacp", object_type="Instrument", start_date=date
-    ).query("IsAlive")
+    ).query("IsAlive").query("MIC not in @blacklist")
 
     return pl.DataFrame(universe_query)
 
