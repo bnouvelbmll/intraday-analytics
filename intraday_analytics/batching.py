@@ -352,6 +352,8 @@ class HeuristicBatchingStrategy(BatchingStrategy):
             exceeds = False
             for name in table_names:
                 rows = symbol_estimates.get(name, {}).get(sym, 0)
+                if rows is None:
+                    rows = 0
                 if current_rows[name] + rows > self.max_rows_per_table[name]:
                     exceeds = True
                     break
@@ -364,6 +366,8 @@ class HeuristicBatchingStrategy(BatchingStrategy):
             current_batch.append(sym)
             for name in table_names:
                 rows = symbol_estimates.get(name, {}).get(sym, 0)
+                if rows is None:
+                    rows = 0
                 current_rows[name] += rows
 
         if current_batch:
