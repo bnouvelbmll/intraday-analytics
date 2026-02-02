@@ -112,7 +112,7 @@ class ProcessInterval(Process):
             TEMP_DIR = self.config.TEMP_DIR
             MODE = self.config.PREPARE_DATA_MODE
 
-            ref_partition = self.get_universe(self.sd)
+            ref_partition = self.get_universe(self.sd.date().isoformat())
 
             for current_date in date_range:
                 logging.info(
@@ -120,7 +120,7 @@ class ProcessInterval(Process):
                 )
 
                 try:
-                    ref = self.get_universe(current_date)
+                    ref = self.get_universe(current_date.date().isoformat())
                 except Exception as e:
                     if "No data available" in str(e):
                         logging.warning(
@@ -129,11 +129,13 @@ class ProcessInterval(Process):
                         continue
                     raise e
 
+                symbols = ref["ListingId"].unique().to_list()
                 pipe = self.get_pipeline(
                     pass_config=self.pass_config,
                     context=context,
                     ref=ref,
-                    date=current_date,
+                    date=current_date.date().isoformat(),
+                    symbols=symbols,
                 )
 
                 if MODE == "s3_shredding":
