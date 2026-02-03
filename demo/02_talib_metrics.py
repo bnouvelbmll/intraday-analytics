@@ -27,7 +27,7 @@ from intraday_analytics.configuration import AnalyticsConfig, PassConfig
 
 USER_CONFIG = {
     "START_DATE": "2025-11-01",
-    "END_DATE": "2025-12-31",
+    "END_DATE": "2025-11-07",
     "DATASETNAME": "demo_talib_metrics",
     "PASSES": [
         {
@@ -41,6 +41,7 @@ USER_CONFIG = {
             "modules": ["talib_metrics"],
         },
     ],
+    "SKIP_EXISTING_OUTPUT": True
 }
 
 # --- Universe Definition ---

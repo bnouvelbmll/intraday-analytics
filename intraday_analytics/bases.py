@@ -38,6 +38,10 @@ class BaseAnalytics(ABC):
     ) -> pl.LazyFrame:
         """
         Joins the computed analytics to a base DataFrame.
+
+        This method handles the merging of the module's results with the main
+        DataFrame being built by the pipeline. It also provides options for
+        filling null values that may result from the join.        
         """
         if self.df is None:
             raise ValueError(f"{self.name} has no computed data.")
@@ -70,6 +74,11 @@ class BaseAnalytics(ABC):
 class BaseTWAnalytics(BaseAnalytics):
     """
     A base class for time-weighted analytics modules.
+
+    This class extends `BaseAnalytics` and provides a framework for computing
+    time-weighted metrics. It includes logic for resampling data and applying
+    time-weighted calculations. The `tw_analytics` method must be implemented
+    by subclasses.    
     """
 
     def __init__(self, name: str, specific_fill_cols=None, nanoseconds=None):
