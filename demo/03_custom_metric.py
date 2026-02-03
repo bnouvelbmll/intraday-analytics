@@ -64,18 +64,25 @@ class CustomMetricAnalytics(BaseAnalytics):
     def __init__(self):
         super().__init__("custom")
 
-    def compute(self, trade: pl.LazyFrame) -> pl.LazyFrame:
+    def compute(self) -> pl.LazyFrame:
         """
         Computes the price range and adds it as a new column.
         """
-        return trade.with_columns((pl.col("High") - pl.col("Low")).alias("PriceRange"))
+        return self.trade.with_columns(
+            (pl.col("High") - pl.col("Low")).alias("PriceRange")
+        )
 
 
 # --- Pipeline Definition ---
 
 
 def get_pipeline(
-    pass_config: PassConfig, context: dict, symbols: list, ref: pl.DataFrame, date: str
+    pass_config: PassConfig,
+    context: dict,
+    symbols: list,
+    ref: pl.DataFrame,
+    date: str,
+    config: AnalyticsConfig,
 ):
     """
     Constructs the analytics pipeline using a factory pattern.
@@ -95,7 +102,7 @@ def get_pipeline(
         else:
             logging.warning(f"Module '{module_name}' not recognized in get_pipeline.")
 
-    return AnalyticsPipeline(modules, pass_config, context)
+    return AnalyticsPipeline(modules, config, pass_config, context)
 
 
 # --- Main Execution ---

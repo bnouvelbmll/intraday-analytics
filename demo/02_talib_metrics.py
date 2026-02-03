@@ -39,7 +39,6 @@ USER_CONFIG = {
         {
             "name": "talib_pass",
             "modules": ["talib_metrics"],
-            "tables_to_load": []
         },
     ],
 }
@@ -70,15 +69,27 @@ class TALibAnalytics(BaseAnalytics):
     A custom analytics module to compute TA-Lib indicators.
     """
 
-    REQUIRES = ["ohlcv_pass"]  # Depends on the output of the first pass
+    REQUIRES = []  # Depends on previous pass output, not raw tables
 
     def __init__(self):
         super().__init__("talib")
 
-    def compute(self, ohlcv_pass: pl.LazyFrame) -> pl.LazyFrame:
+    def compute(self) -> pl.LazyFrame:
         """
         Computes SMA and RSI using TA-Lib.
         """
+        source_df = self.context.get("ohlcv_pass")
+        if source_df is None:
+            raise ValueError(
+                "Source pass 'ohlcv_pass' not found in context. "
+                f"Available: {list(self.context.keys())}"
+            )
+
+        if isinstance(source_df, pl.DataFrame):
+            ohlcv_pass = source_df.lazy()
+        else:
+            ohlcv_pass = source_df
+
         return (
             ohlcv_pass.group_by("ListingId", maintain_order=True)
             .agg(
@@ -100,7 +111,12 @@ class TALibAnalytics(BaseAnalytics):
 
 
 def get_pipeline(
-    pass_config: PassConfig, context: dict, symbols: list, ref: pl.DataFrame, date: str
+    pass_config: PassConfig,
+    context: dict,
+    symbols: list,
+    ref: pl.DataFrame,
+    date: str,
+    config: AnalyticsConfig,
 ):
     """
     Constructs the analytics pipeline for each pass using a factory pattern.
@@ -120,7 +136,7 @@ def get_pipeline(
         else:
             logging.warning(f"Module '{module_name}' not recognized in get_pipeline.")
 
-    return AnalyticsPipeline(modules, pass_config, context)
+    return AnalyticsPipeline(modules, config, pass_config, context)
 
 
 # --- Main Execution ---
