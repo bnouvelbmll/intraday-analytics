@@ -1,9 +1,16 @@
 import polars as pl
 from intraday_analytics.bases import BaseAnalytics
 from intraday_analytics.utils import dc
+from .utils import apply_alias
 from pydantic import BaseModel, Field
 from typing import List, Union, Literal, Optional, Set
-from .common import CombinatorialMetricConfig, Side, AggregationMethod
+from .common import (
+    CombinatorialMetricConfig,
+    Side,
+    AggregationMethod,
+    apply_aggregation,
+    metric_doc,
+)
 
 # --- Configuration Models ---
 
@@ -26,6 +33,10 @@ class L3MetricConfig(CombinatorialMetricConfig):
 
     measures: Union[L3Measure, List[L3Measure]] = Field(
         ..., description="Measure to compute (Count or Volume)."
+    )
+    aggregations: List[AggregationMethod] = Field(
+        default_factory=lambda: ["Sum"],
+        description="Aggregations to apply to the metric series.",
     )
 
 
@@ -88,7 +99,9 @@ class L3Analytics(BaseAnalytics):
         # Check dependencies for advanced metrics
         advanced_variants = []
         for req in self.config.advanced_metrics:
-            advanced_variants.extend(req.expand())
+            for variant in req.expand():
+                variant["_output_name_pattern"] = req.output_name_pattern
+                advanced_variants.append(variant)
 
         required_intermediates = set()
         for adv in advanced_variants:
@@ -136,10 +149,10 @@ class L3Analytics(BaseAnalytics):
                 filters = filters & pl.col("MarketState").is_in(market_states)
 
             if measure == "Count":
-                return (pl.when(filters).then(1).otherwise(0)).sum()
+                return pl.when(filters).then(1).otherwise(0)
             elif measure == "Volume":
                 if vol_col:
-                    return (pl.when(filters).then(pl.col(vol_col)).otherwise(0)).sum()
+                    return pl.when(filters).then(pl.col(vol_col)).otherwise(0)
             return None
 
         # Add requested generic metrics
@@ -152,12 +165,23 @@ class L3Analytics(BaseAnalytics):
                     req.market_states,
                 )
                 if expr is not None:
-                    alias = (
-                        req.output_name_pattern.format(**variant)
-                        if req.output_name_pattern
-                        else f"{variant['actions']}{variant['measures']}{variant['sides']}"
-                    )
-                    expressions.append(expr.alias(alias))
+                    for agg in req.aggregations:
+                        agg_expr = apply_aggregation(expr, agg)
+                        if agg_expr is None:
+                            continue
+                        default_name = (
+                            f"{variant['actions']}{variant['measures']}{variant['sides']}"
+                            if agg == "Sum" and req.output_name_pattern is None
+                            else f"{variant['actions']}{variant['measures']}{variant['sides']}{agg}"
+                        )
+                        expressions.append(
+                            apply_alias(
+                                agg_expr,
+                                req.output_name_pattern,
+                                {**variant, "agg": agg},
+                                default_name,
+                            )
+                        )
 
         # Add required intermediates (if not already present)
         # We map the intermediate names to the parameters needed to generate them
@@ -176,7 +200,9 @@ class L3Analytics(BaseAnalytics):
                 if params:
                     expr = create_generic_expr(*params)
                     if expr is not None:
-                        expressions.append(expr.alias(name))
+                        agg_expr = apply_aggregation(expr, "Sum")
+                        if agg_expr is not None:
+                            expressions.append(agg_expr.alias(name))
 
         # Execute Base Aggregation
         if expressions:
@@ -191,11 +217,15 @@ class L3Analytics(BaseAnalytics):
             variant = adv["variant"]
 
             if variant == "ArrivalFlowImbalance":
+                pattern = adv.get("_output_name_pattern")
+                col_name = (
+                    pattern.format(**adv) if pattern else "ArrivalFlowImbalance"
+                )
                 base_df = base_df.with_columns(
                     (
                         (pl.col("InsertVolumeBid") - pl.col("InsertVolumeAsk"))
                         / (pl.col("InsertVolumeBid") + pl.col("InsertVolumeAsk") + 1e-9)
-                    ).alias("ArrivalFlowImbalance")
+                    ).alias(col_name)
                 )
 
             elif variant == "CancelToTradeRatio":
@@ -209,11 +239,15 @@ class L3Analytics(BaseAnalytics):
                     pl.col("ExecCount").fill_null(0)
                 )
 
+                pattern = adv.get("_output_name_pattern")
+                col_name = (
+                    pattern.format(**adv) if pattern else "CancelToTradeRatio"
+                )
                 base_df = base_df.with_columns(
                     (
                         (pl.col("RemoveCountBid") + pl.col("RemoveCountAsk"))
                         / (pl.col("ExecCount") + 1e-9)
-                    ).alias("CancelToTradeRatio")
+                    ).alias(col_name)
                 ).drop("ExecCount")
 
             elif variant == "AvgQueuePosition":
@@ -222,6 +256,12 @@ class L3Analytics(BaseAnalytics):
                     .group_by(gcols)
                     .agg(pl.col("SizeAhead").mean().alias("AvgQueuePosition"))
                 )
+                pattern = adv.get("_output_name_pattern")
+                col_name = (
+                    pattern.format(**adv) if pattern else "AvgQueuePosition"
+                )
+                if col_name != "AvgQueuePosition":
+                    queue_pos = queue_pos.rename({"AvgQueuePosition": col_name})
                 base_df = base_df.join(queue_pos, on=gcols, how="left")
 
             elif variant == "AvgRestingTime":
@@ -230,6 +270,12 @@ class L3Analytics(BaseAnalytics):
                     .group_by(gcols)
                     .agg(pl.col("DurationNs").mean().alias("AvgRestingTime"))
                 )
+                pattern = adv.get("_output_name_pattern")
+                col_name = (
+                    pattern.format(**adv) if pattern else "AvgRestingTime"
+                )
+                if col_name != "AvgRestingTime":
+                    resting_metrics = resting_metrics.rename({"AvgRestingTime": col_name})
                 base_df = base_df.join(resting_metrics, on=gcols, how="left")
 
             elif variant == "FleetingLiquidityRatio":
@@ -248,15 +294,25 @@ class L3Analytics(BaseAnalytics):
                 )
 
                 base_df = base_df.join(fleeting_metrics, on=gcols, how="left")
+                pattern = adv.get("_output_name_pattern")
+                col_name = (
+                    pattern.format(**adv) if pattern else "FleetingLiquidityRatio"
+                )
                 base_df = base_df.with_columns(
                     (
                         pl.col("FleetingVolume")
                         / (pl.col("InsertVolumeBid") + pl.col("InsertVolumeAsk") + 1e-9)
-                    ).alias("FleetingLiquidityRatio")
+                    ).alias(col_name)
                 ).drop("FleetingVolume")
 
             elif variant == "AvgReplacementLatency":
                 latency = self._compute_replacement_latency(adv.get("market_states"))
+                pattern = adv.get("_output_name_pattern")
+                col_name = (
+                    pattern.format(**adv) if pattern else "AvgReplacementLatency"
+                )
+                if col_name != "AvgReplacementLatency":
+                    latency = latency.rename({"AvgReplacementLatency": col_name})
                 base_df = base_df.join(latency, on=gcols, how="left")
 
         # Cleanup: Remove intermediates that were not explicitly requested
@@ -345,3 +401,66 @@ class L3Analytics(BaseAnalytics):
             .group_by(["ListingId", "TimeBucket"])
             .agg(pl.col("LatencyNs").mean().alias("AvgReplacementLatency"))
         )
+
+@metric_doc(
+    module="l3",
+    pattern=r"^(?P<action>Insert|Remove|Update|UpdateInserted|UpdateRemoved)(?P<measure>Count|Volume)(?P<side>Bid|Ask)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
+    template="{measure} of {action} L3 events on {side} side; aggregated by {agg_or_sum} within TimeBucket.",
+)
+def _doc_l3_generic():
+    pass
+
+
+@metric_doc(
+    module="l3",
+    pattern=r"^ArrivalFlowImbalance$",
+    template="Normalized difference between bid-side and ask-side insert volume per TimeBucket.",
+)
+def _doc_l3_arrival_flow():
+    pass
+
+
+@metric_doc(
+    module="l3",
+    pattern=r"^CancelToTradeRatio$",
+    template="Ratio of cancellations to executions per TimeBucket.",
+)
+def _doc_l3_cancel_to_trade():
+    pass
+
+
+@metric_doc(
+    module="l3",
+    pattern=r"^AvgQueuePosition$",
+    template="Mean SizeAhead for executions within the TimeBucket.",
+)
+def _doc_l3_queue_position():
+    pass
+
+
+@metric_doc(
+    module="l3",
+    pattern=r"^AvgRestingTime$",
+    template="Mean lifetime (ns) of orders from insert to end within the TimeBucket.",
+)
+def _doc_l3_resting_time():
+    pass
+
+
+@metric_doc(
+    module="l3",
+    pattern=r"^FleetingLiquidityRatio$",
+    template="Share of inserted volume that is cancelled within the fleeting threshold in the TimeBucket.",
+)
+def _doc_l3_fleeting():
+    pass
+
+
+# Metric documentation (used by schema enumeration)
+@metric_doc(
+    module="l3",
+    pattern=r"^AvgReplacementLatency$",
+    template="Mean latency (ns) between an execution and the next insert on the same side within the TimeBucket.",
+)
+def _doc_l3_latency():
+    pass

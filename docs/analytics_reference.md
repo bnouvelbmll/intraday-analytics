@@ -30,7 +30,9 @@ Key config:
   - measures: Volume, Count, NotionalEUR, NotionalUSD, RetailCount, BlockCount, AuctionNotional, OTCVolume, VWAP, OHLC, AvgPrice, MedianPrice
   - sides: Bid, Ask, Total, Unknown
 - `TradeAnalyticsConfig.discrepancy_metrics` (TradeDiscrepancyConfig)
-  - references: MidAtPrimary, EBBO, BestBid, BestAsk, BestBidAtVenue, BestAskAtVenue, BestBidAtPrimary, BestAskAtPrimary
+  - references: MidAtPrimary, EBBO, PreTradeMid, MidPrice, BestBid, BestAsk, BestBidAtVenue, BestAskAtVenue, BestBidAtPrimary, BestAskAtPrimary
+  - sides: Bid, Ask, Total, Unknown
+  - aggregations: First, Last, Min, Max, Mean, Sum, Median, Std (default: Mean)
 - `TradeAnalyticsConfig.flag_metrics` (TradeFlagConfig)
   - flags: NegotiatedTrade, OddLotTrade, BlockTrade, CrossTrade, AlgorithmicTrade
   - measures: Volume, Count, AvgNotional
@@ -66,8 +68,8 @@ Key config:
   - levels: int or list[int]
   - measure: Quantity, CumQuantity, CumNotional, Orders
 - `L2AnalyticsConfig.volatility` (L2VolatilityConfig)
-  - source: Mid, Bid, Ask, Last, WeightedMid
-  - aggregations: Std
+  - source: Mid, Bid, Ask, WeightedMid
+  - aggregations: First, Last, Min, Max, Mean, Sum, Median, Std
 
 ---
 
@@ -91,7 +93,14 @@ Required tables:
 - l3
 
 Key config:
-- `L3AnalyticsConfig` (module-specific metrics defined in l3 analytics implementation)
+- `L3AnalyticsConfig.generic_metrics` (L3MetricConfig)
+  - sides: Bid, Ask
+  - actions: Insert, Remove, Update, UpdateInserted, UpdateRemoved
+  - measures: Count, Volume
+  - aggregations: First, Last, Min, Max, Mean, Sum, Median, Std (default: Sum)
+- `L3AnalyticsConfig.advanced_metrics` (L3AdvancedConfig)
+  - variant: ArrivalFlowImbalance, CancelToTradeRatio, AvgQueuePosition, AvgRestingTime, FleetingLiquidityRatio, AvgReplacementLatency
+  - fleeting_threshold_ms: threshold for fleeting liquidity ratio
 
 Notes:
 - L3 metrics rely on per-order event sequences; ensure l3 data is complete for the time range.

@@ -2,7 +2,7 @@ import polars as pl
 from intraday_analytics.bases import BaseAnalytics, BaseTWAnalytics
 from pydantic import BaseModel, Field
 from typing import Optional, List, Union, Literal
-from .common import CombinatorialMetricConfig, Side, AggregationMethod
+from .common import CombinatorialMetricConfig, Side, AggregationMethod, metric_doc
 
 # --- Configuration Models ---
 
@@ -86,7 +86,7 @@ class L2VolatilityConfig(CombinatorialMetricConfig):
         Field(default="Mid", description="The price series to measure volatility on.")
     )
 
-    # Override default aggregation to Std since that's the definition of Volatility here
+    # Default to Std, but allow any aggregation from AggregationMethod
     aggregations: List[AggregationMethod] = ["Std"]
 
 
@@ -454,48 +454,64 @@ class L2AnalyticsTW(BaseTWAnalytics):
 
         # --- Volatility ---
         for req in self.config.volatility:
-            if "Std" in req.aggregations:
-                for variant in req.expand():
-                    source = variant["source"]
+            for variant in req.expand():
+                source = variant["source"]
 
-                    # Define price expression
-                    if source == "Mid":
-                        p = (pl.col("AskPrice1") + pl.col("BidPrice1")) / 2
-                    elif source == "WeightedMid":
-                        p = (
-                            pl.col("BidPrice1") * pl.col("AskQuantity1")
-                            + pl.col("AskPrice1") * pl.col("BidQuantity1")
-                        ) / (pl.col("AskQuantity1") + pl.col("BidQuantity1"))
-                    elif source == "Bid":
-                        p = pl.col("BidPrice1")
-                    elif source == "Ask":
-                        p = pl.col("AskPrice1")
-                    else:
+                # Define price expression
+                if source == "Mid":
+                    p = (pl.col("AskPrice1") + pl.col("BidPrice1")) / 2
+                elif source == "WeightedMid":
+                    p = (
+                        pl.col("BidPrice1") * pl.col("AskQuantity1")
+                        + pl.col("AskPrice1") * pl.col("BidQuantity1")
+                    ) / (pl.col("AskQuantity1") + pl.col("BidQuantity1"))
+                elif source == "Bid":
+                    p = pl.col("BidPrice1")
+                elif source == "Ask":
+                    p = pl.col("AskPrice1")
+                else:
+                    continue
+
+                # Log Returns: ln(p_t / p_{t-1})
+                log_ret = (p / p.shift(1)).log()
+
+                agg_map = {
+                    "First": log_ret.first(),
+                    "Last": log_ret.last(),
+                    "Min": log_ret.min(),
+                    "Max": log_ret.max(),
+                    "Mean": log_ret.mean(),
+                    "Sum": log_ret.sum(),
+                    "Median": log_ret.median(),
+                    "Std": log_ret.std(),
+                }
+
+                for agg in req.aggregations:
+                    if agg not in agg_map:
+                        logging.warning(
+                            f"Unsupported aggregation '{agg}' for L2 volatility."
+                        )
                         continue
 
-                    # Log Returns: ln(p_t / p_{t-1})
-                    log_ret = (p / p.shift(1)).log()
+                    expr = agg_map[agg]
 
-                    # Standard Deviation of Log Returns
-                    std_dev = log_ret.std()
+                    if agg == "Std":
+                        # Annualization Factor
+                        # We estimate frequency as Count / TimeBucketSeconds
+                        # Annualized Vol = Std * Sqrt(SecondsInYear * Frequency)
+                        #                = Std * Sqrt(SecondsInYear * Count / TimeBucketSeconds)
+                        # SecondsInYear = 252 * 24 * 60 * 60 (Trading Year assumption)
+                        seconds_in_year = 252 * 24 * 60 * 60
+                        bucket_seconds = self.config.time_bucket_seconds
 
-                    # Annualization Factor
-                    # We estimate frequency as Count / TimeBucketSeconds
-                    # Annualized Vol = Std * Sqrt(SecondsInYear * Frequency)
-                    #                = Std * Sqrt(SecondsInYear * Count / TimeBucketSeconds)
-                    # SecondsInYear = 252 * 24 * 60 * 60 (Trading Year assumption)
-                    seconds_in_year = 252 * 24 * 60 * 60
-                    bucket_seconds = self.config.time_bucket_seconds
-
-                    # Avoid division by zero if bucket_seconds is somehow 0 (unlikely)
-                    factor = (seconds_in_year * pl.len() / bucket_seconds).sqrt()
-
-                    expr = std_dev * factor
+                        # Avoid division by zero if bucket_seconds is somehow 0 (unlikely)
+                        factor = (seconds_in_year * pl.len() / bucket_seconds).sqrt()
+                        expr = expr * factor
 
                     alias = (
-                        req.output_name_pattern.format(**variant)
+                        req.output_name_pattern.format(**variant, agg=agg)
                         if req.output_name_pattern
-                        else f"L2Volatility{source}Std"
+                        else f"L2Volatility{source}{agg}"
                     )
                     expressions.append(expr.alias(alias))
 
@@ -518,3 +534,85 @@ class L2AnalyticsTW(BaseTWAnalytics):
         expressions.append(pl.col("EventTimestamp").len().alias("EventCount"))
 
         return l2.agg(expressions)
+
+
+# Metric documentation (used by schema enumeration)
+@metric_doc(
+    module="l2_last",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|Quantity|NumOrders|CumQuantity|CumOrders|CumNotional)(?P<level>\d+)$",
+    template="{side} {measure} at book level {level} (last snapshot in TimeBucket).",
+)
+def _doc_l2_last_liquidity():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
+    pattern=r"^Spread(?P<variant>Abs|BPS)$",
+    template="Best ask minus best bid in {variant} terms using the last snapshot in the TimeBucket.",
+)
+def _doc_l2_last_spread():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
+    pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)$",
+    template="Order book imbalance for {measure} up to level {level} using the last snapshot, expressed as a normalized difference between bid and ask.",
+)
+def _doc_l2_last_imbalance():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
+    pattern=r"^L2Volatility(?P<source>Mid|Bid|Ask|WeightedMid)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)$",
+    template="Aggregation ({agg}) of log-returns of {source} price within TimeBucket; Std is annualized.",
+)
+def _doc_l2_last_volatility():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|Quantity|NumOrders|CumQuantity|CumOrders|CumNotional)(?P<level>\d+)TWA$",
+    template="{side} {measure} at level {level}, time-weighted average over TimeBucket.",
+)
+def _doc_l2_tw_liquidity():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^Spread(?P<variant>Abs|BPS)TWA$",
+    template="Time-weighted average of spread in {variant} terms within the TimeBucket.",
+)
+def _doc_l2_tw_spread():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)TWA$",
+    template="Time-weighted average of order book imbalance for {measure} up to level {level}, expressed as a normalized difference between bid and ask.",
+)
+def _doc_l2_tw_imbalance():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^L2Volatility(?P<source>Mid|Bid|Ask|WeightedMid)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)$",
+    template="Aggregation ({agg}) of log-returns of {source} price within TimeBucket; Std is annualized.",
+)
+def _doc_l2_tw_volatility():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^EventCount$",
+    template="Number of L2 events in the TimeBucket.",
+)
+def _doc_l2_tw_event_count():
+    pass

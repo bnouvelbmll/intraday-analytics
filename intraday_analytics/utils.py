@@ -13,6 +13,10 @@ from .tables import DataTable, ALL_TABLES
 # small constants
 SYMBOL_COL = "ListingId"
 
+# Float normalization defaults (tweak as needed)
+FLOAT_CANONICAL_DECIMALS = 6
+FLOAT_CANONICAL_EPS = 1e-12
+
 
 def dc(lf, suffix, timebucket_col="TimeBucket"):
     """
@@ -348,6 +352,51 @@ def assert_unique_lazy(lf: pl.LazyFrame, keys: list[str], name=""):
 
     # map_batches injects a custom function into the physical plan
     return lf.map_batches(check_uniqueness)
+
+
+def normalize_float_df(
+    df: pl.DataFrame,
+    decimals: int = FLOAT_CANONICAL_DECIMALS,
+    eps: float = FLOAT_CANONICAL_EPS,
+) -> pl.DataFrame:
+    if df.is_empty():
+        return df
+    float_cols = [
+        c
+        for c, dt in zip(df.columns, df.dtypes)
+        if dt in (pl.Float32, pl.Float64)
+    ]
+    if not float_cols:
+        return df
+    updates = {}
+    for c in float_cols:
+        rounded = pl.col(c).round(decimals)
+        updates[c] = (
+            pl.when((pl.col(c) - rounded).abs() <= eps)
+            .then(rounded)
+            .otherwise(pl.col(c))
+        )
+    return df.with_columns(**updates)
+
+
+def normalize_float_lf(
+    lf: pl.LazyFrame,
+    decimals: int = FLOAT_CANONICAL_DECIMALS,
+    eps: float = FLOAT_CANONICAL_EPS,
+) -> pl.LazyFrame:
+    schema = lf.collect_schema()
+    float_cols = [c for c, dt in schema.items() if dt in (pl.Float32, pl.Float64)]
+    if not float_cols:
+        return lf
+    updates = {}
+    for c in float_cols:
+        rounded = pl.col(c).round(decimals)
+        updates[c] = (
+            pl.when((pl.col(c) - rounded).abs() <= eps)
+            .then(rounded)
+            .otherwise(pl.col(c))
+        )
+    return lf.with_columns(**updates)
 
 
 def write_per_listing(df, listing_id):

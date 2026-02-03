@@ -4,8 +4,53 @@ from abc import ABC
 
 # --- Common Types ---
 AggregationMethod = Literal[
-    "First", "Last", "Min", "Max", "Mean", "Sum", "Std", "TWA", "VWA", "Median"
+    "First",
+    "Last",
+    "Min",
+    "Max",
+    "Mean",
+    "Sum",
+    "Std",
+    "TWA",
+    "VWA",
+    "Median",
+    "NotionalWeighted",
 ]
+
+# Metric hint registry (module can register hints for schema metadata).
+METRIC_HINTS: list[dict] = []
+
+
+def metric_hint(module: str, pattern: str, default_agg: AggregationMethod, weight_col: str | None = None):
+    def _decorator(fn):
+        METRIC_HINTS.append(
+            {
+                "module": module,
+                "pattern": pattern,
+                "default_agg": default_agg,
+                "weight_col": weight_col,
+            }
+        )
+        return fn
+
+    return _decorator
+
+
+METRIC_DOCS: list[dict] = []
+
+
+def metric_doc(module: str, pattern: str, template: str):
+    def _decorator(fn):
+        METRIC_DOCS.append(
+            {
+                "module": module,
+                "pattern": pattern,
+                "template": template,
+            }
+        )
+        return fn
+
+    return _decorator
 Side = Literal["Bid", "Ask"]
 MarketState = Literal[
     "AUCTION_ON_DEMAND",
@@ -84,3 +129,23 @@ class CombinatorialMetricConfig(BaseModel, ABC):
                 expanded.append(item)
 
         return expanded
+
+
+def apply_aggregation(expr, agg: AggregationMethod):
+    if agg == "First":
+        return expr.first()
+    if agg == "Last":
+        return expr.last()
+    if agg == "Min":
+        return expr.min()
+    if agg == "Max":
+        return expr.max()
+    if agg == "Mean":
+        return expr.mean()
+    if agg == "Sum":
+        return expr.sum()
+    if agg == "Std":
+        return expr.std()
+    if agg == "Median":
+        return expr.median()
+    return None

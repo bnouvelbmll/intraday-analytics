@@ -96,3 +96,7 @@ config.PASSES[1].generic_analytics.talib_indicators = [
 - See docs/analytics_reference.md for what each module computes.
 - See docs/multi_pass_analytics.md for chaining passes.
 - See docs/shredding_and_batching.md for data preparation modes.
+ - Enumerate all potential pass1 metric columns:
+   - `python -m intraday_analytics.schema_utils`
+   - `python -m intraday_analytics.schema_utils --config /path/to/config.json`
+   - `python -m intraday_analytics.schema_utils --levels 5 --impact-horizons 1s,5s --json`
