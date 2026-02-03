@@ -300,6 +300,7 @@ class ExecutionAnalytics(BaseAnalytics):
     module="execution",
     pattern=r"^ExecutedVolume(?P<side>Bid|Ask)$",
     template="Sum of executed volume from L3 executions on {side} side per TimeBucket.",
+    unit="Shares",
 )
 def _doc_exec_executed_volume():
     pass
@@ -309,6 +310,7 @@ def _doc_exec_executed_volume():
     module="execution",
     pattern=r"^Vwap(?P<side>Bid|Ask)$",
     template="VWAP of executions on {side} side per TimeBucket.",
+    unit="XLOC",
 )
 def _doc_exec_vwap():
     pass
@@ -316,8 +318,19 @@ def _doc_exec_vwap():
 
 @metric_doc(
     module="execution",
-    pattern=r"^(?P<trade_type>Lit|Dark)(?P<measure>Volume|VWAP|VolumeWeightedPricePlacement)(?P<agg_side>Buy|Sell|Unknown)Aggressor$",
+    pattern=r"^(?P<trade_type>Lit|Dark)(?P<measure>Volume)(?P<agg_side>Buy|Sell|Unknown)Aggressor$",
     template="{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket.",
+    unit="Shares",
+)
+def _doc_exec_trade_volume():
+    pass
+
+
+@metric_doc(
+    module="execution",
+    pattern=r"^(?P<trade_type>Lit|Dark)(?P<measure>VWAP|VolumeWeightedPricePlacement)(?P<agg_side>Buy|Sell|Unknown)Aggressor$",
+    template="{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket.",
+    unit="XLOC",
 )
 def _doc_exec_trade_breakdown():
     pass
@@ -327,6 +340,7 @@ def _doc_exec_trade_breakdown():
     module="execution",
     pattern=r"^TradeImbalance$",
     template="Normalized trade volume imbalance between buy and sell aggressor sides per TimeBucket.",
+    unit="Imbalance",
 )
 def _doc_exec_trade_imbalance():
     pass

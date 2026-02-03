@@ -2,7 +2,12 @@ import polars as pl
 from intraday_analytics.bases import BaseAnalytics, BaseTWAnalytics
 from pydantic import BaseModel, Field
 from typing import Optional, List, Union, Literal
-from .common import CombinatorialMetricConfig, Side, AggregationMethod, metric_doc
+from .common import (
+    CombinatorialMetricConfig,
+    Side,
+    AggregationMethod,
+    metric_doc,
+)
 
 # --- Configuration Models ---
 
@@ -539,8 +544,29 @@ class L2AnalyticsTW(BaseTWAnalytics):
 # Metric documentation (used by schema enumeration)
 @metric_doc(
     module="l2_last",
-    pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|Quantity|NumOrders|CumQuantity|CumOrders|CumNotional)(?P<level>\d+)$",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|CumNotional)(?P<level>\d+)$",
     template="{side} {measure} at book level {level} (last snapshot in TimeBucket).",
+    unit="XLOC",
+)
+def _doc_l2_last_liquidity_price():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>Quantity|CumQuantity|SizeAhead)(?P<level>\d+)$",
+    template="{side} {measure} at book level {level} (last snapshot in TimeBucket).",
+    unit="Shares",
+)
+def _doc_l2_last_liquidity_qty():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>NumOrders|CumOrders)(?P<level>\d+)$",
+    template="{side} {measure} at book level {level} (last snapshot in TimeBucket).",
+    unit="Orders",
 )
 def _doc_l2_last_liquidity():
     pass
@@ -548,8 +574,29 @@ def _doc_l2_last_liquidity():
 
 @metric_doc(
     module="l2_last",
-    pattern=r"^Spread(?P<variant>Abs|BPS)$",
-    template="Best ask minus best bid in {variant} terms using the last snapshot in the TimeBucket.",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>InsertAge|LastMod)(?P<level>\d+)$",
+    template="{side} {measure} at book level {level} (last snapshot in TimeBucket).",
+    unit="Nanoseconds",
+)
+def _doc_l2_last_liquidity_time():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
+    pattern=r"^SpreadAbs$",
+    template="Best ask minus best bid in absolute price terms using the last snapshot in the TimeBucket.",
+    unit="XLOC",
+)
+def _doc_l2_last_spread_abs():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
+    pattern=r"^SpreadBPS$",
+    template="Best ask minus best bid in basis points using the last snapshot in the TimeBucket.",
+    unit="BPS",
 )
 def _doc_l2_last_spread():
     pass
@@ -557,8 +604,19 @@ def _doc_l2_last_spread():
 
 @metric_doc(
     module="l2_last",
+    pattern=r"^SpreadBps$",
+    template="Best ask minus best bid in basis points using the last snapshot in the TimeBucket.",
+    unit="BPS",
+)
+def _doc_l2_last_spread_alt():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
     pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)$",
     template="Order book imbalance for {measure} up to level {level} using the last snapshot, expressed as a normalized difference between bid and ask.",
+    unit="Imbalance",
 )
 def _doc_l2_last_imbalance():
     pass
@@ -566,8 +624,19 @@ def _doc_l2_last_imbalance():
 
 @metric_doc(
     module="l2_last",
+    pattern=r"^(VolumeImbalance|OrdersImbalance)(?P<level>\d+)$",
+    template="Order book imbalance for volume or orders up to level {level} using the last snapshot, expressed as a normalized difference between bid and ask.",
+    unit="Imbalance",
+)
+def _doc_l2_last_imbalance_alt():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
     pattern=r"^L2Volatility(?P<source>Mid|Bid|Ask|WeightedMid)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)$",
     template="Aggregation ({agg}) of log-returns of {source} price within TimeBucket; Std is annualized.",
+    unit="Percentage",
 )
 def _doc_l2_last_volatility():
     pass
@@ -575,8 +644,29 @@ def _doc_l2_last_volatility():
 
 @metric_doc(
     module="l2_tw",
-    pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|Quantity|NumOrders|CumQuantity|CumOrders|CumNotional)(?P<level>\d+)TWA$",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|CumNotional)(?P<level>\d+)TWA$",
     template="{side} {measure} at level {level}, time-weighted average over TimeBucket.",
+    unit="XLOC",
+)
+def _doc_l2_tw_liquidity_price():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>Quantity|CumQuantity|SizeAhead)(?P<level>\d+)TWA$",
+    template="{side} {measure} at level {level}, time-weighted average over TimeBucket.",
+    unit="Shares",
+)
+def _doc_l2_tw_liquidity_qty():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>NumOrders|CumOrders)(?P<level>\d+)TWA$",
+    template="{side} {measure} at level {level}, time-weighted average over TimeBucket.",
+    unit="Orders",
 )
 def _doc_l2_tw_liquidity():
     pass
@@ -584,8 +674,29 @@ def _doc_l2_tw_liquidity():
 
 @metric_doc(
     module="l2_tw",
-    pattern=r"^Spread(?P<variant>Abs|BPS)TWA$",
-    template="Time-weighted average of spread in {variant} terms within the TimeBucket.",
+    pattern=r"^(?P<side>Bid|Ask)(?P<measure>InsertAge|LastMod)(?P<level>\d+)TWA$",
+    template="{side} {measure} at level {level}, time-weighted average over TimeBucket.",
+    unit="Nanoseconds",
+)
+def _doc_l2_tw_liquidity_time():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^SpreadAbsTWA$",
+    template="Time-weighted average of spread in absolute price terms within the TimeBucket.",
+    unit="XLOC",
+)
+def _doc_l2_tw_spread_abs():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^SpreadBPSTWA$",
+    template="Time-weighted average of spread in basis points within the TimeBucket.",
+    unit="BPS",
 )
 def _doc_l2_tw_spread():
     pass
@@ -593,8 +704,19 @@ def _doc_l2_tw_spread():
 
 @metric_doc(
     module="l2_tw",
+    pattern=r"^SpreadRelTWA$",
+    template="Time-weighted average of spread in relative terms within the TimeBucket.",
+    unit="BPS",
+)
+def _doc_l2_tw_spread_rel():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
     pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)TWA$",
     template="Time-weighted average of order book imbalance for {measure} up to level {level}, expressed as a normalized difference between bid and ask.",
+    unit="Imbalance",
 )
 def _doc_l2_tw_imbalance():
     pass
@@ -604,6 +726,7 @@ def _doc_l2_tw_imbalance():
     module="l2_tw",
     pattern=r"^L2Volatility(?P<source>Mid|Bid|Ask|WeightedMid)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)$",
     template="Aggregation ({agg}) of log-returns of {source} price within TimeBucket; Std is annualized.",
+    unit="Percentage",
 )
 def _doc_l2_tw_volatility():
     pass
@@ -613,6 +736,17 @@ def _doc_l2_tw_volatility():
     module="l2_tw",
     pattern=r"^EventCount$",
     template="Number of L2 events in the TimeBucket.",
+    unit="Orders",
 )
 def _doc_l2_tw_event_count():
+    pass
+
+
+@metric_doc(
+    module="l2_tw",
+    pattern=r"^(?P<source>Mid|Ask|Bid)TWA$",
+    template="Time-weighted average of {source} price within the TimeBucket.",
+    unit="XLOC",
+)
+def _doc_l2_tw_mid_prices():
     pass

@@ -393,11 +393,18 @@ def _apply_docs(module: str, col: str):
         data.setdefault("agg_or_sum", data.get("agg") or "Sum")
         data.setdefault("agg_or_mean", data.get("agg") or "Mean")
         data.setdefault("scope_or_empty", data.get("scope") or "")
+        template = doc.get("template", "")
+        unit_template = doc.get("unit") or ""
         try:
-            return doc.get("template", "").format(**data)
+            definition = template.format(**data)
         except Exception:
-            return doc.get("template", "")
-    return ""
+            definition = template
+        try:
+            unit = unit_template.format(**data) if unit_template else ""
+        except Exception:
+            unit = unit_template
+        return {"definition": definition, "unit": unit}
+    return {"definition": "", "unit": ""}
 
 
 def _default_hint_for_column(col: str, weight_col: str | None):
@@ -455,7 +462,7 @@ def _apply_hints(
                     "column": c,
                     "default_agg": hint["default_agg"],
                     "weight_col": hint["weight_col"],
-                    "definition": _apply_docs(module, c),
+                    **_apply_docs(module, c),
                 }
             )
         hinted[module] = rows

@@ -486,8 +486,89 @@ class TradeAnalytics(BaseAnalytics):
 # Metric documentation (used by schema enumeration)
 @metric_doc(
     module="trade",
-    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Volume|Count|NotionalEUR|NotionalUSD|VWAP|AvgPrice|MedianPrice|Open|High|Low|Close)$",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Volume)$",
     template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="Shares",
+)
+def _doc_trade_volume():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalEUR)$",
+    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="EUR",
+)
+def _doc_trade_notional_eur():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalUSD)$",
+    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="USD",
+)
+def _doc_trade_notional_usd():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^VWAP$",
+    template="Volume-weighted average price over trades in the TimeBucket.",
+    unit="XLOC",
+)
+def _doc_trade_vwap_default():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^VolumeWeightedPricePlacement$",
+    template="Volume-weighted price placement over trades in the TimeBucket.",
+    unit="XLOC",
+)
+def _doc_trade_vwpp_default():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Volume$",
+    template="Sum of trade volume over trades in the TimeBucket.",
+    unit="Shares",
+)
+def _doc_trade_volume_default():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<ohlc>Open|High|Low|Close)$",
+    template="{ohlc} trade price over trades in the TimeBucket.",
+    unit="XLOC",
+)
+def _doc_trade_ohlc_default():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice|Open|High|Low|Close)$",
+    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="XLOC",
+)
+def _doc_trade_prices():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Count)$",
+    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="Trades",
 )
 def _doc_trade_generic():
     pass
@@ -497,8 +578,39 @@ def _doc_trade_generic():
     module="trade",
     pattern=r"^DiscrepancyTo(?P<reference>.+?)(?P<side>Bid|Ask)?(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
     template="Price difference between LocalPrice and {reference} expressed in basis points for {side_or_total} trades; aggregated by {agg_or_mean} within the TimeBucket.",
+    unit="BPS",
 )
 def _doc_trade_discrepancy():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>Volume)(?P<side>Bid|Ask)?$",
+    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.",
+    unit="Shares",
+)
+def _doc_trade_flag_volume():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>AvgNotional)(?P<side>Bid|Ask)?$",
+    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.",
+    unit="EUR",
+)
+def _doc_trade_flag_avg_notional():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>Count)(?P<side>Bid|Ask)?$",
+    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.",
+    unit="Trades",
+)
+def _doc_trade_flag_count():
     pass
 
 
@@ -513,8 +625,19 @@ def _doc_trade_flags():
 
 @metric_doc(
     module="trade",
-    pattern=r"^(?P<measure>PreTradeElapsedTimeChg|PostTradeElapsedTimeChg|PricePoint)(?P<scope>AtPrimary|AtVenue)?$",
+    pattern=r"^PricePoint(?P<scope>AtPrimary|AtVenue)?$",
+    template="Mean of PricePoint{scope_or_empty} over trades in the TimeBucket.",
+    unit="Probability",
+)
+def _doc_trade_price_point():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<measure>PreTradeElapsedTimeChg|PostTradeElapsedTimeChg)(?P<scope>AtPrimary|AtVenue)?$",
     template="Mean of {measure}{scope_or_empty} over trades in the TimeBucket.",
+    unit="Nanoseconds",
 )
 def _doc_trade_change():
     pass
@@ -524,6 +647,7 @@ def _doc_trade_change():
     module="trade",
     pattern=r"^(?P<metric>EffectiveSpread|RealizedSpread|PriceImpact)(?P<horizon>.+)$",
     template="Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration.",
+    unit="XLOC",
 )
 def _doc_trade_impact():
     pass
@@ -533,6 +657,7 @@ def _doc_trade_impact():
     module="trade",
     pattern=r"^RetailTradeImbalance$",
     template="Retail trade imbalance as the net retail notional divided by total retail notional in the TimeBucket.",
+    unit="Imbalance",
 )
 def _doc_trade_retail_imbalance():
     pass

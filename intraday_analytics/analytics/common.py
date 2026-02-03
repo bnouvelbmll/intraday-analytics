@@ -39,13 +39,14 @@ def metric_hint(module: str, pattern: str, default_agg: AggregationMethod, weigh
 METRIC_DOCS: list[dict] = []
 
 
-def metric_doc(module: str, pattern: str, template: str):
+def metric_doc(module: str, pattern: str, template: str, unit: str | None = None):
     def _decorator(fn):
         METRIC_DOCS.append(
             {
                 "module": module,
                 "pattern": pattern,
                 "template": template,
+                "unit": unit,
             }
         )
         return fn

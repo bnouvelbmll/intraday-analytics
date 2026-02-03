@@ -404,10 +404,21 @@ class L3Analytics(BaseAnalytics):
 
 @metric_doc(
     module="l3",
-    pattern=r"^(?P<action>Insert|Remove|Update|UpdateInserted|UpdateRemoved)(?P<measure>Count|Volume)(?P<side>Bid|Ask)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
+    pattern=r"^(?P<action>Insert|Remove|Update|UpdateInserted|UpdateRemoved)(?P<measure>Count)(?P<side>Bid|Ask)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
     template="{measure} of {action} L3 events on {side} side; aggregated by {agg_or_sum} within TimeBucket.",
+    unit="Orders",
 )
-def _doc_l3_generic():
+def _doc_l3_generic_count():
+    pass
+
+
+@metric_doc(
+    module="l3",
+    pattern=r"^(?P<action>Insert|Remove|Update|UpdateInserted|UpdateRemoved)(?P<measure>Volume)(?P<side>Bid|Ask)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
+    template="{measure} of {action} L3 events on {side} side; aggregated by {agg_or_sum} within TimeBucket.",
+    unit="Shares",
+)
+def _doc_l3_generic_volume():
     pass
 
 
@@ -415,6 +426,7 @@ def _doc_l3_generic():
     module="l3",
     pattern=r"^ArrivalFlowImbalance$",
     template="Normalized difference between bid-side and ask-side insert volume per TimeBucket.",
+    unit="Imbalance",
 )
 def _doc_l3_arrival_flow():
     pass
@@ -424,6 +436,7 @@ def _doc_l3_arrival_flow():
     module="l3",
     pattern=r"^CancelToTradeRatio$",
     template="Ratio of cancellations to executions per TimeBucket.",
+    unit="Percentage",
 )
 def _doc_l3_cancel_to_trade():
     pass
@@ -433,6 +446,7 @@ def _doc_l3_cancel_to_trade():
     module="l3",
     pattern=r"^AvgQueuePosition$",
     template="Mean SizeAhead for executions within the TimeBucket.",
+    unit="Shares",
 )
 def _doc_l3_queue_position():
     pass
@@ -442,6 +456,7 @@ def _doc_l3_queue_position():
     module="l3",
     pattern=r"^AvgRestingTime$",
     template="Mean lifetime (ns) of orders from insert to end within the TimeBucket.",
+    unit="Nanoseconds",
 )
 def _doc_l3_resting_time():
     pass
@@ -451,6 +466,7 @@ def _doc_l3_resting_time():
     module="l3",
     pattern=r"^FleetingLiquidityRatio$",
     template="Share of inserted volume that is cancelled within the fleeting threshold in the TimeBucket.",
+    unit="Percentage",
 )
 def _doc_l3_fleeting():
     pass
@@ -461,6 +477,17 @@ def _doc_l3_fleeting():
     module="l3",
     pattern=r"^AvgReplacementLatency$",
     template="Mean latency (ns) between an execution and the next insert on the same side within the TimeBucket.",
+    unit="Nanoseconds",
 )
 def _doc_l3_latency():
+    pass
+
+
+@metric_doc(
+    module="l3",
+    pattern=r"^_count$",
+    template="Count of L3 events in the TimeBucket.",
+    unit="Orders",
+)
+def _doc_l3_count_fallback():
     pass
