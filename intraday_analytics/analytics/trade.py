@@ -2,7 +2,13 @@ import polars as pl
 from intraday_analytics.bases import BaseAnalytics
 from pydantic import BaseModel, Field
 from typing import List, Union, Literal, Optional
-from .common import CombinatorialMetricConfig, Side, AggregationMethod
+from .common import (
+    CombinatorialMetricConfig,
+    Side,
+    AggregationMethod,
+    apply_aggregation,
+    metric_doc,
+)
 from .utils import apply_market_state_filter, apply_alias, MetricGenerator
 
 # --- Configuration Models ---
@@ -46,6 +52,8 @@ class TradeGenericConfig(CombinatorialMetricConfig):
 DiscrepancyReference = Literal[
     "MidAtPrimary",
     "EBBO",
+    "PreTradeMid",
+    "MidPrice",
     "BestBid",
     "BestAsk",
     "BestBidAtVenue",
@@ -65,6 +73,13 @@ class TradeDiscrepancyConfig(CombinatorialMetricConfig):
 
     references: Union[DiscrepancyReference, List[DiscrepancyReference]] = Field(
         ..., description="Reference price to compare against."
+    )
+    sides: Union[SideWithTotal, List[SideWithTotal]] = Field(
+        default="Total", description="Filter trades by aggressor side."
+    )
+    aggregations: List[AggregationMethod] = Field(
+        default_factory=lambda: ["Mean"],
+        description="Aggregations to apply to discrepancy series.",
     )
 
 
@@ -151,7 +166,7 @@ class TradeAnalyticsConfig(BaseModel):
     impact_metrics: List[TradeImpactConfig] = Field(default_factory=list)
 
     # Legacy support
-    enable_retail_imbalance: bool = True
+    enable_retail_imbalance: bool = False
 
 
 class TradeAnalytics(BaseAnalytics):
@@ -307,9 +322,12 @@ class TradeAnalytics(BaseAnalytics):
 
     def _compute_discrepancy(self, req, variant):
         ref_name = variant["references"]
+        side = variant["sides"]
         ref_map = {
             "MidAtPrimary": "PostTradeMidAtPrimary",
             "EBBO": "PostTradeMid",
+            "PreTradeMid": "PreTradeMid",
+            "MidPrice": "MidPrice",
             "BestBid": "BestBidPrice",
             "BestAsk": "BestAskPrice",
             "BestBidAtVenue": "BestBidPriceAtVenue",
@@ -323,12 +341,28 @@ class TradeAnalytics(BaseAnalytics):
             ref_col = pl.col(col_name)
             expr = 10000 * (price_col - ref_col) / ref_col
 
+            if side == "Bid":
+                expr = pl.when(pl.col("AggressorSide") == 2).then(expr).otherwise(None)
+            elif side == "Ask":
+                expr = pl.when(pl.col("AggressorSide") == 1).then(expr).otherwise(None)
+
             expr = apply_market_state_filter(expr, req.market_states)
 
-            default_name = f"DiscrepancyTo{ref_name}"
-            return apply_alias(
-                expr.mean(), req.output_name_pattern, variant, default_name
-            )
+            outputs = []
+            for agg in req.aggregations:
+                agg_expr = apply_aggregation(expr, agg)
+                if agg_expr is None:
+                    continue
+                side_suffix = "" if side == "Total" else f"{side}"
+                default_name = (
+                    f"DiscrepancyTo{ref_name}{side_suffix}"
+                    if agg == "Mean" and req.output_name_pattern is None
+                    else f"DiscrepancyTo{ref_name}{side_suffix}{agg}"
+                )
+                outputs.append(
+                    apply_alias(agg_expr, req.output_name_pattern, {**variant, "agg": agg}, default_name)
+                )
+            return outputs if outputs else None
         return None
 
     def _compute_flag(self, req, variant):
@@ -370,7 +404,7 @@ class TradeAnalytics(BaseAnalytics):
         if expr is not None:
             default_name = f"{flag_name}{measure}"
             if side != "Total":
-                default_name += f"_{side}"
+                default_name += f"{side}"
             return apply_alias(expr, req.output_name_pattern, variant, default_name)
         return None
 
@@ -447,3 +481,199 @@ class TradeAnalytics(BaseAnalytics):
             )
         )
         return df.join(df2, on=gcols, how="left")
+
+
+# Metric documentation (used by schema enumeration)
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Volume)$",
+    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="Shares",
+)
+def _doc_trade_volume():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalEUR)$",
+    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="EUR",
+)
+def _doc_trade_notional_eur():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalUSD)$",
+    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="USD",
+)
+def _doc_trade_notional_usd():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^VWAP$",
+    template="Volume-weighted average price over trades in the TimeBucket.",
+    unit="XLOC",
+)
+def _doc_trade_vwap_default():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^VolumeWeightedPricePlacement$",
+    template="Volume-weighted price placement over trades in the TimeBucket.",
+    unit="XLOC",
+)
+def _doc_trade_vwpp_default():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Volume$",
+    template="Sum of trade volume over trades in the TimeBucket.",
+    unit="Shares",
+)
+def _doc_trade_volume_default():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<ohlc>Open|High|Low|Close)$",
+    template="{ohlc} trade price over trades in the TimeBucket.",
+    unit="XLOC",
+    group="TradeOHLCTotal",
+    group_role="{ohlc}",
+    group_semantics="ohlc_bar,ffill_non_naive",
+)
+def _doc_trade_ohlc_default():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<ohlc>Open|High|Low|Close)$",
+    template="Trade {ohlc} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="XLOC",
+    group="TradeOHLC{side}",
+    group_role="{ohlc}",
+    group_semantics="ohlc_bar,ffill_non_naive",
+)
+def _doc_trade_ohlc_group():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice)$",
+    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="XLOC",
+)
+def _doc_trade_prices():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Count)$",
+    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="Trades",
+)
+def _doc_trade_generic():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^DiscrepancyTo(?P<reference>.+?)(?P<side>Bid|Ask)?(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
+    template="Price difference between LocalPrice and {reference} expressed in basis points for {side_or_total} trades; aggregated by {agg_or_mean} within the TimeBucket.",
+    unit="BPS",
+)
+def _doc_trade_discrepancy():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>Volume)(?P<side>Bid|Ask)?$",
+    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.",
+    unit="Shares",
+)
+def _doc_trade_flag_volume():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>AvgNotional)(?P<side>Bid|Ask)?$",
+    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.",
+    unit="EUR",
+)
+def _doc_trade_flag_avg_notional():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>Count)(?P<side>Bid|Ask)?$",
+    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.",
+    unit="Trades",
+)
+def _doc_trade_flag_count():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>Volume|Count|AvgNotional)(?P<side>Bid|Ask)?$",
+    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket. AvgNotional is the average trade notional.",
+)
+def _doc_trade_flags():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^PricePoint(?P<scope>AtPrimary|AtVenue)?$",
+    template="Mean of PricePoint{scope_or_empty} over trades in the TimeBucket.",
+    unit="Probability",
+)
+def _doc_trade_price_point():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<measure>PreTradeElapsedTimeChg|PostTradeElapsedTimeChg)(?P<scope>AtPrimary|AtVenue)?$",
+    template="Mean of {measure}{scope_or_empty} over trades in the TimeBucket.",
+    unit="Nanoseconds",
+)
+def _doc_trade_change():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^(?P<metric>EffectiveSpread|RealizedSpread|PriceImpact)(?P<horizon>.+)$",
+    template="Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration.",
+    unit="XLOC",
+)
+def _doc_trade_impact():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^RetailTradeImbalance$",
+    template="Retail trade imbalance as the net retail notional divided by total retail notional in the TimeBucket.",
+    unit="Imbalance",
+)
+def _doc_trade_retail_imbalance():
+    pass

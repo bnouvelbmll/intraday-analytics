@@ -145,6 +145,8 @@ def shred_data_task(
     current_date,
     temp_dir,
     get_universe,
+    time_bucket_anchor,
+    time_bucket_closed,
 ):
     """
     Worker function to run S3 shredding in a separate process.
@@ -152,7 +154,12 @@ def shred_data_task(
     try:
         # Reconstruct transform_fns inside the worker
         transform_fns = {
-            table.name: table.get_transform_fn(ref, nanoseconds)
+            table.name: table.get_transform_fn(
+                ref,
+                nanoseconds,
+                time_bucket_anchor=time_bucket_anchor,
+                time_bucket_closed=time_bucket_closed,
+            )
             for table in table_definitions
         }
 
@@ -245,7 +252,13 @@ class ProcessInterval(Process):
                     continue
                 table = ALL_TABLES.get(table_name)
                 if table:
-                    lf = table.post_load_process(lf, ref, nanoseconds)
+                    lf = table.post_load_process(
+                        lf,
+                        ref,
+                        nanoseconds,
+                        time_bucket_anchor=self.pass_config.time_bucket_anchor,
+                        time_bucket_closed=self.pass_config.time_bucket_closed,
+                    )
                 lf_dict[table_name] = lf
 
         if not lf_dict:
@@ -306,6 +319,8 @@ class ProcessInterval(Process):
                 current_date,
                 self.config.TEMP_DIR,
                 self.get_universe,
+                self.pass_config.time_bucket_anchor,
+                self.pass_config.time_bucket_closed,
             )
             future.result()
 

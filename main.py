@@ -59,6 +59,9 @@ USER_CONFIG = {
                 "l3",
                 "execution",
             ],
+            "trade_analytics": {
+                "enable_retail_imbalance": True,
+            },
         }
     ],
     # --- Batching & Performance ---

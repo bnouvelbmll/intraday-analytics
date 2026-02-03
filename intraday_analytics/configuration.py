@@ -29,6 +29,8 @@ class PassConfig(BaseModel):
 
     name: str
     time_bucket_seconds: float = Field(60, gt=0)
+    time_bucket_anchor: Literal["end", "start"] = "end"
+    time_bucket_closed: Literal["right", "left"] = "right"
     modules: List[str] = Field(default_factory=list)
     dense_analytics: DenseAnalyticsConfig = Field(default_factory=DenseAnalyticsConfig)
     l2_analytics: L2AnalyticsConfig = Field(default_factory=L2AnalyticsConfig)
@@ -45,7 +47,11 @@ class PassConfig(BaseModel):
     def propagate_pass_settings(self) -> "PassConfig":
         """Propagate pass-level settings to sub-configs."""
         self.dense_analytics.time_bucket_seconds = self.time_bucket_seconds
+        self.dense_analytics.time_bucket_anchor = self.time_bucket_anchor
+        self.dense_analytics.time_bucket_closed = self.time_bucket_closed
         self.l2_analytics.time_bucket_seconds = self.time_bucket_seconds
+        self.l2_analytics.time_bucket_anchor = self.time_bucket_anchor
+        self.l2_analytics.time_bucket_closed = self.time_bucket_closed
         return self
 
 

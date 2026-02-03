@@ -5,7 +5,12 @@ import glob
 import polars as pl
 import pyarrow.parquet as pq
 
-from intraday_analytics.utils import is_s3_path, retry_s3
+from intraday_analytics.utils import (
+    is_s3_path,
+    retry_s3,
+    normalize_float_lf,
+    normalize_float_df,
+)
 
 
 def get_final_s3_path(start_date, end_date, config, pass_name):
@@ -71,6 +76,8 @@ def aggregate_and_write_final_output(
     else:
         final_df = combined_df
 
+    final_df = normalize_float_lf(final_df)
+
     final_s3_path = get_final_s3_path(start_date, end_date, config, pass_config.name)
 
     logging.info(
@@ -112,6 +119,7 @@ class BatchWriter:
         Initializes the ParquetWriter if it's the first write.
         """
         with self.lock:  # Ensure only one thread writes at a time
+            df = normalize_float_df(df)
             tbl = df.to_arrow()
             if self.writer is None:
                 # Ensure the directory exists

@@ -19,6 +19,8 @@ class DenseAnalyticsConfig(BaseModel):
     mode: Literal["adaptative", "uniform"] = "adaptative"
     time_interval: Optional[List[str]] = None
     time_bucket_seconds: Optional[float] = None
+    time_bucket_anchor: Literal["end", "start"] = "end"
+    time_bucket_closed: Literal["right", "left"] = "right"
 
 
 class DenseAnalytics(BaseAnalytics):
@@ -58,14 +60,25 @@ class DenseAnalytics(BaseAnalytics):
             )
 
             frequency = str(int(self.config.time_bucket_seconds * 1e9)) + "ns"
+            interval_ns = int(self.config.time_bucket_seconds * 1e9)
+            interval = dt.timedelta(seconds=self.config.time_bucket_seconds)
+
+            if self.config.time_bucket_anchor == "end":
+                range_start = start_dt + interval
+                range_end = end_dt
+                closed = "both"
+            else:
+                range_start = start_dt
+                range_end = end_dt
+                closed = "left"
 
             times_df = pl.DataFrame(
                 {
                     "TimeBucket": pl.datetime_range(
-                        start=start_dt,
-                        end=end_dt,
+                        start=range_start,
+                        end=range_end,
                         interval=frequency,
-                        closed="left",
+                        closed=closed,
                         eager=True,
                     )
                 }

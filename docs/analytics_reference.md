@@ -7,6 +7,10 @@ Terminology:
 - TimeBucket: time bucket column (derived from timestamps).
 - All modules produce metrics grouped by ListingId and TimeBucket unless noted.
 
+Time bucket semantics (pass-level):
+- `time_bucket_anchor`: `"end"` (default) or `"start"`. `"end"` attaches the bucket timestamp to the end of the interval to avoid lookahead bias.
+- `time_bucket_closed`: `"right"` (default) or `"left"`. Default is right-closed, left-open intervals.
+
 ## Module Index
 
 - trade
@@ -30,7 +34,9 @@ Key config:
   - measures: Volume, Count, NotionalEUR, NotionalUSD, RetailCount, BlockCount, AuctionNotional, OTCVolume, VWAP, OHLC, AvgPrice, MedianPrice
   - sides: Bid, Ask, Total, Unknown
 - `TradeAnalyticsConfig.discrepancy_metrics` (TradeDiscrepancyConfig)
-  - references: MidAtPrimary, EBBO, BestBid, BestAsk, BestBidAtVenue, BestAskAtVenue, BestBidAtPrimary, BestAskAtPrimary
+  - references: MidAtPrimary, EBBO, PreTradeMid, MidPrice, BestBid, BestAsk, BestBidAtVenue, BestAskAtVenue, BestBidAtPrimary, BestAskAtPrimary
+  - sides: Bid, Ask, Total, Unknown
+  - aggregations: First, Last, Min, Max, Mean, Sum, Median, Std (default: Mean)
 - `TradeAnalyticsConfig.flag_metrics` (TradeFlagConfig)
   - flags: NegotiatedTrade, OddLotTrade, BlockTrade, CrossTrade, AlgorithmicTrade
   - measures: Volume, Count, AvgNotional
@@ -45,6 +51,7 @@ Key config:
 Notes:
 - Aggregations are per bucket and side (Bid/Ask/Total as configured).
 - If no metrics are configured, defaults are computed.
+- OHLC is event-based by default (Open=first, Close=last within bucket). For non-naive OHLC with forward-fill behavior, use L2 OHLC or compute in pass2.
 
 ---
 
@@ -66,8 +73,13 @@ Key config:
   - levels: int or list[int]
   - measure: Quantity, CumQuantity, CumNotional, Orders
 - `L2AnalyticsConfig.volatility` (L2VolatilityConfig)
-  - source: Mid, Bid, Ask, Last, WeightedMid
-  - aggregations: Std
+  - source: Mid, Bid, Ask, WeightedMid
+  - aggregations: First, Last, Min, Max, Mean, Sum, Median, Std
+- `L2AnalyticsConfig.ohlc` (L2OHLCConfig)
+  - source: Mid, Bid, Ask, WeightedMid
+  - open_mode: event | prev_close
+    - event: Open/High/Low/Close from events within the bucket
+    - prev_close: uses previous Close for empty buckets and fills OHLC consistently
 
 ---
 
@@ -91,7 +103,14 @@ Required tables:
 - l3
 
 Key config:
-- `L3AnalyticsConfig` (module-specific metrics defined in l3 analytics implementation)
+- `L3AnalyticsConfig.generic_metrics` (L3MetricConfig)
+  - sides: Bid, Ask
+  - actions: Insert, Remove, Update, UpdateInserted, UpdateRemoved
+  - measures: Count, Volume
+  - aggregations: First, Last, Min, Max, Mean, Sum, Median, Std (default: Sum)
+- `L3AnalyticsConfig.advanced_metrics` (L3AdvancedConfig)
+  - variant: ArrivalFlowImbalance, CancelToTradeRatio, AvgQueuePosition, AvgRestingTime, FleetingLiquidityRatio, AvgReplacementLatency
+  - fleeting_threshold_ms: threshold for fleeting liquidity ratio
 
 Notes:
 - L3 metrics rely on per-order event sequences; ensure l3 data is complete for the time range.

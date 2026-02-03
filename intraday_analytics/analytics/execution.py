@@ -3,7 +3,7 @@ from intraday_analytics.bases import BaseAnalytics
 from intraday_analytics.utils import dc
 from pydantic import BaseModel, Field
 from typing import List, Union, Literal, Dict
-from .common import CombinatorialMetricConfig, Side, AggregationMethod
+from .common import CombinatorialMetricConfig, Side, AggregationMethod, metric_doc
 
 # --- Configuration Models ---
 
@@ -293,3 +293,54 @@ class ExecutionAnalytics(BaseAnalytics):
 
         self.df = df
         return df
+
+
+# Metric documentation (used by schema enumeration)
+@metric_doc(
+    module="execution",
+    pattern=r"^ExecutedVolume(?P<side>Bid|Ask)$",
+    template="Sum of executed volume from L3 executions on {side} side per TimeBucket.",
+    unit="Shares",
+)
+def _doc_exec_executed_volume():
+    pass
+
+
+@metric_doc(
+    module="execution",
+    pattern=r"^Vwap(?P<side>Bid|Ask)$",
+    template="VWAP of executions on {side} side per TimeBucket.",
+    unit="XLOC",
+)
+def _doc_exec_vwap():
+    pass
+
+
+@metric_doc(
+    module="execution",
+    pattern=r"^(?P<trade_type>Lit|Dark)(?P<measure>Volume)(?P<agg_side>Buy|Sell|Unknown)Aggressor$",
+    template="{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket.",
+    unit="Shares",
+)
+def _doc_exec_trade_volume():
+    pass
+
+
+@metric_doc(
+    module="execution",
+    pattern=r"^(?P<trade_type>Lit|Dark)(?P<measure>VWAP|VolumeWeightedPricePlacement)(?P<agg_side>Buy|Sell|Unknown)Aggressor$",
+    template="{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket.",
+    unit="XLOC",
+)
+def _doc_exec_trade_breakdown():
+    pass
+
+
+@metric_doc(
+    module="execution",
+    pattern=r"^TradeImbalance$",
+    template="Normalized trade volume imbalance between buy and sell aggressor sides per TimeBucket.",
+    unit="Imbalance",
+)
+def _doc_exec_trade_imbalance():
+    pass

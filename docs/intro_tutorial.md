@@ -8,6 +8,7 @@ It focuses on user-facing analytics modules and does not cover the internal dens
 - You run one or more Passes. Each pass has its own modules and time bucket size.
 - Modules compute metrics from raw tables (trades, l2, l3, marketstate) or from previous passes.
 - Output of pass N can be used by pass N+1 (via the context).
+- Time buckets are right-closed and end-anchored by default to avoid lookahead bias.
 
 ## 2) Minimal end-to-end example
 
@@ -39,6 +40,8 @@ config = AnalyticsConfig(
             name="pass1",
             modules=["trade"],
             time_bucket_seconds=60,
+            time_bucket_anchor="end",
+            time_bucket_closed="right",
         )
     ],
     CLEAN_UP_TEMP_DIR=False,
@@ -51,6 +54,7 @@ run_metrics_pipeline(config=config, get_universe=get_universe)
 Notes:
 - `TABLES_TO_LOAD` is auto-derived from the modules. You can still set it explicitly and it will be unioned with the derived list.
 - ListingId should be numeric in the raw tables and universe for best compatibility.
+- You can switch bucket semantics per pass using `time_bucket_anchor` and `time_bucket_closed`.
 
 ## 3) Multi-pass example (trade -> generic)
 
@@ -96,3 +100,7 @@ config.PASSES[1].generic_analytics.talib_indicators = [
 - See docs/analytics_reference.md for what each module computes.
 - See docs/multi_pass_analytics.md for chaining passes.
 - See docs/shredding_and_batching.md for data preparation modes.
+ - Enumerate all potential pass1 metric columns:
+   - `python -m intraday_analytics.schema_utils`
+   - `python -m intraday_analytics.schema_utils --config /path/to/config.json`
+   - `python -m intraday_analytics.schema_utils --levels 5 --impact-horizons 1s,5s --json`
