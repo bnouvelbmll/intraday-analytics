@@ -95,15 +95,36 @@ class L2VolatilityConfig(CombinatorialMetricConfig):
     aggregations: List[AggregationMethod] = ["Std"]
 
 
+class L2OHLCConfig(CombinatorialMetricConfig):
+    """
+    Configuration for OHLC bars computed from L2 price series.
+    """
+
+    metric_type: Literal["L2_OHLC"] = "L2_OHLC"
+
+    source: Union[Literal["Mid", "Bid", "Ask", "WeightedMid"], List[str]] = Field(
+        default="Mid", description="The price series to compute OHLC on."
+    )
+
+    open_mode: Literal["event", "prev_close"] = Field(
+        default="event",
+        description="How to compute Open for empty buckets: 'event' uses first event; "
+        "'prev_close' uses previous Close and fills empty buckets.",
+    )
+
+
 class L2AnalyticsConfig(BaseModel):
     ENABLED: bool = True
     time_bucket_seconds: Optional[float] = None
+    time_bucket_anchor: Literal["end", "start"] = "end"
+    time_bucket_closed: Literal["right", "left"] = "right"
 
     # Combinatorial Configs
     liquidity: List[L2LiquidityConfig] = Field(default_factory=list)
     spreads: List[L2SpreadConfig] = Field(default_factory=list)
     imbalances: List[L2ImbalanceConfig] = Field(default_factory=list)
     volatility: List[L2VolatilityConfig] = Field(default_factory=list)
+    ohlc: List[L2OHLCConfig] = Field(default_factory=list)
 
     # Legacy support (optional, can be deprecated)
     levels: int = 10
@@ -128,6 +149,7 @@ class L2AnalyticsLast(BaseAnalytics):
         gcols = ["MIC", "ListingId", "Ticker", "TimeBucket", "CurrencyCode"]
 
         expressions = []
+        ohlc_specs = []
 
         # --- Liquidity ---
         for req in self.config.liquidity:
@@ -252,6 +274,52 @@ class L2AnalyticsLast(BaseAnalytics):
                 )
                 expressions.append(expr.alias(alias))
 
+        # --- OHLC ---
+        for req in self.config.ohlc:
+            for variant in req.expand():
+                source = variant["source"]
+                if source == "Mid":
+                    p = (pl.col("AskPrice1") + pl.col("BidPrice1")) / 2
+                elif source == "WeightedMid":
+                    p = (
+                        pl.col("BidPrice1") * pl.col("AskQuantity1")
+                        + pl.col("AskPrice1") * pl.col("BidQuantity1")
+                    ) / (pl.col("AskQuantity1") + pl.col("BidQuantity1"))
+                elif source == "Bid":
+                    p = pl.col("BidPrice1")
+                elif source == "Ask":
+                    p = pl.col("AskPrice1")
+                else:
+                    continue
+
+                names = {}
+                for ohlc in ["Open", "High", "Low", "Close"]:
+                    variant_with_ohlc = {**variant, "ohlc": ohlc}
+                    default_name = f"{source}{ohlc}"
+                    if ohlc == "Open":
+                        expr = p.first()
+                    elif ohlc == "High":
+                        expr = p.max()
+                    elif ohlc == "Low":
+                        expr = p.min()
+                    else:
+                        expr = p.last()
+
+                    alias = (
+                        req.output_name_pattern.format(**variant_with_ohlc)
+                        if req.output_name_pattern
+                        else default_name
+                    )
+                    expressions.append(expr.alias(alias))
+                    names[ohlc] = alias
+
+                ohlc_specs.append(
+                    {
+                        "open_mode": variant.get("open_mode", "event"),
+                        "names": names,
+                    }
+                )
+
         # --- Legacy Fallback (if config is empty) ---
         if not expressions:
             N = self.config.levels
@@ -316,8 +384,86 @@ class L2AnalyticsLast(BaseAnalytics):
         # Execute Aggregation
         l2_last = self.l2.group_by(gcols).agg(expressions)
 
+        if any(spec["open_mode"] == "prev_close" for spec in ohlc_specs):
+            l2_last = self._ensure_dense_time_buckets(l2_last, gcols)
+            for spec in ohlc_specs:
+                if spec["open_mode"] != "prev_close":
+                    continue
+                l2_last = self._apply_prev_close_ohlc(
+                    l2_last, gcols, spec["names"]
+                )
+
         self.df = l2_last
         return l2_last
+
+    def _ensure_dense_time_buckets(
+        self, df: pl.LazyFrame, gcols: list[str]
+    ) -> pl.LazyFrame:
+        if not self.config.time_bucket_seconds:
+            raise ValueError("time_bucket_seconds must be set for OHLC prev_close mode.")
+        group_cols = [c for c in gcols if c != "TimeBucket"]
+        df = df.with_columns(pl.col("TimeBucket").cast(pl.Datetime("ns")))
+        interval = int(self.config.time_bucket_seconds * 1e9)
+        frequency = f"{interval}ns"
+
+        ranges = (
+            df.group_by(group_cols)
+            .agg(
+                pl.datetime_range(
+                    start=pl.col("TimeBucket").min(),
+                    end=pl.col("TimeBucket").max(),
+                    interval=frequency,
+                    closed="both",
+                )
+                .cast(pl.Datetime("ns"))
+                .alias("TimeBucket")
+            )
+            .explode("TimeBucket")
+        )
+
+        return ranges.join(df, on=group_cols + ["TimeBucket"], how="left")
+
+    def _apply_prev_close_ohlc(
+        self, df: pl.LazyFrame, gcols: list[str], names: dict[str, str]
+    ) -> pl.LazyFrame:
+        group_cols = [c for c in gcols if c != "TimeBucket"]
+        open_col = names["Open"]
+        high_col = names["High"]
+        low_col = names["Low"]
+        close_col = names["Close"]
+        temp_col = f"__{close_col}_filled"
+
+        no_event = (
+            pl.col(open_col).is_null()
+            & pl.col(high_col).is_null()
+            & pl.col(low_col).is_null()
+            & pl.col(close_col).is_null()
+        )
+
+        df = df.with_columns(
+            pl.when(no_event)
+            .then(pl.col(close_col).shift(1).over(group_cols))
+            .otherwise(pl.col(close_col))
+            .alias(temp_col)
+        ).with_columns(pl.col(temp_col).forward_fill().over(group_cols).alias(temp_col))
+
+        return df.with_columns(
+            [
+                pl.when(no_event)
+                .then(pl.col(temp_col))
+                .otherwise(pl.col(open_col))
+                .alias(open_col),
+                pl.when(no_event)
+                .then(pl.col(temp_col))
+                .otherwise(pl.col(high_col))
+                .alias(high_col),
+                pl.when(no_event)
+                .then(pl.col(temp_col))
+                .otherwise(pl.col(low_col))
+                .alias(low_col),
+                pl.col(temp_col).alias(close_col),
+            ]
+        ).drop(temp_col)
 
 
 class L2AnalyticsTW(BaseTWAnalytics):
@@ -549,6 +695,19 @@ class L2AnalyticsTW(BaseTWAnalytics):
     unit="XLOC",
 )
 def _doc_l2_last_liquidity_price():
+    pass
+
+
+@metric_doc(
+    module="l2_last",
+    pattern=r"^(?P<source>Bid|Ask|Mid|WeightedMid)(?P<ohlc>Open|High|Low|Close)$",
+    template="L2 {ohlc} for {source} price within the TimeBucket.",
+    unit="XLOC",
+    group="L2OHLC{source}",
+    group_role="{ohlc}",
+    group_semantics="ohlc_bar,ffill_non_naive",
+)
+def _doc_l2_last_ohlc():
     pass
 
 

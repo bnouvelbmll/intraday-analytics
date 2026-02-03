@@ -228,7 +228,13 @@ def filter_existing_s3_files(paths, storage_options=None):
 
 
 def preload(
-    sd, ed, ref, nanoseconds, tables: list[DataTable]
+    sd,
+    ed,
+    ref,
+    nanoseconds,
+    tables: list[DataTable],
+    time_bucket_anchor: str = "end",
+    time_bucket_closed: str = "right",
 ) -> dict[str, pl.LazyFrame]:
     """
     Preloads data from the data lake for a given date range and reference data.
@@ -256,7 +262,13 @@ def preload(
     for table in tables:
         logging.info(f"  - Loading table: {table.name}")
         lf = table.load(markets, sd, ed)
-        processed_lf = table.post_load_process(lf, ref, nanoseconds)
+        processed_lf = table.post_load_process(
+            lf,
+            ref,
+            nanoseconds,
+            time_bucket_anchor=time_bucket_anchor,
+            time_bucket_closed=time_bucket_closed,
+        )
         loaded_tables[table.name] = processed_lf
 
     return loaded_tables

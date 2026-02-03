@@ -25,7 +25,9 @@ class TestMarketStateTableTransform(unittest.TestCase):
         nanoseconds = 60_000_000_000  # 1 minute
 
         table = MarketStateTable()
-        transform_fn = table.get_transform_fn(ref, nanoseconds)
+        transform_fn = table.get_transform_fn(
+            ref, nanoseconds, time_bucket_anchor="end", time_bucket_closed="right"
+        )
 
         # Apply transformation
         result_lf = transform_fn(df)

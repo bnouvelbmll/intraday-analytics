@@ -5,6 +5,23 @@ import os
 from abc import ABC, abstractmethod
 
 
+def _timebucket_expr(
+    ts_col: pl.Expr,
+    nanoseconds: int,
+    anchor: str,
+    closed: str,
+) -> pl.Expr:
+    trunc = ts_col.dt.truncate(f"{nanoseconds}ns")
+    dur = pl.duration(nanoseconds=nanoseconds)
+    if anchor == "end":
+        if closed == "right":
+            return pl.when(ts_col == trunc).then(ts_col).otherwise(trunc + dur)
+        return trunc + dur
+    if closed == "left":
+        return trunc
+    return pl.when(ts_col == trunc).then(trunc - dur).otherwise(trunc)
+
+
 class DataTable(ABC):
     """Abstract base class for defining an input data table."""
 
@@ -30,23 +47,23 @@ class DataTable(ABC):
         )
 
     def post_load_process(
-        self, lf: pl.LazyFrame, ref: pl.DataFrame, nanoseconds: int
+        self,
+        lf: pl.LazyFrame,
+        ref: pl.DataFrame,
+        nanoseconds: int,
+        time_bucket_anchor: str = "end",
+        time_bucket_closed: str = "right",
     ) -> pl.LazyFrame:
         """Applies post-loading transformations, like resampling."""
         return (
             lf.filter(pl.col("ListingId").is_in(ref["ListingId"].to_list()))
             .with_columns(pl.col(self.timestamp_col).cast(pl.Datetime("ns")))
             .with_columns(
-                TimeBucket=(
-                    pl.when(
-                        pl.col(self.timestamp_col)
-                        == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                    )
-                    .then(pl.col(self.timestamp_col))
-                    .otherwise(
-                        pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                        + pl.duration(nanoseconds=nanoseconds)
-                    )
+                TimeBucket=_timebucket_expr(
+                    pl.col(self.timestamp_col),
+                    nanoseconds,
+                    time_bucket_anchor,
+                    time_bucket_closed,
                 ).cast(pl.Datetime("ns"))
             )
         )
@@ -71,7 +88,11 @@ class DataTable(ABC):
 
     @abstractmethod
     def get_transform_fn(
-        self, ref: pl.DataFrame, nanoseconds: int
+        self,
+        ref: pl.DataFrame,
+        nanoseconds: int,
+        time_bucket_anchor: str = "end",
+        time_bucket_closed: str = "right",
     ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         """
         Returns a transformation function for this table, including filtering and resampling.
@@ -98,7 +119,11 @@ class TradesPlusTable(DataTable):
         )
 
     def get_transform_fn(
-        self, ref: pl.DataFrame, nanoseconds: int
+        self,
+        ref: pl.DataFrame,
+        nanoseconds: int,
+        time_bucket_anchor: str = "end",
+        time_bucket_closed: str = "right",
     ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
             lf_filtered = lf.filter(
@@ -110,16 +135,11 @@ class TradesPlusTable(DataTable):
                 TradeTimestamp=pl.col(self.timestamp_col).cast(pl.Datetime("ns")),
             )
             return lf_filtered.with_columns(
-                TimeBucket=(
-                    pl.when(
-                        pl.col(self.timestamp_col)
-                        == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                    )
-                    .then(pl.col(self.timestamp_col))
-                    .otherwise(
-                        pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                        + pl.duration(nanoseconds=nanoseconds)
-                    )
+                TimeBucket=_timebucket_expr(
+                    pl.col(self.timestamp_col),
+                    nanoseconds,
+                    time_bucket_anchor,
+                    time_bucket_closed,
                 ).cast(pl.Datetime("ns"))
             )
 
@@ -140,7 +160,11 @@ class L2Table(DataTable):
         return super().load(markets, start_date, end_date)
 
     def get_transform_fn(
-        self, ref: pl.DataFrame, nanoseconds: int
+        self,
+        ref: pl.DataFrame,
+        nanoseconds: int,
+        time_bucket_anchor: str = "end",
+        time_bucket_closed: str = "right",
     ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
             lf_renamed = lf.rename({self.source_id_col: "ListingId"})
@@ -148,16 +172,11 @@ class L2Table(DataTable):
                 pl.col("ListingId").is_in(ref["ListingId"].to_list())
             )
             return lf_filtered.with_columns(
-                TimeBucket=(
-                    pl.when(
-                        pl.col(self.timestamp_col)
-                        == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                    )
-                    .then(pl.col(self.timestamp_col))
-                    .otherwise(
-                        pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                        + pl.duration(nanoseconds=nanoseconds)
-                    )
+                TimeBucket=_timebucket_expr(
+                    pl.col(self.timestamp_col),
+                    nanoseconds,
+                    time_bucket_anchor,
+                    time_bucket_closed,
                 ).cast(pl.Datetime("ns"))
             )
 
@@ -179,7 +198,11 @@ class L3Table(DataTable):
         return lf.with_columns(pl.col("TimestampNanoseconds").alias("EventTimestamp"))
 
     def get_transform_fn(
-        self, ref: pl.DataFrame, nanoseconds: int
+        self,
+        ref: pl.DataFrame,
+        nanoseconds: int,
+        time_bucket_anchor: str = "end",
+        time_bucket_closed: str = "right",
     ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
             lf_filtered = lf.filter(
@@ -202,16 +225,11 @@ class L3Table(DataTable):
                 EventTimestamp=pl.col("TimestampNanoseconds").cast(pl.Datetime("ns"))
             )
             return lf_filtered.with_columns(
-                TimeBucket=(
-                    pl.when(
-                        pl.col(self.timestamp_col)
-                        == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                    )
-                    .then(pl.col(self.timestamp_col))
-                    .otherwise(
-                        pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                        + pl.duration(nanoseconds=nanoseconds)
-                    )
+                TimeBucket=_timebucket_expr(
+                    pl.col(self.timestamp_col),
+                    nanoseconds,
+                    time_bucket_anchor,
+                    time_bucket_closed,
                 ).cast(pl.Datetime("ns"))
             )
 
@@ -231,7 +249,11 @@ class MarketStateTable(DataTable):
         return super().load(markets, start_date, end_date)
 
     def get_transform_fn(
-        self, ref: pl.DataFrame, nanoseconds: int
+        self,
+        ref: pl.DataFrame,
+        nanoseconds: int,
+        time_bucket_anchor: str = "end",
+        time_bucket_closed: str = "right",
     ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
             lf_filtered = lf.filter(
@@ -241,16 +263,11 @@ class MarketStateTable(DataTable):
                 EventTimestamp=pl.col("TimestampNanoseconds").cast(pl.Datetime("ns"))
             )
             return lf_filtered.with_columns(
-                TimeBucket=(
-                    pl.when(
-                        pl.col(self.timestamp_col)
-                        == pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                    )
-                    .then(pl.col(self.timestamp_col))
-                    .otherwise(
-                        pl.col(self.timestamp_col).dt.truncate(f"{nanoseconds}ns")
-                        + pl.duration(nanoseconds=nanoseconds)
-                    )
+                TimeBucket=_timebucket_expr(
+                    pl.col(self.timestamp_col),
+                    nanoseconds,
+                    time_bucket_anchor,
+                    time_bucket_closed,
                 ).cast(pl.Datetime("ns"))
             )
 
