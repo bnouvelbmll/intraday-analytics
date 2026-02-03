@@ -33,7 +33,7 @@ USER_CONFIG = {
         {
             "name": "pass1",
             "time_bucket_seconds": 60,  # 1-minute bars
-            "modules": ["dense", "trade"],
+            "modules": ["trade"],
             "trade_analytics": {
                 "generic_metrics": [
                     {
@@ -55,7 +55,7 @@ def get_universe(date):
     This example uses a query to the BMLL reference data service to get a list of
     instruments. You can replace this with your own logic to define the universe.
     """ 
-    blacklist=['@ALP','SGMX','SGMU','ALP']
+    blacklist=['@ALP','SGMX','SGMU','BOTC']
     universe_query = bmll.reference.query(
         Index="bezacp", object_type="Instrument", start_date=date
     ).query("IsAlive").query("MIC not in @blacklist")

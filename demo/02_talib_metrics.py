@@ -33,12 +33,13 @@ USER_CONFIG = {
         {
             "name": "ohlcv_pass",
             "time_bucket_seconds": 60,
-            "modules": ["dense", "trade"],
+            "modules": ["trade"],
             "trade_analytics": {"generic_metrics": [{"measures": ["OHLC", "Volume"]}]},
         },
         {
             "name": "talib_pass",
             "modules": ["talib_metrics"],
+            "tables_to_load": []
         },
     ],
 }
@@ -49,10 +50,14 @@ USER_CONFIG = {
 def get_universe(date):
     """
     Retrieves the universe of instruments for a given date.
-    """
+
+    This example uses a query to the BMLL reference data service to get a list of
+    instruments. You can replace this with your own logic to define the universe.
+    """ 
+    blacklist=['@ALP','SGMX','SGMU','BOTC']
     universe_query = bmll.reference.query(
-        Index="bezacp", object_types="Instrument", start_date=date
-    ).query("IsAlive")
+        Index="bezacp", object_type="Instrument", start_date=date
+    ).query("IsAlive").query("MIC not in @blacklist")
 
     return pl.DataFrame(universe_query)
 
