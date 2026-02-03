@@ -7,6 +7,10 @@ Terminology:
 - TimeBucket: time bucket column (derived from timestamps).
 - All modules produce metrics grouped by ListingId and TimeBucket unless noted.
 
+Time bucket semantics (pass-level):
+- `time_bucket_anchor`: `"end"` (default) or `"start"`. `"end"` attaches the bucket timestamp to the end of the interval to avoid lookahead bias.
+- `time_bucket_closed`: `"right"` (default) or `"left"`. Default is right-closed, left-open intervals.
+
 ## Module Index
 
 - trade
@@ -47,6 +51,7 @@ Key config:
 Notes:
 - Aggregations are per bucket and side (Bid/Ask/Total as configured).
 - If no metrics are configured, defaults are computed.
+- OHLC is event-based by default (Open=first, Close=last within bucket). For non-naive OHLC with forward-fill behavior, use L2 OHLC or compute in pass2.
 
 ---
 
@@ -70,6 +75,11 @@ Key config:
 - `L2AnalyticsConfig.volatility` (L2VolatilityConfig)
   - source: Mid, Bid, Ask, WeightedMid
   - aggregations: First, Last, Min, Max, Mean, Sum, Median, Std
+- `L2AnalyticsConfig.ohlc` (L2OHLCConfig)
+  - source: Mid, Bid, Ask, WeightedMid
+  - open_mode: event | prev_close
+    - event: Open/High/Low/Close from events within the bucket
+    - prev_close: uses previous Close for empty buckets and fills OHLC consistently
 
 ---
 
