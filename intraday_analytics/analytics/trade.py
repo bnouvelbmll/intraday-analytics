@@ -549,6 +549,9 @@ def _doc_trade_volume_default():
     pattern=r"^(?P<ohlc>Open|High|Low|Close)$",
     template="{ohlc} trade price over trades in the TimeBucket.",
     unit="XLOC",
+    group="TradeOHLCTotal",
+    group_role="{ohlc}",
+    group_semantics="ohlc_bar,ffill_non_naive",
 )
 def _doc_trade_ohlc_default():
     pass
@@ -556,7 +559,20 @@ def _doc_trade_ohlc_default():
 
 @metric_doc(
     module="trade",
-    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice|Open|High|Low|Close)$",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<ohlc>Open|High|Low|Close)$",
+    template="Trade {ohlc} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
+    unit="XLOC",
+    group="TradeOHLC{side}",
+    group_role="{ohlc}",
+    group_semantics="ohlc_bar,ffill_non_naive",
+)
+def _doc_trade_ohlc_group():
+    pass
+
+
+@metric_doc(
+    module="trade",
+    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice)$",
     template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
     unit="XLOC",
 )

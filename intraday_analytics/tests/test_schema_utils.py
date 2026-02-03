@@ -48,6 +48,21 @@ class TestSchemaUtils(unittest.TestCase):
         self.assertIn("SpreadRelTWA", schema["l2_tw"])
         self.assertIn("VWAP", schema["trade"])
 
+    def test_schema_includes_ohlc_group_metadata(self):
+        """OHLC columns should carry group metadata in schema hints."""
+        from intraday_analytics.schema_utils import _apply_hints
+
+        config = AnalyticsConfig(PASSES=[PassConfig(name="pass1")])
+        schema = get_output_schema(config.PASSES[0])
+        schema = _apply_hints(schema, weight_col="TradeNotionalEUR")
+
+        trade_rows = {row["column"]: row for row in schema.get("trade", [])}
+        for col in ["Open", "High", "Low", "Close"]:
+            self.assertIn(col, trade_rows)
+            self.assertEqual(trade_rows[col].get("group"), "TradeOHLCTotal")
+            self.assertEqual(trade_rows[col].get("group_role"), col)
+            self.assertIn("ohlc_bar", trade_rows[col].get("group_semantics", ""))
+
         print("\n--- Default Config Column Counts ---")
         for k, v in schema.items():
             print(f"{k}: {len(v)} columns")

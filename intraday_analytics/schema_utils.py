@@ -395,6 +395,9 @@ def _apply_docs(module: str, col: str):
         data.setdefault("scope_or_empty", data.get("scope") or "")
         template = doc.get("template", "")
         unit_template = doc.get("unit") or ""
+        group_template = doc.get("group") or ""
+        role_template = doc.get("group_role") or ""
+        semantics_template = doc.get("group_semantics") or ""
         try:
             definition = template.format(**data)
         except Exception:
@@ -403,8 +406,28 @@ def _apply_docs(module: str, col: str):
             unit = unit_template.format(**data) if unit_template else ""
         except Exception:
             unit = unit_template
-        return {"definition": definition, "unit": unit}
-    return {"definition": "", "unit": ""}
+        try:
+            group = group_template.format(**data) if group_template else ""
+        except Exception:
+            group = group_template
+        try:
+            group_role = role_template.format(**data) if role_template else ""
+        except Exception:
+            group_role = role_template
+        try:
+            group_semantics = (
+                semantics_template.format(**data) if semantics_template else ""
+            )
+        except Exception:
+            group_semantics = semantics_template
+        return {
+            "definition": definition,
+            "unit": unit,
+            "group": group,
+            "group_role": group_role,
+            "group_semantics": group_semantics,
+        }
+    return {"definition": "", "unit": "", "group": "", "group_role": "", "group_semantics": ""}
 
 
 def _default_hint_for_column(col: str, weight_col: str | None):
