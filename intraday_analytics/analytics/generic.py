@@ -3,6 +3,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Union, Literal
 from intraday_analytics.bases import BaseAnalytics
+from intraday_analytics.analytics_registry import register_analytics
 import logging
 
 try:
@@ -31,6 +32,7 @@ class GenericAnalyticsConfig(BaseModel):
     talib_indicators: List[TalibIndicatorConfig] = Field(default_factory=list)
 
 
+@register_analytics("generic", config_attr="generic_analytics")
 class GenericAnalytics(BaseAnalytics):
     REQUIRES = []  # Depends on previous pass, not raw tables directly
 

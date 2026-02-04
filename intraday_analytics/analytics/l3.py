@@ -5,7 +5,8 @@ from typing import List, Union, Literal, Optional, Set, Dict, Any
 
 from .common import CombinatorialMetricConfig, Side, AggregationMethod, apply_aggregation
 from .utils import apply_alias
-from .metric_base import AnalyticSpec, AnalyticContext, AnalyticDoc
+from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc
+from intraday_analytics.analytics_registry import register_analytics
 
 
 # =============================
@@ -369,6 +370,7 @@ class L3AdvancedAnalytic(AnalyticSpec):
 # =============================
 
 
+@register_analytics("l3", config_attr="l3_analytics")
 class L3Analytics(BaseAnalytics):
     """
     Computes L3 order book event analytics.
@@ -455,4 +457,3 @@ class L3Analytics(BaseAnalytics):
 
         self.df = base_df
         return base_df
-

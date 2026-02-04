@@ -312,7 +312,7 @@ class TestAnalyticsModuleOutputs(unittest.TestCase):
 
     def test_module_output_columns(self):
         """Verify that each analytics module includes TimeBucket and ListingId."""
-        from intraday_analytics.analytics.dense import (
+        from intraday_analytics.dense_analytics import (
             DenseAnalytics,
             DenseAnalyticsConfig,
         )

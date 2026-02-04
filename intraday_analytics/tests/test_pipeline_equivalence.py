@@ -17,7 +17,7 @@ from intraday_analytics.batching import (
     HeuristicBatchingStrategy,
     SymbolSizeEstimator,
 )
-from intraday_analytics.analytics.dense import DenseAnalytics, DenseAnalyticsConfig
+from intraday_analytics.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
 from intraday_analytics.analytics.l2 import (
     L2AnalyticsLast,
     L2AnalyticsTW,

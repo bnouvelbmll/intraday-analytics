@@ -10,7 +10,8 @@ from .common import (
     apply_aggregation,
 )
 from .utils import apply_market_state_filter, apply_alias
-from .metric_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_registry import register_analytics
 
 
 # =============================
@@ -173,6 +174,10 @@ class TradeAnalyticsConfig(BaseModel):
     enable_retail_imbalance: bool = False
     use_tagged_trades: bool = False
     tagged_trades_context_key: str = "trades_iceberg"
+
+
+class RetailImbalanceConfig(BaseModel):
+    ENABLED: bool = True
 
 
 # =============================
@@ -624,10 +629,61 @@ class TradeDefaultAnalytic(AnalyticSpec):
 
 
 # =============================
+# Retail Imbalance
+# =============================
+
+
+class RetailImbalanceDoc(AnalyticSpec):
+    MODULE = "retail_imbalance"
+    DOCS = [
+        AnalyticDoc(
+            pattern=r"^RetailTradeImbalance$",
+            template="Retail trade imbalance as the net retail notional divided by total retail notional in the TimeBucket.",
+            unit="Imbalance",
+        )
+    ]
+
+
+@register_analytics("retail_imbalance", config_attr="retail_imbalance_analytics")
+class RetailImbalanceAnalytics(BaseAnalytics):
+    REQUIRES = ["trades"]
+
+    def __init__(self, config: RetailImbalanceConfig):
+        self.config = config
+        super().__init__("retail_imbalance", {})
+
+    def compute(self) -> pl.LazyFrame:
+        if not self.config.ENABLED:
+            return pl.DataFrame(
+                schema={"ListingId": pl.Int64, "TimeBucket": pl.Datetime("ns")}
+            ).lazy()
+
+        gcols = ["MIC", "ListingId", "Ticker", "TimeBucket"]
+        df = (
+            self.trades.filter(pl.col("Classification") == "LIT_CONTINUOUS")
+            .filter(pl.col("BMLLParticipantType") == "RETAIL")
+            .group_by(gcols)
+            .agg(
+                (
+                    (
+                        pl.when(pl.col("AggressorSide") == 1)
+                        .then(pl.col("TradeNotionalEUR"))
+                        .otherwise(-pl.col("TradeNotionalEUR"))
+                    ).sum()
+                    / pl.col("TradeNotionalEUR").sum()
+                ).alias("RetailTradeImbalance")
+            )
+        )
+        self.df = df
+        return df
+
+
+# =============================
 # Analytics Module
 # =============================
 
 
+@register_analytics("trade", config_attr="trade_analytics")
 class TradeAnalytics(BaseAnalytics):
     """
     Computes trade-based analytics for continuous trading segments.

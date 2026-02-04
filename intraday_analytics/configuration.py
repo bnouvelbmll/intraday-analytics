@@ -1,14 +1,15 @@
 from pydantic import BaseModel, Field, model_validator
 from typing import List, Dict, Optional, Literal
 from enum import Enum
-from .analytics.dense import DenseAnalyticsConfig
+from .dense_analytics import DenseAnalyticsConfig
 from .analytics.l2 import L2AnalyticsConfig
 from .analytics.l3 import L3AnalyticsConfig
 from .analytics.trade import TradeAnalyticsConfig
 from .analytics.execution import ExecutionAnalyticsConfig
 from .analytics.generic import GenericAnalyticsConfig
-from .analytics.retail_imbalance import RetailImbalanceConfig
+from .analytics.trade import RetailImbalanceConfig
 from .analytics.iceberg import IcebergAnalyticsConfig
+from .analytics.cbbo import CBBOAnalyticsConfig
 
 
 class PrepareDataMode(str, Enum):
@@ -47,6 +48,9 @@ class PassConfig(BaseModel):
     iceberg_analytics: IcebergAnalyticsConfig = Field(
         default_factory=IcebergAnalyticsConfig
     )
+    cbbo_analytics: CBBOAnalyticsConfig = Field(
+        default_factory=CBBOAnalyticsConfig
+    )
     generic_analytics: GenericAnalyticsConfig = Field(
         default_factory=GenericAnalyticsConfig
     )
@@ -83,7 +87,12 @@ class AnalyticsConfig(BaseModel):
     """
 
     MAX_ROWS_PER_TABLE: Dict[str, int] = Field(
-        default_factory=lambda: {"trades": 250_000, "l2": 1_000_000, "l3": 5_000_000}
+        default_factory=lambda: {
+            "trades": 250_000,
+            "l2": 1_000_000,
+            "l3": 5_000_000,
+            "cbbo": 1_000_000,
+        }
     )
 
     # --- File Paths ---

@@ -236,6 +236,43 @@ class L3Table(DataTable):
         return select_and_resample
 
 
+class CBBOTable(DataTable):
+    """Represents the 'cbbo' data table (millisecond CBBO)."""
+
+    name = "cbbo"
+    bmll_table_name = "cbbo"
+    timestamp_col = "EventTimestamp"
+    s3_folder_name = "CBBO"
+    s3_file_prefix = "cbbo-"
+    source_id_col: str = "BMLLObjectId"
+
+    def load(self, markets: list[str], start_date, end_date) -> pl.LazyFrame:
+        return super().load(markets, start_date, end_date)
+
+    def get_transform_fn(
+        self,
+        ref: pl.DataFrame,
+        nanoseconds: int,
+        time_bucket_anchor: str = "end",
+        time_bucket_closed: str = "right",
+    ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
+        def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
+            lf_renamed = lf.rename({self.source_id_col: "ListingId"})
+            lf_filtered = lf_renamed.filter(
+                pl.col("ListingId").is_in(ref["ListingId"].to_list())
+            )
+            return lf_filtered.with_columns(
+                TimeBucket=_timebucket_expr(
+                    pl.col(self.timestamp_col),
+                    nanoseconds,
+                    time_bucket_anchor,
+                    time_bucket_closed,
+                ).cast(pl.Datetime("ns"))
+            )
+
+        return select_and_resample
+
+
 class MarketStateTable(DataTable):
     """Represents the 'MarketState' data table."""
 
@@ -278,5 +315,6 @@ ALL_TABLES = {
     "trades": TradesPlusTable(),
     "l2": L2Table(),
     "l3": L3Table(),
+    "cbbo": CBBOTable(),
     "marketstate": MarketStateTable(),
 }

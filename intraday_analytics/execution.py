@@ -49,7 +49,7 @@ class _GetUniverseWrapper:
 
 
 def _derive_tables_to_load(pass_config, user_tables):
-    from .analytics.dense import DenseAnalytics
+    from .dense_analytics import DenseAnalytics
     from .analytics.trade import TradeAnalytics
     from .analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
     from .analytics.l3 import L3Analytics

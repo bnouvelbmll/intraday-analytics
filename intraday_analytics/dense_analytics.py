@@ -7,6 +7,7 @@ from typing import List
 import polars as pl
 
 from intraday_analytics.bases import BaseAnalytics
+from intraday_analytics.analytics_registry import register_analytics
 from intraday_analytics.utils import SYMBOL_COL
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
@@ -23,6 +24,7 @@ class DenseAnalyticsConfig(BaseModel):
     time_bucket_closed: Literal["right", "left"] = "right"
 
 
+@register_analytics("dense", config_attr="dense_analytics", needs_ref=True)
 class DenseAnalytics(BaseAnalytics):
     """
     Generates a dense time grid.

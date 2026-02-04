@@ -15,7 +15,7 @@ from .analytics.trade import (
 from .analytics.execution import ExecutionAnalytics
 from .analytics.iceberg import IcebergAnalytics
 from .analytics.common import METRIC_HINTS, METRIC_DOCS
-from .analytics.dense import DenseAnalytics
+from .dense_analytics import DenseAnalytics
 from .analytics.l2 import L2AnalyticsConfig, L2LiquidityConfig, L2SpreadConfig, L2ImbalanceConfig, L2VolatilityConfig
 from .analytics.l3 import L3AnalyticsConfig, L3MetricConfig, L3AdvancedConfig
 from .analytics.execution import (
@@ -25,6 +25,7 @@ from .analytics.execution import (
     ExecutionDerivedConfig,
 )
 from .analytics.iceberg import IcebergAnalyticsConfig, IcebergMetricConfig
+from .analytics.cbbo import CBBOAnalytics, CBBOAnalyticsConfig
 
 
 def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfig:
@@ -169,7 +170,9 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
                 ],
                 sides=["Total"],
             )
-        ]
+        ],
+        enable_peak_linking=False,
+        trade_match_enabled=False,
     )
 
     pass1 = PassConfig(
@@ -284,6 +287,8 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
     l2_dummy = pl.LazyFrame(schema=l2_schema)
     trades_dummy = pl.LazyFrame(schema=trades_schema)
     l3_dummy = pl.LazyFrame(schema=l3_schema)
+    cbbo_dummy = pl.LazyFrame(schema=l2_schema)
+    ref_dummy = pl.DataFrame({"ListingId": [1], "InstrumentId": [1]})
 
     # MarketState dummy (needed for Dense)
     marketstate_dummy = pl.LazyFrame(
@@ -354,13 +359,26 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
 
     # --- Iceberg ---
     try:
-        iceberg_analytics = IcebergAnalytics(pass_config.iceberg_analytics)
+        iceberg_cfg = pass_config.iceberg_analytics.model_copy(
+            update={"enable_peak_linking": False, "trade_match_enabled": False}
+        )
+        iceberg_analytics = IcebergAnalytics(iceberg_cfg)
         iceberg_analytics.l3 = l3_dummy
         iceberg_analytics.trades = trades_dummy
         iceberg_df = iceberg_analytics.compute()
         output_columns["iceberg"] = iceberg_df.collect_schema().names()
     except Exception as e:
         output_columns["iceberg_error"] = [str(e)]
+
+    # --- CBBO ---
+    try:
+        cbbo_analytics = CBBOAnalytics(ref_dummy, CBBOAnalyticsConfig())
+        cbbo_analytics.l2 = l2_dummy
+        cbbo_analytics.cbbo = cbbo_dummy
+        cbbo_df = cbbo_analytics.compute()
+        output_columns["cbbo"] = cbbo_df.collect_schema().names()
+    except Exception as e:
+        output_columns["cbbo_error"] = [str(e)]
 
     return output_columns
 
@@ -380,6 +398,7 @@ def _filter_schema_for_pass1(config: AnalyticsConfig, schema: Dict[str, List[str
         "l3": ["l3"],
         "execution": ["execution"],
         "iceberg": ["iceberg"],
+        "cbbo": ["cbbo"],
     }
 
     keys = []

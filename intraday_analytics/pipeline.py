@@ -175,30 +175,9 @@ def create_pipeline(
     """
     Constructs an analytics pipeline from a configuration using a module registry.
     """
-    # Import analytics modules locally to prevent circular dependencies
-    from .analytics.dense import DenseAnalytics
-    from .analytics.trade import TradeAnalytics
-    from .analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
-    from .analytics.l3 import L3Analytics
-    from .analytics.execution import ExecutionAnalytics
-    from .analytics.generic import GenericAnalytics
-    from .analytics.retail_imbalance import RetailImbalanceAnalytics
-    from .analytics.iceberg import IcebergAnalytics
+    from intraday_analytics.analytics_registry import build_module_registry
 
-    # Default registry of framework modules
-    module_registry = {
-        "dense": lambda: DenseAnalytics(ref, pass_config.dense_analytics),
-        "trade": lambda: TradeAnalytics(pass_config.trade_analytics),
-        "l2": lambda: L2AnalyticsLast(pass_config.l2_analytics),
-        "l2tw": lambda: L2AnalyticsTW(pass_config.l2_analytics),
-        "l3": lambda: L3Analytics(pass_config.l3_analytics),
-        "execution": lambda: ExecutionAnalytics(pass_config.execution_analytics),
-        "generic": lambda: GenericAnalytics(pass_config.generic_analytics),
-        "retail_imbalance": lambda: RetailImbalanceAnalytics(
-            pass_config.retail_imbalance_analytics
-        ),
-        "iceberg": lambda: IcebergAnalytics(pass_config.iceberg_analytics),
-    }
+    module_registry = build_module_registry(pass_config, ref)
 
     # Add any custom modules provided by the user
     if custom_modules:
@@ -224,7 +203,9 @@ def create_pipeline(
                 pass
     for module_name in module_names:
         factory = module_registry.get(module_name)
-        if factory:
+        if isinstance(factory, BaseAnalytics):
+            modules.append(factory)
+        elif callable(factory):
             modules.append(factory())
         else:
             logging.warning(f"Module '{module_name}' not recognized in factory.")

@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field
 from typing import List, Union, Literal, Dict, Any
 
 from .common import CombinatorialMetricConfig, Side
-from .metric_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_registry import register_analytics
 
 
 # =============================
@@ -236,6 +237,7 @@ class ExecutionDerivedAnalytic(AnalyticSpec):
 # =============================
 
 
+@register_analytics("execution", config_attr="execution_analytics")
 class ExecutionAnalytics(BaseAnalytics):
     """
     Computes execution-related analytics.
@@ -337,4 +339,3 @@ class ExecutionAnalytics(BaseAnalytics):
 
         self.df = df
         return df
-

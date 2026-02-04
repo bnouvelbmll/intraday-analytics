@@ -19,6 +19,7 @@ Time bucket semantics (pass-level):
 - l3
 - execution
 - iceberg
+- cbbo
 - generic
 
 ---
@@ -173,6 +174,37 @@ Notes:
 - Peak linking (optional): iceberg refills are approximated by linking a remove execution to the next insert at the same side/price within `peak_link_tolerance_seconds`, and cumulative peak counts per iceberg are averaged in `IcebergAveragePeakCount` (null if linking disabled).
 - Tagged trades include `IcebergExecution` (bool) and `IcebergTag` (L3_REVEALED, TRADE_MATCH, BOTH).
 - Trade analytics can reuse iceberg tags via `TradeAnalyticsConfig.use_tagged_trades` + `tagged_trades_context_key`.
+
+---
+
+## cbbo
+
+Purpose: compare L2 top-of-book to millisecond CBBO, joined by InstrumentId, and compute time-at and quantity-at CBBO.
+
+Required tables:
+- l2
+- cbbo
+
+Key config:
+- `CBBOAnalyticsConfig.measures`
+  - TimeAtCBB, TimeAtCBO, QuantityAtCBB, QuantityAtCBO
+
+Output:
+- TimeAtCBB
+- TimeAtCBO
+- QuantityAtCBB
+- QuantityAtCBO
+- QuantityAtCBBMin
+- QuantityAtCBBMax
+- QuantityAtCBBMedian
+- QuantityAtCBOMin
+- QuantityAtCBOMax
+- QuantityAtCBOMedian
+
+Notes:
+- CBBO is joined to L2 on InstrumentId and millisecond EventTimestamp.
+- TimeAt* is computed as a time-weighted share within the TimeBucket.
+- QuantityAt* variants are computed on quantity-at-CBBO (0 when not matching): TWMean uses time-weighted mean over the full bucket, Min/Max/Median use event-based values.
 
 ---
 

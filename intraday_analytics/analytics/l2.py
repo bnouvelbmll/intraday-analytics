@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Union, Literal, Dict, Any
 
 from .common import CombinatorialMetricConfig, Side, AggregationMethod
-from .metric_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_registry import register_analytics
 
 
 # =============================
@@ -777,6 +778,7 @@ class L2TWVolatilityAnalytic(AnalyticSpec):
 # =============================
 
 
+@register_analytics("l2", config_attr="l2_analytics")
 class L2AnalyticsLast(BaseAnalytics):
     """
     Computes L2 order book analytics based on the last snapshot in each time bucket.
@@ -985,6 +987,7 @@ class L2AnalyticsLast(BaseAnalytics):
         return names
 
 
+@register_analytics("l2tw", config_attr="l2_analytics")
 class L2AnalyticsTW(BaseTWAnalytics):
     """
     Computes time-weighted average (TWA) analytics.
@@ -1070,5 +1073,4 @@ class L2AnalyticsTW(BaseTWAnalytics):
         expressions.append(pl.col("EventTimestamp").len().alias("EventCount"))
 
         return l2.agg(expressions)
-
 
