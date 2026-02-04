@@ -58,7 +58,7 @@ class AnalyticsPipeline:
 
             # Ensure all required tables are present
             for r in module.REQUIRES:
-                assert getattr(module, r) is not None
+                assert getattr(module, r) is not None, f"{r} is not loaded"
 
             # Compute the analytics for the module
             lf_result = module.compute()

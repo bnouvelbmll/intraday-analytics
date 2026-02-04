@@ -27,15 +27,18 @@ import logging
 
 from intraday_analytics.execution import run_metrics_pipeline
 
+from intraday_analytics import cache_universe
 from intraday_analytics.utils import create_date_batches
+from intraday_analytics.pipeline import AnalyticsPipeline, create_pipeline
 
 # Re-add direct imports for analytics modules
-from intraday_analytics.metrics.dense import DenseAnalytics, DenseAnalyticsConfig
-from intraday_analytics.metrics.l2 import L2AnalyticsLast, L2AnalyticsTW
-from intraday_analytics.metrics.trade import TradeAnalytics
-from intraday_analytics.metrics.l3 import L3Analytics
-from intraday_analytics.metrics.execution import ExecutionAnalytics
+from intraday_analytics.analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
+from intraday_analytics.analytics.trade import TradeAnalytics
+from intraday_analytics.analytics.l3 import L3Analytics
+from intraday_analytics.analytics.execution import ExecutionAnalytics
+from intraday_analytics.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
 
+from intraday_analytics.configuration import AnalyticsConfig, PassConfig
 
 # At 1min : 3 minutes per day.
 # At 10 sec: 15 minutes per day ! 250gb matchine (20 GB memory)
@@ -52,7 +55,6 @@ USER_CONFIG = {
             "name": "pass1",
             "time_bucket_seconds": 60,
             "modules": [
-                "dense",
                 "l2_last",
                 "l2_tw",
                 "trade",
@@ -81,8 +83,7 @@ USER_CONFIG = {
     "MEMORY_PER_WORKER": 35,
 }
 
-config_data = {**DEFAULT_CONFIG, **USER_CONFIG}
-CONFIG = AnalyticsConfig(**config_data)
+CONFIG = AnalyticsConfig(**USER_CONFIG)
 
 
 whitelist = [
@@ -188,7 +189,7 @@ def get_universe(date):
     return ref
 
 
-def get_pipeline(pass_config, context, symbols=None, ref=None, date=None):
+def get_pipeline_old(pass_config, context, symbols=None, ref=None, date=None):
     """
     Constructs the analytics pipeline for a single pass.
 
@@ -228,6 +229,38 @@ def get_pipeline(pass_config, context, symbols=None, ref=None, date=None):
     return AnalyticsPipeline(modules, CONFIG, pass_config, context)
 
 
+def get_pipeline(
+    pass_config: PassConfig,
+    context: dict,
+    symbols: list,
+    ref: pl.DataFrame,
+    date: str,
+    config: AnalyticsConfig,
+):
+    """
+    Constructs the analytics pipeline for each pass using a factory pattern.
+    """
+    # A factory pattern to build the analytics modules based on the config
+    module_factories = {
+        "dense": lambda: DenseAnalytics(ref, pass_config.dense_analytics),
+        "trade": lambda: TradeAnalytics(pass_config.trade_analytics),
+        "l3": lambda: L3Analytics(pass_config.l3_analytics),
+        "l2_last": lambda: L2AnalyticsLast(pass_config.l2_analytics),
+        "l2_tw": lambda: L2AnalyticsTW(pass_config.l2_analytics),
+        "execution": lambda: ExecutionAnalytics(pass_config.execution_analytics),
+         
+    }
+
+    modules = []
+    for module_name in pass_config.modules:
+        factory = module_factories.get(module_name)
+        if factory:
+            modules.append(factory())
+        else:
+            logging.warning(f"Module '{module_name}' not recognized in get_pipeline.")
+
+    return AnalyticsPipeline(modules, config, pass_config, context)
+
 if __name__ == "__main__":
     os.environ["POLARS_MAX_THREADS"] = "48"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
@@ -242,16 +275,11 @@ if __name__ == "__main__":
     try:
         from intraday_analytics.execution import run_metrics_pipeline
 
-        context = {}
-        for pass_config in CONFIG.PASSES:
-            logging.info(f"Starting pass: {pass_config.name}")
-            run_metrics_pipeline(
+        run_metrics_pipeline(
                 CONFIG,
-                get_pipeline=lambda symbols, ref, date: get_pipeline(
-                    pass_config, context, symbols, ref, date
-                ),
+                get_pipeline=get_pipeline,
                 get_universe=get_universe,
-            )
+        )
 
     except Exception as e:
         logging.error(f"Pipeline failed: {e}", exc_info=True)

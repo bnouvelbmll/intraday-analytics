@@ -21,6 +21,7 @@ from intraday_analytics.pipeline import AnalyticsPipeline, create_pipeline
 from intraday_analytics.execution import run_metrics_pipeline
 from intraday_analytics.analytics.trade import TradeAnalytics, TradeAnalyticsConfig
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig
+from intraday_analytics.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
 
 # --- Configuration ---
 

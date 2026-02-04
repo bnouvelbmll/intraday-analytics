@@ -17,7 +17,7 @@ import polars as pl
 from intraday_analytics.bases import BaseAnalytics
 from intraday_analytics.pipeline import AnalyticsPipeline, create_pipeline
 from intraday_analytics.execution import run_metrics_pipeline
-from intraday_analytics.analytics.dense import DenseAnalytics, DenseAnalyticsConfig
+from intraday_analytics.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
 from intraday_analytics.analytics.trade import TradeAnalytics, TradeAnalyticsConfig
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig
 

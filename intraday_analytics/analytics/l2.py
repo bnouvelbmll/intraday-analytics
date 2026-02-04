@@ -1034,6 +1034,7 @@ class L2AnalyticsTW(BaseTWAnalytics):
             for variant in req.expand():
                 expressions.extend(volatility.expressions(ctx, req, variant))
 
+	# WHY IS this on if not ?
         if not expressions:
             expressions.append(
                 (
@@ -1070,6 +1071,7 @@ class L2AnalyticsTW(BaseTWAnalytics):
                 .alias("BidTWA")
             )
 
+	#FIXME: Should it  always be there needs config ? Why is in TW ? Probably does not make sense herence would remove
         expressions.append(pl.col("EventTimestamp").len().alias("EventCount"))
 
         return l2.agg(expressions)
