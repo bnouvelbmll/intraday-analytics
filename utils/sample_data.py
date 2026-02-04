@@ -22,4 +22,4 @@ for t in tables:
       tbl = tbl.filter(pl.col("Timestamp").dt.hour()>start_hour)
    elif t not in ["reference","market-state"]:
       tbl = tbl.filter(pl.col("EventTimestamp").dt.hour()>start_hour)
-   tbl.limit(max_rows).collect().to_pandas().to_parquet(f"sample/{t}.parquet")
+   tbl.limit(max_rows).collect().to_pandas().to_parquet(f"sample_fixture/{t}.parquet")
