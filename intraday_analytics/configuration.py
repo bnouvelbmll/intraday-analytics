@@ -92,6 +92,7 @@ class AnalyticsConfig(BaseModel):
             "l2": 1_000_000,
             "l3": 5_000_000,
             "cbbo": 1_000_000,
+            "marketstate": 200_000,
         }
     )
 

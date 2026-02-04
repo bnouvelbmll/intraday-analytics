@@ -55,8 +55,8 @@ USER_CONFIG = {
             "name": "pass1",
             "time_bucket_seconds": 60,
             "modules": [
-                "l2_last",
-                "l2_tw",
+                "l2",
+                "l2tw",
                 "trade",
                 "l3",
                 "execution",

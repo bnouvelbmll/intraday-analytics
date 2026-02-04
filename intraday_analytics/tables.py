@@ -134,6 +134,11 @@ class TradesPlusTable(DataTable):
                 PriceEUR=pl.col("TradeNotionalEUR") / pl.col("Size"),
                 TradeTimestamp=pl.col(self.timestamp_col).cast(pl.Datetime("ns")),
             )
+            cols = lf_filtered.collect_schema().names()
+            if "PreTradeMid" not in cols and "PreTradeMid1ms" in cols:
+                lf_filtered = lf_filtered.with_columns(
+                    PreTradeMid=pl.col("PreTradeMid1ms")
+                )
             return lf_filtered.with_columns(
                 TimeBucket=_timebucket_expr(
                     pl.col(self.timestamp_col),
@@ -167,7 +172,11 @@ class L2Table(DataTable):
         time_bucket_closed: str = "right",
     ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
-            lf_renamed = lf.rename({self.source_id_col: "ListingId"})
+            cols = lf.collect_schema().names()
+            if self.source_id_col in cols:
+                lf_renamed = lf.rename({self.source_id_col: "ListingId"})
+            else:
+                lf_renamed = lf
             lf_filtered = lf_renamed.filter(
                 pl.col("ListingId").is_in(ref["ListingId"].to_list())
             )
@@ -257,7 +266,11 @@ class CBBOTable(DataTable):
         time_bucket_closed: str = "right",
     ) -> Callable[[pl.LazyFrame], pl.LazyFrame]:
         def select_and_resample(lf: pl.LazyFrame) -> pl.LazyFrame:
-            lf_renamed = lf.rename({self.source_id_col: "ListingId"})
+            cols = lf.collect_schema().names()
+            if self.source_id_col in cols:
+                lf_renamed = lf.rename({self.source_id_col: "ListingId"})
+            else:
+                lf_renamed = lf
             lf_filtered = lf_renamed.filter(
                 pl.col("ListingId").is_in(ref["ListingId"].to_list())
             )

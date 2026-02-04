@@ -271,6 +271,8 @@ class SymbolSizeEstimator:
                     .median()
                     .reset_index()
                 )
+                if not isinstance(res, pd.DataFrame):
+                    return None
                 return res
             except Exception as e:
                 logging.warning(

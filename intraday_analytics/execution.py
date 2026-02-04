@@ -247,13 +247,13 @@ class ProcessInterval(Process):
                     continue
                 table = ALL_TABLES.get(table_name)
                 if table:
-                    lf = table.post_load_process(
-                        lf,
+                    transform = table.get_transform_fn(
                         ref,
                         nanoseconds,
                         time_bucket_anchor=self.pass_config.time_bucket_anchor,
                         time_bucket_closed=self.pass_config.time_bucket_closed,
                     )
+                    lf = transform(lf)
                 lf_dict[table_name] = lf
 
         if not lf_dict:
@@ -273,7 +273,7 @@ class ProcessInterval(Process):
             tasks.append(i)
 
 
-        print("TASKS=",len(task))
+        print("TASKS=", len(tasks))
         # 3. Process batches in parallel
         n_jobs = self.config.NUM_WORKERS
         if n_jobs == -1:

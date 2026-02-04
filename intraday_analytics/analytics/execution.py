@@ -320,6 +320,8 @@ class ExecutionAnalytics(BaseAnalytics):
         else:
             df = l3.select(["ListingId", "TimeBucketInt"]).unique()
 
+        df = df.filter(pl.col("ListingId").is_not_null() & pl.col("TimeBucketInt").is_not_null())
+
         df = df.with_columns(
             pl.col("TimeBucketInt").cast(pl.Datetime("ns")).alias("TimeBucket")
         ).drop("TimeBucketInt")

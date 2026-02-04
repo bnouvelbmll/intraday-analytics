@@ -32,7 +32,7 @@ USER_CONFIG = {
             "name": "custom_metric_pass",
             "time_bucket_seconds": 60,
             "modules": ["dense", "trade", "custom_metric"],
-            "trade_analytics": {"generic_metrics": [{"measures": ["OHLCV"]}]},
+            "trade_analytics": {"generic_metrics": [{"measures": ["OHLC", "Volume"]}]},
         }
     ],
 }
@@ -59,7 +59,7 @@ class CustomMetricAnalytics(BaseAnalytics):
     A custom analytics module to compute the price range (High - Low).
     """
 
-    REQUIRES = ["trade"]  # Depends on the output of the TradeAnalytics module
+    REQUIRES = ["trades"]  # Depends on the trades table
 
     def __init__(self):
         super().__init__("custom")
@@ -68,9 +68,15 @@ class CustomMetricAnalytics(BaseAnalytics):
         """
         Computes the price range and adds it as a new column.
         """
-        return self.trade.with_columns(
-            (pl.col("High") - pl.col("Low")).alias("PriceRange")
+        gcols = ["MIC", "ListingId", "Ticker", "TimeBucket"]
+        price = pl.col("LocalPrice")
+        df = (
+            self.trades.filter(pl.col("Classification") == "LIT_CONTINUOUS")
+            .group_by(gcols)
+            .agg((price.max() - price.min()).alias("PriceRange"))
         )
+        self.df = df
+        return df
 
 
 # --- Pipeline Definition ---
