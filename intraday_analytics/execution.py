@@ -25,6 +25,7 @@ from .utils import (
     retry_s3,
 )
 from .tables import ALL_TABLES
+from .api_stats import init_api_stats, summarize_api_stats
 from .process import aggregate_and_write_final_output, BatchWriter, get_final_s3_path
 
 
@@ -486,6 +487,7 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
     if os.path.exists(temp_dir) and config.OVERWRITE_TEMP_DIR:
         shutil.rmtree(temp_dir)
     os.makedirs(temp_dir, exist_ok=True)
+    init_api_stats(temp_dir)
 
     context_path = os.path.join(temp_dir, "context.pkl")
 
@@ -543,6 +545,7 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
             logging.info(f"✅ Pass {pass_config.name} completed.")
 
     finally:
+        summarize_api_stats(temp_dir)
         if config.CLEAN_UP_TEMP_DIR and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
         if os.path.exists(context_path):

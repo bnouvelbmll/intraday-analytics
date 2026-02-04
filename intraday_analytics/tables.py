@@ -37,13 +37,19 @@ class DataTable(ABC):
         """Loads the table from the data source."""
         import bmll2
 
-        return bmll2.get_market_data_range(
-            markets=markets,
-            table_name=self.bmll_table_name,
-            df_engine="polars",
-            start_date=start_date,
-            end_date=end_date,
-            lazy_load=True,
+        from .api_stats import api_call
+
+        return api_call(
+            "bmll2.get_market_data_range",
+            lambda: bmll2.get_market_data_range(
+                markets=markets,
+                table_name=self.bmll_table_name,
+                df_engine="polars",
+                start_date=start_date,
+                end_date=end_date,
+                lazy_load=True,
+            ),
+            extra={"table": self.bmll_table_name},
         )
 
     def post_load_process(

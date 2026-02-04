@@ -531,6 +531,7 @@ def cache_universe(cache_dir_path_from_config: str):
         @wraps(func)
         def wrapper(date, *args, **kwargs):
             import bmll2  # Moved import inside function
+            from .api_stats import api_call
 
             # Ensure the date is in a consistent format for the filename
             iso_date = pd.Timestamp(date).date().isoformat()
@@ -543,7 +544,10 @@ def cache_universe(cache_dir_path_from_config: str):
             if not os.path.exists(universe_path):
                 logging.info(f"📜 Universe for {iso_date} not in cache. Fetching...")
                 # If not cached, call the original function to get the universe
-                universe_df = func(date, *args, **kwargs)
+                universe_df = api_call(
+                    "get_universe",
+                    lambda: func(date, *args, **kwargs),
+                )
 
                 # Save the result to the cache
                 if isinstance(universe_df, pl.DataFrame):

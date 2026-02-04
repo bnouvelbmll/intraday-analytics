@@ -200,6 +200,7 @@ class SymbolSizeEstimator:
         """Loads size estimates from an external source."""
         import pandas as pd
         import bmll
+        from .api_stats import api_call
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         try:
@@ -260,14 +261,18 @@ class SymbolSizeEstimator:
         def query_mic(mic, group):
             try:
                 logging.debug(f"🔍 Querying size estimates for mic {mic}")
-                res = (
-                    bmll.time_series.query(
+                res = api_call(
+                    "bmll.time_series.query",
+                    lambda: bmll.time_series.query(
                         object_ids=group["ListingId"].tolist(),
                         metric=["TradeCount"],
                         start_date=end_date_m2w,
                         end_date=self.date,
-                    )
-                    .groupby("ObjectId")["TradeCount|Lit"]
+                    ),
+                    extra={"mic": mic},
+                )
+                res = (
+                    res.groupby("ObjectId")["TradeCount|Lit"]
                     .median()
                     .reset_index()
                 )
