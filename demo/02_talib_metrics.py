@@ -19,7 +19,6 @@ import talib
 from intraday_analytics.bases import BaseAnalytics
 from intraday_analytics.pipeline import AnalyticsPipeline, create_pipeline
 from intraday_analytics.execution import run_metrics_pipeline
-from intraday_analytics.analytics.dense import DenseAnalytics, DenseAnalyticsConfig
 from intraday_analytics.analytics.trade import TradeAnalytics, TradeAnalyticsConfig
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig
 
@@ -37,11 +36,14 @@ USER_CONFIG = {
             "trade_analytics": {"generic_metrics": [{"measures": ["OHLC", "Volume"]}]},
         },
         {
+            "time_bucket_seconds": 60,
             "name": "talib_pass",
             "modules": ["talib_metrics"],
         },
     ],
-    "SKIP_EXISTING_OUTPUT": True
+    "SKIP_EXISTING_OUTPUT": True,
+    "EAGER_EXECUTION": True,
+    "LOGGING_LEVEL": "DEBUG"
 }
 
 # --- Universe Definition ---
@@ -79,6 +81,7 @@ class TALibAnalytics(BaseAnalytics):
         """
         Computes SMA and RSI using TA-Lib.
         """
+        print("X")
         source_df = self.context.get("ohlcv_pass")
         if source_df is None:
             raise ValueError(
@@ -86,12 +89,9 @@ class TALibAnalytics(BaseAnalytics):
                 f"Available: {list(self.context.keys())}"
             )
 
-        if isinstance(source_df, pl.DataFrame):
-            ohlcv_pass = source_df.lazy()
-        else:
-            ohlcv_pass = source_df
-
-        return (
+        ohlcv_pass = source_df
+        print(source_df.shape)
+        res= (
             ohlcv_pass.group_by("ListingId", maintain_order=True)
             .agg(
                 [
@@ -103,9 +103,26 @@ class TALibAnalytics(BaseAnalytics):
                     .apply(lambda s: talib.RSI(s, timeperiod=14))
                     .alias("RSI14"),
                 ]
-            )
-            .explode(pl.col_matching(r"^(SMA14|RSI14)$"))
+            ).with_columns([
+        pl.col("Close")
+        .map_elements(
+            lambda s: talib.SMA(s.to_numpy(), timeperiod=14),
+            return_dtype=pl.Float64
         )
+        .over("ListingId")
+        .alias("SMA14"),
+
+        pl.col("Close")
+        .map_elements(
+            lambda s: talib.RSI(s.to_numpy(), timeperiod=14),
+            return_dtype=pl.Float64
+        )
+        .over("ListingId")
+        .alias("RSI14"),
+    ]))
+        print(res)
+        print("/X")
+        return res
 
 
 # --- Pipeline Definition ---

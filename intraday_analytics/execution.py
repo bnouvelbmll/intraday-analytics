@@ -96,11 +96,6 @@ def process_batch_task(i, temp_dir, current_date, config, pipe):
     Worker function to process a single batch in a separate process.
     """
     try:
-        with open("/tmp/debug_worker.txt", "a") as f:
-            f.write(f"Worker {os.getpid()} processing batch {i} for {current_date}\n")
-            f.write(f"Config TABLES_TO_LOAD: {config.TABLES_TO_LOAD}\n")
-            f.write(f"Temp dir: {temp_dir}\n")
-
         # Load batch data
         batch_data = {}
         for table_name in config.TABLES_TO_LOAD:
@@ -277,6 +272,8 @@ class ProcessInterval(Process):
                 df.write_parquet(out_path)
             tasks.append(i)
 
+
+        print("TASKS=",len(task))
         # 3. Process batches in parallel
         n_jobs = self.config.NUM_WORKERS
         if n_jobs == -1:
@@ -303,6 +300,7 @@ class ProcessInterval(Process):
             )
             for name in tables_to_load_names
         }
+        print(s3_file_lists)
 
         table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
 
@@ -324,6 +322,8 @@ class ProcessInterval(Process):
             )
             future.result()
 
+        #FIXME: Does not seem robust for multipass if trades not input
+        print(os.listdir(self.config.TEMP_DIR))
         batch_files = glob.glob(
             os.path.join(self.config.TEMP_DIR, "batch-trades-*.parquet")
         )
@@ -335,6 +335,7 @@ class ProcessInterval(Process):
         if max_workers <= 0:
             max_workers = os.cpu_count()
 
+        print("TASKS=",len(batch_indices))
         with ProcessPoolExecutor(
             max_workers=max_workers, mp_context=get_context("spawn")
         ) as executor:
@@ -409,6 +410,7 @@ class ProcessInterval(Process):
                     raise ValueError(f"Unknown PREPARE_DATA_MODE: {MODE}")
 
             # Determine sort keys based on modules
+            ## FIXME: The 3 following lines don't look right
             sort_keys = ["ListingId", "TimeBucket"]
             if "generic" in self.pass_config.modules:
                 sort_keys = self.pass_config.generic_analytics.group_by
@@ -436,6 +438,27 @@ class ProcessInterval(Process):
             )
             raise
 
+
+import boto3
+from botocore.exceptions import ClientError
+from urllib.parse import urlparse
+
+def check_s3_url_exists(s3_url):
+    # 1. Parse the URL (e.g., s3://my-bucket/folder/file.txt)
+    parsed = urlparse(s3_url)
+    bucket = parsed.netloc
+    # lstrip('/') is critical because urlparse keeps the leading slash
+    key = parsed.path.lstrip('/')
+    s3 = boto3.client('s3')
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except ClientError as e:
+        # 404 means the object definitely does not exist
+        if e.response['Error']['Code'] == "404":
+            return False
+        # 403 means you don't have permission to see if it exists
+        raise e
 
 def run_metrics_pipeline(config, get_universe, get_pipeline=None):
     """
@@ -482,7 +505,7 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
             for sd, ed in date_batches:
                 if config.SKIP_EXISTING_OUTPUT:
                     final_s3_path = get_final_s3_path(sd, ed, config, pass_config.name)
-                    if bmll2.file_exists(final_s3_path, area=config.AREA):
+                    if check_s3_url_exists(final_s3_path):
                         logging.info(
                             f"✅ Output already exists for {sd.date()} -> {ed.date()} (Pass {pass_config.name}). Skipping."
                         )

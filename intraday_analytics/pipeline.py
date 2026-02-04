@@ -39,6 +39,8 @@ class AnalyticsPipeline:
         """
         base: pl.LazyFrame | None = None
         prev_specific_cols = {}
+        print("MODULES")
+        print (self.modules)
 
         for module in self.modules:
             # Provide the context to the module
