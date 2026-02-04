@@ -1071,8 +1071,4 @@ class L2AnalyticsTW(BaseTWAnalytics):
                 .alias("BidTWA")
             )
 
-	#FIXME: Should it  always be there needs config ? Why is in TW ? Probably does not make sense herence would remove
-        expressions.append(pl.col("EventTimestamp").len().alias("EventCount"))
-
         return l2.agg(expressions)
-

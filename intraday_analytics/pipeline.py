@@ -42,9 +42,21 @@ class AnalyticsPipeline:
         print("MODULES")
         print (self.modules)
 
+        join_keys_override = None
+        if self.pass_config.sort_keys:
+            join_keys_override = list(self.pass_config.sort_keys)
+            if "TimeBucket" not in join_keys_override:
+                join_keys_override.append("TimeBucket")
+
         for module in self.modules:
             # Provide the context to the module
             module.context = self.context
+            if join_keys_override is not None:
+                module.join_keys = join_keys_override
+                if hasattr(module, "config") and hasattr(module.config, "symbol_cols"):
+                    module.config.symbol_cols = [
+                        k for k in join_keys_override if k != "TimeBucket"
+                    ]
 
             # Provide the necessary data tables to the module
             for key in self.config.TABLES_TO_LOAD:

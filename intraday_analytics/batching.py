@@ -109,7 +109,25 @@ class SymbolBatcherStreaming:
         """
         liter = {name: iter(lf.collect_batches()) for name, lf in self.lf_dict.items()}
         citer = {name: next(liter[name]) for name, lf in self.lf_dict.items()}
-        # FIXME CHECK DATA IS SORTED
+        last_symbol_seen: Dict[str, str] = {name: "" for name in self.lf_dict.keys()}
+
+        def _check_sorted_by_symbol(name: str, df: pl.DataFrame, last_symbol: str) -> None:
+            if df.is_empty():
+                return
+            if not df[SYMBOL_COL].is_sorted():
+                raise ValueError(
+                    f"{name} data must be sorted by {SYMBOL_COL} for streaming batches."
+                )
+            first_symbol = df[SYMBOL_COL][0]
+            if last_symbol and first_symbol < last_symbol:
+                raise ValueError(
+                    f"{name} data is not globally sorted by {SYMBOL_COL}."
+                )
+
+        for name, df in citer.items():
+            _check_sorted_by_symbol(name, df, last_symbol_seen[name])
+            if not df.is_empty():
+                last_symbol_seen[name] = df[SYMBOL_COL][-1]
 
         for batch_symbols in self.batches:
             batch_data: Dict[str, pl.DataFrame] = {}
@@ -128,6 +146,9 @@ class SymbolBatcherStreaming:
                         try:
                             citer[name] = next(liter[name])
                             b = citer[name]
+                            _check_sorted_by_symbol(name, b, last_symbol_seen[name])
+                            if not b.is_empty():
+                                last_symbol_seen[name] = b[SYMBOL_COL][-1]
                             mask = pl.Series(SYMBOL_COL, b[SYMBOL_COL]).is_in(
                                 list(batch_symbols)
                             )

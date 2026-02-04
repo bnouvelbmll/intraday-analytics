@@ -22,6 +22,7 @@ class DenseAnalyticsConfig(BaseModel):
     time_bucket_seconds: Optional[float] = None
     time_bucket_anchor: Literal["end", "start"] = "end"
     time_bucket_closed: Literal["right", "left"] = "right"
+    symbol_cols: Optional[List[str]] = None
 
 
 @register_analytics("dense", config_attr="dense_analytics", needs_ref=True)
@@ -39,8 +40,8 @@ class DenseAnalytics(BaseAnalytics):
 
     def compute(self) -> pl.LazyFrame:
         # (Keep original logic as it's structural, not metric-generating in the same sense)
-        sc = SYMBOL_COL
-        symbols = pl.DataFrame({sc: list(sorted(self.ref[sc].unique()))})
+        scs = self.config.symbol_cols or [SYMBOL_COL]
+        symbols = self.ref.select(scs).unique()
 
         if self.config.mode == "uniform":
             dates = (
@@ -86,38 +87,47 @@ class DenseAnalytics(BaseAnalytics):
                 }
             )
 
+            ref_cols = [c for c in ["MIC", "Ticker", "CurrencyCode"] if c in self.ref.columns]
+            ref_sel = self.ref.select(scs + ref_cols).unique(subset=scs).lazy()
+
             return (
-                pl.LazyFrame(symbols.cast(pl.Int64))
+                pl.LazyFrame(symbols)
                 .join(pl.LazyFrame(times_df), how="cross")
-                .join(
-                    self.ref.lazy().select(
-                        [SYMBOL_COL, "MIC", "Ticker", "CurrencyCode"]
-                    ),
-                    on=SYMBOL_COL,
-                    how="left",
-                )
-                .sort([sc, "TimeBucket"])
+                .join(ref_sel, on=scs, how="left")
+                .sort(scs + ["TimeBucket"])
             )
         elif self.config.mode == "adaptative":
             tsc = "EventTimestamp"
-            available_listings = self.marketstate.select("ListingId").unique().collect()
-            symbols = symbols.join(available_listings, on=sc, how="inner")
+            if "ListingId" in scs:
+                available_listings = (
+                    self.marketstate.select("ListingId").unique().collect()
+                )
+                symbols = symbols.join(available_listings, on="ListingId", how="inner")
 
-            calendar = self.marketstate.filter(
-                pl.col("ListingId").is_in(list(symbols[sc]))
-            )
+            calendar = self.marketstate
+            if "ListingId" not in scs:
+                if "ListingId" not in self.ref.columns:
+                    raise ValueError("DenseAnalytics requires ListingId in ref.")
+                calendar = calendar.join(
+                    self.ref.select(["ListingId"] + scs), on="ListingId", how="left"
+                )
+
+            if "ListingId" in symbols.columns:
+                calendar = calendar.filter(
+                    pl.col("ListingId").is_in(list(symbols["ListingId"]))
+                )
             continuous_intervals = (
                 calendar.with_columns(
                     [
                         pl.col("MarketState")
                         .shift(1)
-                        .over("ListingId")
+                        .over(scs)
                         .alias("pstate"),
                         pl.col("MarketState")
                         .shift(-1)
-                        .over("ListingId")
+                        .over(scs)
                         .alias("nstate"),
-                        pl.col(tsc).shift(-1).over("ListingId").alias("nts"),
+                        pl.col(tsc).shift(-1).over(scs).alias("nts"),
                     ]
                 )
                 .filter(pl.col("MarketState") == "CONTINUOUS_TRADING")
@@ -127,7 +137,7 @@ class DenseAnalytics(BaseAnalytics):
                     | (pl.col("pstate").is_null())
                     | (pl.col("nstate").is_null())
                 )
-                .select(["ListingId", "MarketState", tsc, "nts"])
+                .select(scs + ["MarketState", tsc, "nts"])
                 .collect()
                 .to_pandas()
             )
@@ -135,16 +145,20 @@ class DenseAnalytics(BaseAnalytics):
             failed_listings = []
             frequency = str(int(self.config.time_bucket_seconds * 1e9)) + "ns"
             TS_PADDING = pd.Timedelta(seconds=600)
-            for s in symbols[sc]:
-                ciq = continuous_intervals.query("ListingId==@s")[tsc]
+            sym_rows = symbols.iter_rows(named=True)
+            for row in sym_rows:
+                mask = True
+                for c in scs:
+                    mask = mask & (continuous_intervals[c] == row[c])
+                ciq = continuous_intervals.loc[mask, tsc]
                 if len(ciq) == 0:
-                    failed_listings.append(s)
+                    failed_listings.append(row)
                     continue
                 start_dt = pd.Timestamp(ciq.iloc[0]).floor(str(frequency)) - TS_PADDING
                 end_dt = (
-                    pd.Timestamp(
-                        continuous_intervals.query("ListingId==@s")["nts"].iloc[-1]
-                    ).ceil(str(frequency))
+                    pd.Timestamp(continuous_intervals.loc[mask, "nts"].iloc[-1]).ceil(
+                        str(frequency)
+                    )
                     + TS_PADDING
                 )
                 res.append(
@@ -158,7 +172,7 @@ class DenseAnalytics(BaseAnalytics):
                                 eager=True,
                             ).cast(pl.Datetime("ns"))
                         }
-                    ).with_columns(ListingId=s)
+                    ).with_columns(**{c: row[c] for c in scs})
                 )
 
             if failed_listings:
@@ -168,10 +182,10 @@ class DenseAnalytics(BaseAnalytics):
 
             if not res:
                 return pl.DataFrame(
-                    schema={"ListingId": pl.Int64, "TimeBucket": pl.Datetime("ns")}
+                    schema={**{c: pl.Int64 for c in scs}, "TimeBucket": pl.Datetime("ns")}
                 ).lazy()
 
-            r = pl.concat(res).sort([sc, "TimeBucket"])
+            r = pl.concat(res).sort(scs + ["TimeBucket"])
             return r.lazy()
         else:
             raise ValueError()

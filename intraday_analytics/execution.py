@@ -323,14 +323,40 @@ class ProcessInterval(Process):
             )
             future.result()
 
-        #FIXME: Does not seem robust for multipass if trades not input
+        # Determine batch indices from available tables in priority order.
         print(os.listdir(self.config.TEMP_DIR))
-        batch_files = glob.glob(
-            os.path.join(self.config.TEMP_DIR, "batch-trades-*.parquet")
+        priority_tables = [
+            "reference",
+            "marketstate",
+            "previous_pass",
+            "trades",
+            "l2",
+            "l3",
+        ]
+        tables_to_check = [
+            name for name in priority_tables if name in tables_to_load_names
+        ]
+        tables_to_check.extend(
+            [name for name in tables_to_load_names if name not in tables_to_check]
         )
-        batch_indices = sorted(
-            [int(f.split("-")[-1].split(".")[0]) for f in batch_files]
-        )
+
+        batch_indices = []
+        for table_name in tables_to_check:
+            pattern = os.path.join(
+                self.config.TEMP_DIR, f"batch-{table_name}-*.parquet"
+            )
+            batch_files = glob.glob(pattern)
+            if batch_files:
+                batch_indices = sorted(
+                    [int(f.split("-")[-1].split(".")[0]) for f in batch_files]
+                )
+                break
+
+        if not batch_indices:
+            logging.warning(
+                "No batch files found for any table; skipping batch processing."
+            )
+            return
 
         max_workers = self.config.NUM_WORKERS
         if max_workers <= 0:
@@ -411,10 +437,14 @@ class ProcessInterval(Process):
                     raise ValueError(f"Unknown PREPARE_DATA_MODE: {MODE}")
 
             # Determine sort keys based on modules
-            ## FIXME: The 3 following lines don't look right
-            sort_keys = ["ListingId", "TimeBucket"]
-            if "generic" in self.pass_config.modules:
+            if self.pass_config.sort_keys:
+                sort_keys = list(self.pass_config.sort_keys)
+                if "TimeBucket" not in sort_keys:
+                    sort_keys.append("TimeBucket")
+            elif "generic" in self.pass_config.modules:
                 sort_keys = self.pass_config.generic_analytics.group_by
+            else:
+                sort_keys = ["ListingId", "TimeBucket"]
 
             aggregate_and_write_final_output(
                 self.sd,
