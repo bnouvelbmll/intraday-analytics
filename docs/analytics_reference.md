@@ -18,6 +18,7 @@ Time bucket semantics (pass-level):
 - l2tw (time-weighted)
 - l3
 - execution
+- iceberg
 - generic
 
 ---
@@ -38,7 +39,7 @@ Key config:
   - sides: Bid, Ask, Total, Unknown
   - aggregations: First, Last, Min, Max, Mean, Sum, Median, Std (default: Mean)
 - `TradeAnalyticsConfig.flag_metrics` (TradeFlagConfig)
-  - flags: NegotiatedTrade, OddLotTrade, BlockTrade, CrossTrade, AlgorithmicTrade
+  - flags: NegotiatedTrade, OddLotTrade, BlockTrade, CrossTrade, AlgorithmicTrade, IcebergExecution
   - measures: Volume, Count, AvgNotional
 - `TradeAnalyticsConfig.change_metrics` (TradeChangeConfig)
   - measures: PreTradeElapsedTimeChg, PostTradeElapsedTimeChg, PricePoint
@@ -138,6 +139,52 @@ Key config:
 
 Notes:
 - If config is empty, default sets of L3 and trade breakdown metrics are computed.
+
+---
+
+## iceberg
+
+Purpose: detect iceberg executions from L3 events and optionally tag trades for reuse in trade analytics.
+
+Required tables:
+- l3
+- trades (needed for trade tagging)
+
+Key config:
+- `IcebergAnalyticsConfig.metrics` (IcebergMetricConfig)
+  - measures: ExecutionVolume, ExecutionCount, AverageSize, RevealedPeakCount, AveragePeakCount, OrderImbalance
+  - sides: Bid, Ask, Total
+- `IcebergAnalyticsConfig.tag_trades`: enable iceberg trade tagging (default: true)
+- `IcebergAnalyticsConfig.trade_tag_context_key`: context key for tagged trades (default: trades_iceberg)
+- `IcebergAnalyticsConfig.match_tolerance_seconds`: asof join tolerance for trade tagging
+- `IcebergAnalyticsConfig.price_match`: require exact price match when tagging trades
+
+Output:
+- IcebergExecutionVolume{Side}
+- IcebergExecutionCount{Side}
+- IcebergAverageSize{Side}
+- IcebergRevealedPeakCount{Side}
+- IcebergAveragePeakCount{Side}
+- IcebergOrderImbalance
+
+Notes:
+- Heuristic: iceberg executions are inferred from L3 remove events with `ExecutionSize > 0` and `RevealedQty = max(ExecutionSize - OldSize, 0)`; optional trade tagging uses an asof join within `match_tolerance_seconds` and optional price match.
+- Trade-match heuristic (optional): trades filtered to LIT/DARK (configurable) are matched to nearby L3 executions by time/price/side; trades that exactly match a book execution can be excluded by size tolerance. If side is missing, it is inferred via Lee-Ready against mid.
+- Peak linking (optional): iceberg refills are approximated by linking a remove execution to the next insert at the same side/price within `peak_link_tolerance_seconds`, and cumulative peak counts per iceberg are averaged in `IcebergAveragePeakCount` (null if linking disabled).
+- Tagged trades include `IcebergExecution` (bool) and `IcebergTag` (L3_REVEALED, TRADE_MATCH, BOTH).
+- Trade analytics can reuse iceberg tags via `TradeAnalyticsConfig.use_tagged_trades` + `tagged_trades_context_key`.
+
+---
+
+## retail_imbalance
+
+Purpose: compute retail trade imbalance as a separate module.
+
+Required tables:
+- trades
+
+Output:
+- RetailTradeImbalance
 
 ---
 

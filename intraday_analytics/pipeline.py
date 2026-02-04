@@ -182,6 +182,8 @@ def create_pipeline(
     from .analytics.l3 import L3Analytics
     from .analytics.execution import ExecutionAnalytics
     from .analytics.generic import GenericAnalytics
+    from .analytics.retail_imbalance import RetailImbalanceAnalytics
+    from .analytics.iceberg import IcebergAnalytics
 
     # Default registry of framework modules
     module_registry = {
@@ -192,6 +194,10 @@ def create_pipeline(
         "l3": lambda: L3Analytics(pass_config.l3_analytics),
         "execution": lambda: ExecutionAnalytics(pass_config.execution_analytics),
         "generic": lambda: GenericAnalytics(pass_config.generic_analytics),
+        "retail_imbalance": lambda: RetailImbalanceAnalytics(
+            pass_config.retail_imbalance_analytics
+        ),
+        "iceberg": lambda: IcebergAnalytics(pass_config.iceberg_analytics),
     }
 
     # Add any custom modules provided by the user
@@ -200,7 +206,23 @@ def create_pipeline(
 
     # Build the list of module instances for this pass
     modules = []
-    for module_name in pass_config.modules:
+    module_names = list(pass_config.modules)
+    if pass_config.trade_analytics.enable_retail_imbalance:
+        if "retail_imbalance" not in module_names:
+            module_names.append("retail_imbalance")
+    if pass_config.trade_analytics.use_tagged_trades:
+        if "iceberg" not in module_names:
+            module_names.insert(0, "iceberg")
+        else:
+            try:
+                trade_idx = module_names.index("trade")
+                iceberg_idx = module_names.index("iceberg")
+                if iceberg_idx > trade_idx:
+                    module_names.pop(iceberg_idx)
+                    module_names.insert(trade_idx, "iceberg")
+            except ValueError:
+                pass
+    for module_name in module_names:
         factory = module_registry.get(module_name)
         if factory:
             modules.append(factory())

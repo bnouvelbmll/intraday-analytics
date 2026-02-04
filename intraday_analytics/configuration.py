@@ -7,6 +7,8 @@ from .analytics.l3 import L3AnalyticsConfig
 from .analytics.trade import TradeAnalyticsConfig
 from .analytics.execution import ExecutionAnalyticsConfig
 from .analytics.generic import GenericAnalyticsConfig
+from .analytics.retail_imbalance import RetailImbalanceConfig
+from .analytics.iceberg import IcebergAnalyticsConfig
 
 
 class PrepareDataMode(str, Enum):
@@ -38,6 +40,12 @@ class PassConfig(BaseModel):
     trade_analytics: TradeAnalyticsConfig = Field(default_factory=TradeAnalyticsConfig)
     execution_analytics: ExecutionAnalyticsConfig = Field(
         default_factory=ExecutionAnalyticsConfig
+    )
+    retail_imbalance_analytics: RetailImbalanceConfig = Field(
+        default_factory=RetailImbalanceConfig
+    )
+    iceberg_analytics: IcebergAnalyticsConfig = Field(
+        default_factory=IcebergAnalyticsConfig
     )
     generic_analytics: GenericAnalyticsConfig = Field(
         default_factory=GenericAnalyticsConfig

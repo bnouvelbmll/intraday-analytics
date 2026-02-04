@@ -19,11 +19,27 @@ AggregationMethod = Literal[
 
 # Metric hint registry (module can register hints for schema metadata).
 METRIC_HINTS: list[dict] = []
+_METRIC_HINT_KEYS: set[tuple] = set()
 
 
-def metric_hint(module: str, pattern: str, default_agg: AggregationMethod, weight_col: str | None = None):
+def _register_metric_hint(data: dict):
+    key = (
+        data.get("module"),
+        data.get("pattern"),
+        data.get("default_agg"),
+        data.get("weight_col"),
+    )
+    if key in _METRIC_HINT_KEYS:
+        return
+    _METRIC_HINT_KEYS.add(key)
+    METRIC_HINTS.append(data)
+
+
+def metric_hint(
+    module: str, pattern: str, default_agg: AggregationMethod, weight_col: str | None = None
+):
     def _decorator(fn):
-        METRIC_HINTS.append(
+        _register_metric_hint(
             {
                 "module": module,
                 "pattern": pattern,
@@ -37,6 +53,23 @@ def metric_hint(module: str, pattern: str, default_agg: AggregationMethod, weigh
 
 
 METRIC_DOCS: list[dict] = []
+_METRIC_DOC_KEYS: set[tuple] = set()
+
+
+def _register_metric_doc(data: dict):
+    key = (
+        data.get("module"),
+        data.get("pattern"),
+        data.get("template"),
+        data.get("unit"),
+        data.get("group"),
+        data.get("group_role"),
+        data.get("group_semantics"),
+    )
+    if key in _METRIC_DOC_KEYS:
+        return
+    _METRIC_DOC_KEYS.add(key)
+    METRIC_DOCS.append(data)
 
 
 def metric_doc(
@@ -49,7 +82,7 @@ def metric_doc(
     group_semantics: str | None = None,
 ):
     def _decorator(fn):
-        METRIC_DOCS.append(
+        _register_metric_doc(
             {
                 "module": module,
                 "pattern": pattern,

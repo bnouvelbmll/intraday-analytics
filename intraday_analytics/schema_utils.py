@@ -13,6 +13,7 @@ from .analytics.trade import (
     TradeImpactConfig,
 )
 from .analytics.execution import ExecutionAnalytics
+from .analytics.iceberg import IcebergAnalytics
 from .analytics.common import METRIC_HINTS, METRIC_DOCS
 from .analytics.dense import DenseAnalytics
 from .analytics.l2 import L2AnalyticsConfig, L2LiquidityConfig, L2SpreadConfig, L2ImbalanceConfig, L2VolatilityConfig
@@ -23,6 +24,7 @@ from .analytics.execution import (
     TradeBreakdownConfig,
     ExecutionDerivedConfig,
 )
+from .analytics.iceberg import IcebergAnalyticsConfig, IcebergMetricConfig
 
 
 def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfig:
@@ -155,12 +157,28 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
         derived_metrics=[ExecutionDerivedConfig(variant="TradeImbalance")],
     )
 
+    iceberg_config = IcebergAnalyticsConfig(
+        metrics=[
+            IcebergMetricConfig(
+                measures=[
+                    "ExecutionVolume",
+                    "ExecutionCount",
+                    "AverageSize",
+                    "OrderImbalance",
+                    "AveragePeakCount",
+                ],
+                sides=["Total"],
+            )
+        ]
+    )
+
     pass1 = PassConfig(
         name="pass1",
         l2_analytics=l2_config,
         l3_analytics=l3_config,
         trade_analytics=trade_config,
         execution_analytics=exec_config,
+        iceberg_analytics=iceberg_config,
     )
 
     return AnalyticsConfig(PASSES=[pass1])
@@ -209,6 +227,7 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
     trades_schema = {
         **common_cols,
         "TradeDate": pl.Date,
+        "TradeTimestamp": pl.Datetime("ns"),
         "Price": pl.Float64,
         "LocalPrice": pl.Float64,
         "Size": pl.Float64,
@@ -243,6 +262,7 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
         "IsBlock": pl.Utf8,
         "CrossingTrade": pl.Utf8,
         "AlgorithmicTrade": pl.Utf8,
+        "IcebergExecution": pl.Boolean,
     }
 
     # L3 Schema
@@ -332,6 +352,16 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
     except Exception as e:
         output_columns["execution_error"] = [str(e)]
 
+    # --- Iceberg ---
+    try:
+        iceberg_analytics = IcebergAnalytics(pass_config.iceberg_analytics)
+        iceberg_analytics.l3 = l3_dummy
+        iceberg_analytics.trades = trades_dummy
+        iceberg_df = iceberg_analytics.compute()
+        output_columns["iceberg"] = iceberg_df.collect_schema().names()
+    except Exception as e:
+        output_columns["iceberg_error"] = [str(e)]
+
     return output_columns
 
 
@@ -349,6 +379,7 @@ def _filter_schema_for_pass1(config: AnalyticsConfig, schema: Dict[str, List[str
         "trade": ["trade"],
         "l3": ["l3"],
         "execution": ["execution"],
+        "iceberg": ["iceberg"],
     }
 
     keys = []

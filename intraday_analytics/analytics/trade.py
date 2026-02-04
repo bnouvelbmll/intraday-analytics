@@ -1,19 +1,22 @@
 import polars as pl
 from intraday_analytics.bases import BaseAnalytics
 from pydantic import BaseModel, Field
-from typing import List, Union, Literal, Optional
+from typing import List, Union, Literal, Optional, Dict, Any
+
 from .common import (
     CombinatorialMetricConfig,
     Side,
     AggregationMethod,
     apply_aggregation,
-    metric_doc,
 )
-from .utils import apply_market_state_filter, apply_alias, MetricGenerator
+from .utils import apply_market_state_filter, apply_alias
+from .metric_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
 
-# --- Configuration Models ---
 
-# 1. Generic Trade Metrics (Volume, Count, VWAP, OHLC)
+# =============================
+# Configuration Models
+# =============================
+
 TradeGenericMeasure = Literal[
     "Volume",
     "Count",
@@ -48,7 +51,6 @@ class TradeGenericConfig(CombinatorialMetricConfig):
     )
 
 
-# 2. Discrepancy Metrics
 DiscrepancyReference = Literal[
     "MidAtPrimary",
     "EBBO",
@@ -65,7 +67,7 @@ DiscrepancyReference = Literal[
 
 class TradeDiscrepancyConfig(CombinatorialMetricConfig):
     """
-    Price Discrepancy Metrics (in BPS).
+    Price Discrepancy Analytics (in BPS).
     Calculates: 10000 * (TradePrice - ReferencePrice) / ReferencePrice
     """
 
@@ -83,16 +85,20 @@ class TradeDiscrepancyConfig(CombinatorialMetricConfig):
     )
 
 
-# 3. Flag-Based Metrics (Negotiated, OddLot, etc.)
 TradeFlagType = Literal[
-    "NegotiatedTrade", "OddLotTrade", "BlockTrade", "CrossTrade", "AlgorithmicTrade"
+    "NegotiatedTrade",
+    "OddLotTrade",
+    "BlockTrade",
+    "CrossTrade",
+    "AlgorithmicTrade",
+    "IcebergExecution",
 ]
 TradeFlagMeasure = Literal["Volume", "Count", "AvgNotional"]
 
 
 class TradeFlagConfig(CombinatorialMetricConfig):
     """
-    Metrics filtered by specific trade flags (e.g., Negotiated, Odd Lot).
+    Analytics filtered by specific trade flags (e.g., Negotiated, Odd Lot).
     """
 
     metric_type: Literal["Trade_Flag"] = "Trade_Flag"
@@ -111,16 +117,15 @@ class TradeFlagConfig(CombinatorialMetricConfig):
     )
 
 
-# 4. Impact / Change Metrics
 ImpactMeasure = Literal[
     "PreTradeElapsedTimeChg", "PostTradeElapsedTimeChg", "PricePoint"
 ]
-VenueScope = Literal["Local", "Primary", "Venue"]  # Local=Default/None suffix
+VenueScope = Literal["Local", "Primary", "Venue"]
 
 
 class TradeChangeConfig(CombinatorialMetricConfig):
     """
-    Metrics related to trade impact or state change.
+    Analytics related to trade impact or state change.
     """
 
     metric_type: Literal["Trade_Change"] = "Trade_Change"
@@ -134,17 +139,16 @@ class TradeChangeConfig(CombinatorialMetricConfig):
     )
 
 
-# 5. TCA / Impact (Existing)
 class TradeImpactConfig(CombinatorialMetricConfig):
     """
-    Trade Impact and Execution Quality metrics (TCA).
+    Trade Impact and Execution Quality analytics (TCA).
     """
 
     metric_type: Literal["Trade_Impact"] = "Trade_Impact"
 
     variant: Union[
         Literal["EffectiveSpread", "RealizedSpread", "PriceImpact"], List[str]
-    ] = Field(..., description="TCA metric type.")
+    ] = Field(..., description="TCA analytic type.")
 
     horizon: Union[str, List[str]] = Field(
         default="1s",
@@ -167,160 +171,191 @@ class TradeAnalyticsConfig(BaseModel):
 
     # Legacy support
     enable_retail_imbalance: bool = False
+    use_tagged_trades: bool = False
+    tagged_trades_context_key: str = "trades_iceberg"
 
 
-class TradeAnalytics(BaseAnalytics):
-    """
-    Computes trade-based analytics for continuous trading segments.
-    """
+# =============================
+# Analytic Specs
+# =============================
 
-    REQUIRES = ["trades"]  # (trades_plus)
 
-    def __init__(self, config: TradeAnalyticsConfig):
-        self.config = config
-        super().__init__(
-            "trades",
-            {},  # Dynamic schema
-        )
+class TradeGenericAnalytic(AnalyticSpec):
+    MODULE = "trade"
+    ConfigModel = TradeGenericConfig
 
-    def compute(self) -> pl.LazyFrame:
-        # Base filter: LIT_CONTINUOUS is standard
-        base_df = self.trades.filter(pl.col("Classification") == "LIT_CONTINUOUS")
-        gcols = ["MIC", "ListingId", "Ticker", "TimeBucket"]
-
-        generator = MetricGenerator(base_df)
-        expressions = []
-
-        expressions.extend(
-            generator.generate(self.config.generic_metrics, self._compute_generic)
-        )
-        expressions.extend(
-            generator.generate(
-                self.config.discrepancy_metrics, self._compute_discrepancy
-            )
-        )
-        expressions.extend(
-            generator.generate(self.config.flag_metrics, self._compute_flag)
-        )
-        expressions.extend(
-            generator.generate(self.config.change_metrics, self._compute_change)
-        )
-        expressions.extend(
-            generator.generate(self.config.impact_metrics, self._compute_impact)
-        )
-
-        # --- Legacy / Default Metrics (if config is empty) ---
-        if not expressions:
-            expressions.extend(self._get_default_metrics())
-
-        # Always add MarketState
-        expressions.append(pl.col("MarketState").last())
-
-        # Execute Main Aggregation
-        df = base_df.group_by(gcols).agg(expressions)
-
-        # --- Retail Imbalance ---
-        if self.config.enable_retail_imbalance:
-            df = self._compute_retail_imbalance(df, gcols)
-
-        self.df = df
-        return self.df
-
-    def _compute_generic(self, req, variant):
-        side = variant["sides"]
-        measure = variant["measures"]
-
-        # Filter by Side
+    def _build_filters(self, config: TradeGenericConfig, side: str):
         cond = pl.lit(True)
         if side == "Bid":
             cond = pl.col("AggressorSide") == 2
         elif side == "Ask":
             cond = pl.col("AggressorSide") == 1
+        if config.market_states:
+            cond = cond & pl.col("MarketState").is_in(config.market_states)
+        return cond
 
-        # Apply MarketState filter to condition if needed
-        if req.market_states:
-            cond = cond & pl.col("MarketState").is_in(req.market_states)
+    @staticmethod
+    def _filtered(cond, col):
+        return pl.when(cond).then(col).otherwise(None)
 
-        # Helper to apply condition
-        def filtered(col):
-            return (
-                pl.when(cond).then(col).otherwise(None)
-            )  # Use None for aggregations that ignore nulls like mean/median
+    @staticmethod
+    def _filtered_zero(cond, col):
+        return pl.when(cond).then(col).otherwise(0)
 
-        def filtered_zero(col):
-            return pl.when(cond).then(col).otherwise(0)
+    @analytic_handler(
+        "Volume",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Volume)$",
+        unit="Shares",
+    )
+    def _handle_volume(self, cond):
+        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        return self._filtered_zero(cond, pl.col("Size")).sum()
 
-        expr = None
-        if measure == "Volume":
-            expr = filtered_zero(pl.col("Size")).sum()
-        elif measure == "Count":
-            expr = filtered_zero(1).sum()
-        elif measure == "NotionalEUR":
-            expr = filtered_zero(pl.col("TradeNotionalEUR")).sum()
-        elif measure == "NotionalUSD":
-            expr = filtered_zero(pl.col("TradeNotionalUSD")).sum()
-        elif measure == "RetailCount":
-            expr = filtered_zero(
-                pl.when(pl.col("BMLLParticipantType") == "RETAIL").then(1).otherwise(0)
-            ).sum()
-        elif measure == "BlockCount":
-            expr = filtered_zero(
-                pl.when(pl.col("IsBlock") == "Y").then(1).otherwise(0)
-            ).sum()
-        elif measure == "AuctionNotional":
-            expr = filtered_zero(
-                pl.when(pl.col("Classification").str.contains("AUCTION"))
-                .then(pl.col("TradeNotionalEUR"))
-                .otherwise(0)
-            ).sum()
-        elif measure == "OTCVolume":
-            expr = filtered_zero(
-                pl.when(pl.col("Classification").str.contains("OTC"))
-                .then(pl.col("Size"))
-                .otherwise(0)
-            ).sum()
-        elif measure == "VWAP":
-            # VWAP = Sum(Price * Size) / Sum(Size)
-            # We need to filter both numerator and denominator
-            # Note: This simple aggregation assumes we can do it in one go.
-            # But VWAP is (Sum(P*V) / Sum(V)).
-            # If we return a single expression, it must be the result.
-            num = filtered_zero(pl.col("LocalPrice") * pl.col("Size")).sum()
-            den = filtered_zero(pl.col("Size")).sum()
-            expr = num / den
-        elif measure == "AvgPrice":
-            expr = filtered(pl.col("LocalPrice")).mean()
-        elif measure == "MedianPrice":
-            expr = filtered(pl.col("LocalPrice")).median()
-        elif measure == "OHLC":
-            # OHLC returns a list of expressions, but generator expects one.
-            # We handle this special case by returning a struct or we need to change generator.
-            # Or we can just return None here and handle OHLC separately?
-            # Or better, we can return a list of expressions?
-            # The generator currently expects a single expression.
-            # Let's hack it: return a list, and update generator to handle lists.
-            prefix = (
-                f"Trade{side}"
-                if not req.output_name_pattern
-                else req.output_name_pattern.format(**variant)
-            )
-            if side == "Total" and not req.output_name_pattern:
-                prefix = ""
+    @analytic_handler(
+        "Count",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Count)$",
+        unit="Trades",
+    )
+    def _handle_count(self, cond):
+        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        return self._filtered_zero(cond, 1).sum()
 
-            price_col = filtered(pl.col("LocalPrice")).drop_nans()
-            return [
-                price_col.first().alias(f"{prefix}Open"),
-                price_col.max().alias(f"{prefix}High"),
-                price_col.min().alias(f"{prefix}Low"),
-                price_col.last().alias(f"{prefix}Close"),
-            ]
+    @analytic_handler(
+        "NotionalEUR",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalEUR)$",
+        unit="EUR",
+    )
+    def _handle_notional_eur(self, cond):
+        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        return self._filtered_zero(cond, pl.col("TradeNotionalEUR")).sum()
 
-        if expr is not None:
-            default_name = f"Trade{side}{measure}"
-            return apply_alias(expr, req.output_name_pattern, variant, default_name)
-        return None
+    @analytic_handler(
+        "NotionalUSD",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalUSD)$",
+        unit="USD",
+    )
+    def _handle_notional_usd(self, cond):
+        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        return self._filtered_zero(cond, pl.col("TradeNotionalUSD")).sum()
 
-    def _compute_discrepancy(self, req, variant):
+    @analytic_handler("RetailCount")
+    def _handle_retail_count(self, cond):
+        return self._filtered_zero(
+            cond, pl.when(pl.col("BMLLParticipantType") == "RETAIL").then(1).otherwise(0)
+        ).sum()
+
+    @analytic_handler("BlockCount")
+    def _handle_block_count(self, cond):
+        return self._filtered_zero(
+            cond, pl.when(pl.col("IsBlock") == "Y").then(1).otherwise(0)
+        ).sum()
+
+    @analytic_handler("AuctionNotional")
+    def _handle_auction_notional(self, cond):
+        return self._filtered_zero(
+            cond,
+            pl.when(pl.col("Classification").str.contains("AUCTION"))
+            .then(pl.col("TradeNotionalEUR"))
+            .otherwise(0),
+        ).sum()
+
+    @analytic_handler("OTCVolume")
+    def _handle_otc_volume(self, cond):
+        return self._filtered_zero(
+            cond,
+            pl.when(pl.col("Classification").str.contains("OTC"))
+            .then(pl.col("Size"))
+            .otherwise(0),
+        ).sum()
+
+    @analytic_handler(
+        "VWAP",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice)$",
+        unit="XLOC",
+    )
+    def _handle_vwap(self, cond):
+        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        num = self._filtered_zero(cond, pl.col("LocalPrice") * pl.col("Size")).sum()
+        den = self._filtered_zero(cond, pl.col("Size")).sum()
+        return num / den
+
+    @analytic_handler(
+        "AvgPrice",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice)$",
+        unit="XLOC",
+    )
+    def _handle_avg_price(self, cond):
+        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        return self._filtered(cond, pl.col("LocalPrice")).mean()
+
+    @analytic_handler(
+        "MedianPrice",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice)$",
+        unit="XLOC",
+    )
+    def _handle_median_price(self, cond):
+        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        return self._filtered(cond, pl.col("LocalPrice")).median()
+
+    @analytic_handler(
+        "OHLC",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<ohlc>Open|High|Low|Close)$",
+        unit="XLOC",
+        group="TradeOHLC{side}",
+        group_role="{ohlc}",
+        group_semantics="ohlc_bar,ffill_non_naive",
+    )
+    def _handle_ohlc(self, cond, config: TradeGenericConfig, variant: Dict[str, Any]):
+        """Trade {ohlc} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        side = variant["sides"]
+        prefix = (
+            f"Trade{side}"
+            if not config.output_name_pattern
+            else config.output_name_pattern.format(**variant)
+        )
+        if side == "Total" and not config.output_name_pattern:
+            prefix = ""
+        price_col = self._filtered(cond, pl.col("LocalPrice")).drop_nans()
+        return [
+            price_col.first().alias(f"{prefix}Open"),
+            price_col.max().alias(f"{prefix}High"),
+            price_col.min().alias(f"{prefix}Low"),
+            price_col.last().alias(f"{prefix}Close"),
+        ]
+
+    def expressions(
+        self, ctx: AnalyticContext, config: TradeGenericConfig, variant: Dict[str, Any]
+    ) -> List[pl.Expr]:
+        side = variant["sides"]
+        measure = variant["measures"]
+        cond = self._build_filters(config, side)
+
+        handler = self.HANDLERS.get(measure)
+        if handler is None:
+            return []
+
+        if measure == "OHLC":
+            return handler(self, cond, config, variant)
+
+        expr = handler(self, cond)
+        default_name = f"Trade{side}{measure}"
+        return [apply_alias(expr, config.output_name_pattern, variant, default_name)]
+
+
+class TradeDiscrepancyAnalytic(AnalyticSpec):
+    MODULE = "trade"
+    DOCS = [
+        AnalyticDoc(
+            pattern=r"^DiscrepancyTo(?P<reference>.+?)(?P<side>Bid|Ask)?(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
+            template="Price difference between LocalPrice and {reference} expressed in basis points for {side_or_total} trades; aggregated by {agg_or_mean} within the TimeBucket.",
+            unit="BPS",
+        )
+    ]
+    ConfigModel = TradeDiscrepancyConfig
+
+    def expressions(
+        self, ctx: AnalyticContext, config: TradeDiscrepancyConfig, variant: Dict[str, Any]
+    ) -> List[pl.Expr]:
         ref_name = variant["references"]
         side = variant["sides"]
         ref_map = {
@@ -336,39 +371,85 @@ class TradeAnalytics(BaseAnalytics):
             "BestAskAtPrimary": "BestAskPriceAtPrimary",
         }
         col_name = ref_map.get(ref_name)
-        if col_name:
-            price_col = pl.col("LocalPrice")
-            ref_col = pl.col(col_name)
-            expr = 10000 * (price_col - ref_col) / ref_col
+        if not col_name:
+            return []
 
-            if side == "Bid":
-                expr = pl.when(pl.col("AggressorSide") == 2).then(expr).otherwise(None)
-            elif side == "Ask":
-                expr = pl.when(pl.col("AggressorSide") == 1).then(expr).otherwise(None)
+        price_col = pl.col("LocalPrice")
+        ref_col = pl.col(col_name)
+        expr = 10000 * (price_col - ref_col) / ref_col
 
-            expr = apply_market_state_filter(expr, req.market_states)
+        if side == "Bid":
+            expr = pl.when(pl.col("AggressorSide") == 2).then(expr).otherwise(None)
+        elif side == "Ask":
+            expr = pl.when(pl.col("AggressorSide") == 1).then(expr).otherwise(None)
 
-            outputs = []
-            for agg in req.aggregations:
-                agg_expr = apply_aggregation(expr, agg)
-                if agg_expr is None:
-                    continue
-                side_suffix = "" if side == "Total" else f"{side}"
-                default_name = (
-                    f"DiscrepancyTo{ref_name}{side_suffix}"
-                    if agg == "Mean" and req.output_name_pattern is None
-                    else f"DiscrepancyTo{ref_name}{side_suffix}{agg}"
+        expr = apply_market_state_filter(expr, config.market_states)
+
+        outputs = []
+        for agg in config.aggregations:
+            agg_expr = apply_aggregation(expr, agg)
+            if agg_expr is None:
+                continue
+            side_suffix = "" if side == "Total" else f"{side}"
+            default_name = (
+                f"DiscrepancyTo{ref_name}{side_suffix}"
+                if agg == "Mean" and config.output_name_pattern is None
+                else f"DiscrepancyTo{ref_name}{side_suffix}{agg}"
+            )
+            outputs.append(
+                apply_alias(
+                    agg_expr, config.output_name_pattern, {**variant, "agg": agg}, default_name
                 )
-                outputs.append(
-                    apply_alias(agg_expr, req.output_name_pattern, {**variant, "agg": agg}, default_name)
-                )
-            return outputs if outputs else None
-        return None
+            )
+        return outputs
 
-    def _compute_flag(self, req, variant):
+
+class TradeFlagAnalytic(AnalyticSpec):
+    MODULE = "trade"
+    ConfigModel = TradeFlagConfig
+
+    @analytic_handler(
+        "Volume",
+        pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade|IcebergExecution)(?P<measure>Volume)(?P<side>Bid|Ask)?$",
+        unit="Shares",
+    )
+    def _handle_volume(self, cond):
+        """Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket."""
+        return pl.when(cond).then(pl.col("Size")).otherwise(0).sum()
+
+    @analytic_handler(
+        "Count",
+        pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade|IcebergExecution)(?P<measure>Count)(?P<side>Bid|Ask)?$",
+        unit="Trades",
+    )
+    def _handle_count(self, cond):
+        """Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket."""
+        return pl.when(cond).then(1).otherwise(0).sum()
+
+    @analytic_handler(
+        "AvgNotional",
+        pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade|IcebergExecution)(?P<measure>AvgNotional)(?P<side>Bid|Ask)?$",
+        unit="EUR",
+    )
+    def _handle_avg_notional(self, cond):
+        """Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket."""
+        num = pl.when(cond).then(pl.col("TradeNotionalEUR")).otherwise(0).sum()
+        den = pl.when(cond).then(1).otherwise(0).sum()
+        return num / den
+
+    def expressions(
+        self, ctx: AnalyticContext, config: TradeFlagConfig, variant: Dict[str, Any]
+    ) -> List[pl.Expr]:
         flag_name = variant["flags"]
         side = variant["sides"]
         measure = variant["measures"]
+
+        if flag_name == "IcebergExecution":
+            try:
+                if "IcebergExecution" not in ctx.base_df.collect_schema().names():
+                    return []
+            except Exception:
+                return []
 
         flag_map = {
             "NegotiatedTrade": pl.col("NegotiatedTrade") == "Y",
@@ -376,8 +457,11 @@ class TradeAnalytics(BaseAnalytics):
             "BlockTrade": pl.col("IsBlock") == "Y",
             "CrossTrade": pl.col("CrossingTrade") == "Y",
             "AlgorithmicTrade": pl.col("AlgorithmicTrade") == "Y",
+            "IcebergExecution": pl.col("IcebergExecution").fill_null(False),
         }
         flag = flag_map.get(flag_name)
+        if flag is None:
+            return []
 
         cond = flag
         if side == "Bid":
@@ -385,30 +469,39 @@ class TradeAnalytics(BaseAnalytics):
         elif side == "Ask":
             cond = cond & (pl.col("AggressorSide") == 1)
 
-        if req.market_states:
-            cond = cond & pl.col("MarketState").is_in(req.market_states)
+        if config.market_states:
+            cond = cond & pl.col("MarketState").is_in(config.market_states)
 
-        def filtered_zero(col):
-            return pl.when(cond).then(col).otherwise(0)
+        handler = self.HANDLERS.get(measure)
+        if handler is None:
+            return []
+        expr = handler(self, cond)
 
-        expr = None
-        if measure == "Volume":
-            expr = filtered_zero(pl.col("Size")).sum()
-        elif measure == "Count":
-            expr = filtered_zero(1).sum()
-        elif measure == "AvgNotional":
-            num = filtered_zero(pl.col("TradeNotionalEUR")).sum()
-            den = filtered_zero(1).sum()
-            expr = num / den
+        default_name = f"{flag_name}{measure}"
+        if side != "Total":
+            default_name += f"{side}"
+        return [apply_alias(expr, config.output_name_pattern, variant, default_name)]
 
-        if expr is not None:
-            default_name = f"{flag_name}{measure}"
-            if side != "Total":
-                default_name += f"{side}"
-            return apply_alias(expr, req.output_name_pattern, variant, default_name)
-        return None
 
-    def _compute_change(self, req, variant):
+class TradeChangeAnalytic(AnalyticSpec):
+    MODULE = "trade"
+    DOCS = [
+        AnalyticDoc(
+            pattern=r"^PricePoint(?P<scope>AtPrimary|AtVenue)?$",
+            template="Mean of PricePoint{scope_or_empty} over trades in the TimeBucket.",
+            unit="Probability",
+        ),
+        AnalyticDoc(
+            pattern=r"^(?P<measure>PreTradeElapsedTimeChg|PostTradeElapsedTimeChg)(?P<scope>AtPrimary|AtVenue)?$",
+            template="Mean of {measure}{scope_or_empty} over trades in the TimeBucket.",
+            unit="Nanoseconds",
+        ),
+    ]
+    ConfigModel = TradeChangeConfig
+
+    def expressions(
+        self, ctx: AnalyticContext, config: TradeChangeConfig, variant: Dict[str, Any]
+    ) -> List[pl.Expr]:
         base_measure = variant["measures"]
         scope = variant["scopes"]
         suffix = ""
@@ -419,36 +512,101 @@ class TradeAnalytics(BaseAnalytics):
         col_name = f"{base_measure}{suffix}"
 
         expr = pl.col(col_name)
-        expr = apply_market_state_filter(expr, req.market_states)
+        expr = apply_market_state_filter(expr, config.market_states)
 
-        return apply_alias(expr.mean(), req.output_name_pattern, variant, col_name)
+        return [apply_alias(expr.mean(), config.output_name_pattern, variant, col_name)]
 
-    def _compute_impact(self, req, variant):
-        metric_type = variant["variant"]
-        horizon = variant["horizon"]
 
+class TradeImpactAnalytic(AnalyticSpec):
+    MODULE = "trade"
+    ConfigModel = TradeImpactConfig
+
+    @analytic_handler(
+        "EffectiveSpread",
+        pattern=r"^(?P<metric>EffectiveSpread|RealizedSpread|PriceImpact)(?P<horizon>.+)$",
+        unit="XLOC",
+    )
+    def _handle_effective_spread(self, config: TradeImpactConfig):
+        """Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration."""
+        price = pl.col("LocalPrice")
+        current_mid = pl.col(config.reference_price_col)
+        return 2 * (price - current_mid).abs()
+
+    @analytic_handler(
+        "RealizedSpread",
+        pattern=r"^(?P<metric>EffectiveSpread|RealizedSpread|PriceImpact)(?P<horizon>.+)$",
+        unit="XLOC",
+    )
+    def _handle_realized_spread(self, config: TradeImpactConfig):
+        """Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration."""
         side_sign = pl.when(pl.col("AggressorSide") == 1).then(1).otherwise(-1)
         price = pl.col("LocalPrice")
         future_mid = pl.col("PostTradeMid")
-        current_mid = pl.col(req.reference_price_col)
+        return 2 * side_sign * (price - future_mid)
 
-        expr = None
-        if metric_type == "EffectiveSpread":
-            expr = 2 * (price - current_mid).abs()
-        elif metric_type == "RealizedSpread":
-            expr = 2 * side_sign * (price - future_mid)
-        elif metric_type == "PriceImpact":
-            expr = 2 * side_sign * (future_mid - current_mid)
+    @analytic_handler(
+        "PriceImpact",
+        pattern=r"^(?P<metric>EffectiveSpread|RealizedSpread|PriceImpact)(?P<horizon>.+)$",
+        unit="XLOC",
+    )
+    def _handle_price_impact(self, config: TradeImpactConfig):
+        """Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration."""
+        side_sign = pl.when(pl.col("AggressorSide") == 1).then(1).otherwise(-1)
+        future_mid = pl.col("PostTradeMid")
+        current_mid = pl.col(config.reference_price_col)
+        return 2 * side_sign * (future_mid - current_mid)
 
-        if expr is not None:
-            expr = apply_market_state_filter(expr, req.market_states)
-            default_name = f"{metric_type}{horizon}"
-            return apply_alias(
-                expr.mean(), req.output_name_pattern, variant, default_name
-            )
-        return None
+    def expressions(
+        self, ctx: AnalyticContext, config: TradeImpactConfig, variant: Dict[str, Any]
+    ) -> List[pl.Expr]:
+        metric_type = variant["variant"]
+        horizon = variant["horizon"]
 
-    def _get_default_metrics(self):
+        handler = self.HANDLERS.get(metric_type)
+        if handler is None:
+            return []
+        expr = handler(self, config)
+
+        expr = apply_market_state_filter(expr, config.market_states)
+        default_name = f"{metric_type}{horizon}"
+        return [apply_alias(expr.mean(), config.output_name_pattern, variant, default_name)]
+
+
+class TradeDefaultAnalytic(AnalyticSpec):
+    MODULE = "trade"
+    DOCS = [
+        AnalyticDoc(
+            pattern=r"^VWAP$",
+            template="Volume-weighted average price over trades in the TimeBucket.",
+            unit="XLOC",
+        ),
+        AnalyticDoc(
+            pattern=r"^VolumeWeightedPricePlacement$",
+            template="Volume-weighted price placement over trades in the TimeBucket.",
+            unit="XLOC",
+        ),
+        AnalyticDoc(
+            pattern=r"^Volume$",
+            template="Sum of trade volume over trades in the TimeBucket.",
+            unit="Shares",
+        ),
+        AnalyticDoc(
+            pattern=r"^(?P<ohlc>Open|High|Low|Close)$",
+            template="{ohlc} trade price over trades in the TimeBucket.",
+            unit="XLOC",
+            group="TradeOHLCTotal",
+            group_role="{ohlc}",
+            group_semantics="ohlc_bar,ffill_non_naive",
+        ),
+    ]
+    REGISTER = True
+
+    def expressions(
+        self, ctx: AnalyticContext, config: BaseModel, variant: Dict[str, Any]
+    ) -> List[pl.Expr]:
+        return self.default_expressions(ctx)
+
+    def default_expressions(self, ctx: AnalyticContext) -> List[pl.Expr]:
         return [
             (
                 (pl.col("LocalPrice") * pl.col("Size")).sum() / pl.col("Size").sum()
@@ -464,216 +622,61 @@ class TradeAnalytics(BaseAnalytics):
             pl.col("LocalPrice").drop_nans().min().alias("Low"),
         ]
 
-    def _compute_retail_imbalance(self, df, gcols):
-        df2 = (
-            self.trades.filter(pl.col("Classification") == "LIT_CONTINUOUS")
-            .filter(pl.col("BMLLParticipantType") == "RETAIL")
-            .group_by(gcols)
-            .agg(
-                (
-                    (
-                        pl.when(pl.col("AggressorSide") == 1)
-                        .then(pl.col("TradeNotionalEUR"))
-                        .otherwise(-pl.col("TradeNotionalEUR"))
-                    ).sum()
-                    / pl.col("TradeNotionalEUR").sum()
-                ).alias("RetailTradeImbalance")
-            )
+
+# =============================
+# Analytics Module
+# =============================
+
+
+class TradeAnalytics(BaseAnalytics):
+    """
+    Computes trade-based analytics for continuous trading segments.
+    """
+
+    REQUIRES = ["trades"]
+
+    def __init__(self, config: TradeAnalyticsConfig):
+        self.config = config
+        super().__init__(
+            "trades",
+            {},
         )
-        return df.join(df2, on=gcols, how="left")
 
+    def compute(self) -> pl.LazyFrame:
+        base_df = self.trades
+        if self.config.use_tagged_trades:
+            tagged = self.context.get(self.config.tagged_trades_context_key)
+            if tagged is not None:
+                base_df = tagged
 
-# Metric documentation (used by schema enumeration)
-@metric_doc(
-    module="trade",
-    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Volume)$",
-    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
-    unit="Shares",
-)
-def _doc_trade_volume():
-    pass
+        if isinstance(base_df, pl.DataFrame):
+            base_df = base_df.lazy()
 
+        base_df = base_df.filter(pl.col("Classification") == "LIT_CONTINUOUS")
+        gcols = ["MIC", "ListingId", "Ticker", "TimeBucket"]
 
-@metric_doc(
-    module="trade",
-    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalEUR)$",
-    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
-    unit="EUR",
-)
-def _doc_trade_notional_eur():
-    pass
+        ctx = AnalyticContext(base_df=base_df, cache={}, context=self.context)
+        expressions = []
 
+        analytic_config_pairs = [
+            (TradeGenericAnalytic(), self.config.generic_metrics),
+            (TradeDiscrepancyAnalytic(), self.config.discrepancy_metrics),
+            (TradeFlagAnalytic(), self.config.flag_metrics),
+            (TradeChangeAnalytic(), self.config.change_metrics),
+            (TradeImpactAnalytic(), self.config.impact_metrics),
+        ]
 
-@metric_doc(
-    module="trade",
-    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalUSD)$",
-    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
-    unit="USD",
-)
-def _doc_trade_notional_usd():
-    pass
+        for analytic, configs in analytic_config_pairs:
+            for cfg in configs:
+                for variant in analytic.expand_config(cfg):
+                    expressions.extend(analytic.expressions(ctx, cfg, variant))
 
+        if not expressions:
+            expressions.extend(TradeDefaultAnalytic().default_expressions(ctx))
 
-@metric_doc(
-    module="trade",
-    pattern=r"^VWAP$",
-    template="Volume-weighted average price over trades in the TimeBucket.",
-    unit="XLOC",
-)
-def _doc_trade_vwap_default():
-    pass
+        expressions.append(pl.col("MarketState").last())
 
+        df = base_df.group_by(gcols).agg(expressions)
 
-@metric_doc(
-    module="trade",
-    pattern=r"^VolumeWeightedPricePlacement$",
-    template="Volume-weighted price placement over trades in the TimeBucket.",
-    unit="XLOC",
-)
-def _doc_trade_vwpp_default():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^Volume$",
-    template="Sum of trade volume over trades in the TimeBucket.",
-    unit="Shares",
-)
-def _doc_trade_volume_default():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^(?P<ohlc>Open|High|Low|Close)$",
-    template="{ohlc} trade price over trades in the TimeBucket.",
-    unit="XLOC",
-    group="TradeOHLCTotal",
-    group_role="{ohlc}",
-    group_semantics="ohlc_bar,ffill_non_naive",
-)
-def _doc_trade_ohlc_default():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<ohlc>Open|High|Low|Close)$",
-    template="Trade {ohlc} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
-    unit="XLOC",
-    group="TradeOHLC{side}",
-    group_role="{ohlc}",
-    group_semantics="ohlc_bar,ffill_non_naive",
-)
-def _doc_trade_ohlc_group():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice)$",
-    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
-    unit="XLOC",
-)
-def _doc_trade_prices():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Count)$",
-    template="Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).",
-    unit="Trades",
-)
-def _doc_trade_generic():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^DiscrepancyTo(?P<reference>.+?)(?P<side>Bid|Ask)?(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
-    template="Price difference between LocalPrice and {reference} expressed in basis points for {side_or_total} trades; aggregated by {agg_or_mean} within the TimeBucket.",
-    unit="BPS",
-)
-def _doc_trade_discrepancy():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>Volume)(?P<side>Bid|Ask)?$",
-    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.",
-    unit="Shares",
-)
-def _doc_trade_flag_volume():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>AvgNotional)(?P<side>Bid|Ask)?$",
-    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.",
-    unit="EUR",
-)
-def _doc_trade_flag_avg_notional():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>Count)(?P<side>Bid|Ask)?$",
-    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.",
-    unit="Trades",
-)
-def _doc_trade_flag_count():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade)(?P<measure>Volume|Count|AvgNotional)(?P<side>Bid|Ask)?$",
-    template="Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket. AvgNotional is the average trade notional.",
-)
-def _doc_trade_flags():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^PricePoint(?P<scope>AtPrimary|AtVenue)?$",
-    template="Mean of PricePoint{scope_or_empty} over trades in the TimeBucket.",
-    unit="Probability",
-)
-def _doc_trade_price_point():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^(?P<measure>PreTradeElapsedTimeChg|PostTradeElapsedTimeChg)(?P<scope>AtPrimary|AtVenue)?$",
-    template="Mean of {measure}{scope_or_empty} over trades in the TimeBucket.",
-    unit="Nanoseconds",
-)
-def _doc_trade_change():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^(?P<metric>EffectiveSpread|RealizedSpread|PriceImpact)(?P<horizon>.+)$",
-    template="Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration.",
-    unit="XLOC",
-)
-def _doc_trade_impact():
-    pass
-
-
-@metric_doc(
-    module="trade",
-    pattern=r"^RetailTradeImbalance$",
-    template="Retail trade imbalance as the net retail notional divided by total retail notional in the TimeBucket.",
-    unit="Imbalance",
-)
-def _doc_trade_retail_imbalance():
-    pass
+        self.df = df
+        return self.df

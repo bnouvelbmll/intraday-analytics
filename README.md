@@ -77,7 +77,9 @@ The pipeline is designed for easy extension:
 3.  Add an instance of your new table class to the `ALL_TABLES` dictionary in the same file.
 4.  Add the new table's name to the `TABLES_TO_LOAD` list in your `USER_CONFIG`.
 
-### Adding New Metrics
-1.  Create a new analytics module (e.g., in `intraday_analytics/metrics/`).
+### Adding New Analytics
+1.  Create or extend an analytics module in `intraday_analytics/analytics/`.
 2.  Implement your analytics logic within a class that follows the pattern of the existing analytics modules (e.g., `TradeAnalytics`).
-3.  Add an instance of your new analytics class to the `modules` list within the `get_pipeline` function in `main.py`.
+3.  Add your new analytics class to the `modules` list within the `get_pipeline` function in `main.py`.
+
+Analytics modules can also use `@analytic_handler(...)` to register documentation from handler docstrings.

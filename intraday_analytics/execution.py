@@ -494,7 +494,7 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
                 pass_tables_to_load = _derive_tables_to_load(
                     pass_config, config.TABLES_TO_LOAD
                 )
-                config = config.copy(
+                config = config.model_copy(
                     update={"TABLES_TO_LOAD": pass_tables_to_load}
                 )
                 p = ProcessInterval(

@@ -48,4 +48,4 @@ The pipeline executes in the following stages:
 *   **`intraday_analytics/pipeline.py`**: Defines the `AnalyticsPipeline` and `AnalyticsRunner` classes, which are responsible for executing the sequence of analytics modules on a given batch of data.
 *   **`intraday_analytics/batching.py`**: Contains the logic for creating symbol-based batches from the source data. The `S3SymbolBatcher` is the primary component for the efficient `s3_shredding` mode.
 *   **`intraday_analytics/tables.py`**: Defines the data sources. Each table (e.g., `TradesPlusTable`) is represented by a class that knows how to load and pre-process its specific data.
-*   **`intraday_analytics/metrics/`**: This directory contains the individual analytics modules. Each module is responsible for calculating a specific set of metrics (e.g., `dense.py` for dense analytics, `trade.py` for trade-based metrics).
+*   **`intraday_analytics/analytics/`**: This directory contains the individual analytics modules. Each module is responsible for calculating a specific set of analytics (e.g., `dense.py` for dense analytics, `trade.py` for trade-based analytics).

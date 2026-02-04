@@ -59,6 +59,7 @@ Notes:
 ## 3) Multi-pass example (trade -> generic)
 
 Pass 1 computes trade metrics. Pass 2 re-aggregates them (e.g., per InstrumentId) or resamples.
+Optional: enable the `retail_imbalance` module if you want `RetailTradeImbalance` as a separate output.
 
 ```python
 from intraday_analytics.analytics.trade import TradeGenericConfig
