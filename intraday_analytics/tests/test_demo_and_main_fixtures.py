@@ -178,6 +178,23 @@ class TestDemoAndMainFixtures(unittest.TestCase):
         outputs = _run_with_fixtures(cfg, get_pipeline=demo05.get_pipeline)
         _assert_nonempty_outputs(outputs)
 
+    def test_demo_06_characteristics(self):
+        demo06 = importlib.import_module("demo.06_notebook")
+
+        cfg = AnalyticsConfig(
+            **{
+                **demo06.USER_CONFIG,
+                "START_DATE": "2025-01-02",
+                "END_DATE": "2025-01-02",
+                "TEMP_DIR": self.temp_dir,
+                "PREPARE_DATA_MODE": "naive",
+                "CLEAN_UP_TEMP_DIR": False,
+                "BATCH_FREQ": None,
+            }
+        )
+        outputs = _run_with_fixtures(cfg)
+        _assert_nonempty_outputs(outputs)
+
     def test_main_config(self):
         import main as main_script
 

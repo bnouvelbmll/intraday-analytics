@@ -56,6 +56,8 @@ def _derive_tables_to_load(pass_config, user_tables):
     from .analytics.l3 import L3Analytics
     from .analytics.execution import ExecutionAnalytics
     from .analytics.generic import GenericAnalytics
+    from .analytics.l3_characteristics import L3CharacteristicsAnalytics
+    from .analytics.trade_characteristics import TradeCharacteristicsAnalytics
 
     module_requires = {
         "dense": DenseAnalytics.REQUIRES,
@@ -65,6 +67,8 @@ def _derive_tables_to_load(pass_config, user_tables):
         "l3": L3Analytics.REQUIRES,
         "execution": ExecutionAnalytics.REQUIRES,
         "generic": GenericAnalytics.REQUIRES,
+        "l3_characteristics": L3CharacteristicsAnalytics.REQUIRES,
+        "trade_characteristics": TradeCharacteristicsAnalytics.REQUIRES,
     }
 
     tables = []

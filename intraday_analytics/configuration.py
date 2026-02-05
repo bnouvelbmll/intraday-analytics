@@ -10,6 +10,8 @@ from .analytics.generic import GenericAnalyticsConfig
 from .analytics.trade import RetailImbalanceConfig
 from .analytics.iceberg import IcebergAnalyticsConfig
 from .analytics.cbbo import CBBOAnalyticsConfig
+from .analytics.l3_characteristics import L3CharacteristicsConfig
+from .analytics.trade_characteristics import TradeCharacteristicsConfig
 
 
 class PrepareDataMode(str, Enum):
@@ -52,6 +54,12 @@ class PassConfig(BaseModel):
     cbbo_analytics: CBBOAnalyticsConfig = Field(
         default_factory=CBBOAnalyticsConfig
     )
+    l3_characteristics_analytics: L3CharacteristicsConfig = Field(
+        default_factory=L3CharacteristicsConfig
+    )
+    trade_characteristics_analytics: TradeCharacteristicsConfig = Field(
+        default_factory=TradeCharacteristicsConfig
+    )
     generic_analytics: GenericAnalyticsConfig = Field(
         default_factory=GenericAnalyticsConfig
     )
@@ -65,6 +73,8 @@ class PassConfig(BaseModel):
         self.l2_analytics.time_bucket_seconds = self.time_bucket_seconds
         self.l2_analytics.time_bucket_anchor = self.time_bucket_anchor
         self.l2_analytics.time_bucket_closed = self.time_bucket_closed
+        self.l3_characteristics_analytics.time_bucket_seconds = self.time_bucket_seconds
+        self.trade_characteristics_analytics.time_bucket_seconds = self.time_bucket_seconds
         if self.sort_keys:
             if "TimeBucket" not in self.sort_keys:
                 self.sort_keys.append("TimeBucket")
