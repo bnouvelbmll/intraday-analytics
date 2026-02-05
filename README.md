@@ -65,6 +65,21 @@ python3 main.py
 
 The script will process the data for the configured date range and universe, writing the final aggregated output to the S3 location specified by the `FINAL_OUTPUT_PATH_TEMPLATE` in the configuration.
 
+## Dagster Compatibility
+
+The framework includes a Dagster compatibility layer that models the run as a
+cartesian product of universe partitions and date partitions. This allows
+Dagster to materialize a single (universe, date-range) partition or fan out
+across multiple MICs.
+
+See `docs/dagster.md` for a full walkthrough, including:
+- single MIC + single date
+- multi-MIC fan-out with `build_partition_runs`
+- `on_result` callback for artifact handling
+
+There is also a self-contained setup script:
+`scripts/setup_dagster_demo.sh`
+
 ## Extending the Pipeline
 
 The pipeline is designed for easy extension:

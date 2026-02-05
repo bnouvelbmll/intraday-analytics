@@ -9,8 +9,7 @@ import logging
 import bmll.reference
 import polars as pl
 
-from intraday_analytics.execution import run_multiday_pipeline
-from intraday_analytics.configuration import AnalyticsConfig
+from intraday_analytics.cli import run_cli
 
 
 USER_CONFIG = {
@@ -40,17 +39,4 @@ def get_universe(date):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-
-    config = AnalyticsConfig(**USER_CONFIG)
-
-    run_multiday_pipeline(
-        config=config,
-        get_universe=get_universe,
-    )
-
-    logging.info("Pipeline finished successfully.")
-    output_file = f"{config.DATASETNAME}/{config.START_DATE}_{config.END_DATE}.parquet"
-    logging.info(f"Output written to: {output_file}")
+    run_cli(USER_CONFIG, get_universe)
