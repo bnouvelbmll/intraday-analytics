@@ -2,9 +2,9 @@ import polars as pl
 from pydantic import BaseModel, Field
 from typing import List, Union, Literal, Dict, Any
 
-from intraday_analytics.bases import BaseAnalytics
+from intraday_analytics.analytics_base import BaseAnalytics
 from .common import CombinatorialMetricConfig
-from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_expression
 from intraday_analytics.analytics_registry import register_analytics
 from .utils import apply_alias
 
@@ -100,57 +100,57 @@ class IcebergExecutionAnalytic(AnalyticSpec):
         ),
     ]
 
-    @analytic_handler(
+    @analytic_expression(
         "ExecutionVolume",
         pattern=r"^IcebergExecutionVolume(?P<side>Bid|Ask)?$",
         unit="Shares",
     )
-    def _handle_exec_volume(self, cond):
+    def _expression_exec_volume(self, cond):
         """Sum of iceberg execution volume for {side_or_total} within the TimeBucket."""
         return pl.when(cond).then(pl.col("ExecutionSize")).otherwise(0).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "ExecutionCount",
         pattern=r"^IcebergExecutionCount(?P<side>Bid|Ask)?$",
         unit="Trades",
     )
-    def _handle_exec_count(self, cond):
+    def _expression_exec_count(self, cond):
         """Count of iceberg executions for {side_or_total} within the TimeBucket."""
         return pl.when(cond).then(1).otherwise(0).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "AverageSize",
         pattern=r"^IcebergAverageSize(?P<side>Bid|Ask)?$",
         unit="Shares",
     )
-    def _handle_avg_size(self, cond, size_col: str):
+    def _expression_avg_size(self, cond, size_col: str):
         """Mean iceberg revealed size for {side_or_total} within the TimeBucket."""
         return pl.when(cond).then(pl.col(size_col)).otherwise(None).mean()
 
-    @analytic_handler(
+    @analytic_expression(
         "RevealedPeakCount",
         pattern=r"^IcebergRevealedPeakCount(?P<side>Bid|Ask)?$",
         unit="Peaks",
     )
-    def _handle_peak_count(self, cond):
+    def _expression_peak_count(self, cond):
         """Count of revealed iceberg peaks for {side_or_total} within the TimeBucket."""
         return pl.when(cond).then(1).otherwise(0).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "AveragePeakCount",
         pattern=r"^IcebergAveragePeakCount(?P<side>Bid|Ask)?$",
         unit="Peaks",
     )
-    def _handle_avg_peak_count(self, cond):
+    def _expression_avg_peak_count(self, cond):
         """Average cumulative revealed peak count per active iceberg for {side_or_total} within the TimeBucket."""
         return pl.when(cond).then(pl.col("IcebergEventCount")).otherwise(None).mean()
 
-    @analytic_handler(
+    @analytic_expression(
         "OrderImbalance",
         pattern=r"^IcebergOrderImbalance$",
         unit="Imbalance",
     )
-    def _handle_imbalance(self, source_col: str):
+    def _expression_imbalance(self, source_col: str):
         """Normalized imbalance of iceberg execution volume between bid and ask within the TimeBucket."""
         bid = pl.when(pl.col("Side") == 1).then(pl.col(source_col)).otherwise(0).sum()
         ask = pl.when(pl.col("Side") == 2).then(pl.col(source_col)).otherwise(0).sum()
@@ -171,18 +171,18 @@ class IcebergExecutionAnalytic(AnalyticSpec):
         elif side == "Ask":
             cond = pl.col("Side") == 2
 
-        handler = self.HANDLERS.get(measure)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
             return []
 
         if measure == "AverageSize":
-            base_expr = handler(self, cond, ctx.cache["avg_size_col"])
+            base_expr = expression_fn(self, cond, ctx.cache["avg_size_col"])
         elif measure == "AveragePeakCount":
             return []
         elif measure == "OrderImbalance":
-            base_expr = handler(self, ctx.cache["imbalance_col"])
+            base_expr = expression_fn(self, ctx.cache["imbalance_col"])
         else:
-            base_expr = handler(self, cond)
+            base_expr = expression_fn(self, cond)
 
         default_name = f"Iceberg{measure}"
         if measure != "OrderImbalance" and side != "Total":

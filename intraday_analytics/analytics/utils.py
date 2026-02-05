@@ -31,18 +31,18 @@ class MetricGenerator:
     def __init__(self, base_df: pl.LazyFrame):
         self.base_df = base_df
 
-    def generate(self, config_list: List[Any], handler_func) -> List[pl.Expr]:
+    def generate(self, config_list: List[Any], expression_func) -> List[pl.Expr]:
         """
         Iterates over a list of metric configurations, expands variants,
-        and calls the handler function to generate expressions.
+        and calls the expression function to generate expressions.
         """
         expressions = []
         for req in config_list:
-            # Note: Filtering logic should be handled within the handler or applied to the expression
+            # Note: Filtering logic should be handled within the expression or applied to the expression
             # because we are building a list of expressions to be aggregated in one go.
 
             for variant in req.expand():
-                expr = handler_func(req, variant)
+                expr = expression_func(req, variant)
                 if expr is not None:
                     if isinstance(expr, list):
                         expressions.extend(expr)
@@ -53,6 +53,6 @@ class MetricGenerator:
                         # because aggregations like sum() need filtering *before* aggregation.
                         # So we might not need to do anything here for TradeAnalytics.
                         # But for other analytics where we return pre-aggregated expressions, we might.
-                        # For now, we assume handlers return fully formed expressions.
+                        # For now, we assume expressions return fully formed expressions.
                         expressions.append(expr)
         return expressions

@@ -1,10 +1,10 @@
 import polars as pl
-from intraday_analytics.bases import BaseAnalytics
+from intraday_analytics.analytics_base import BaseAnalytics
 from pydantic import BaseModel, Field
 from typing import List, Union, Literal, Dict, Any
 
 from .common import CombinatorialMetricConfig, Side
-from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_expression
 from intraday_analytics.analytics_registry import register_analytics
 
 
@@ -84,21 +84,21 @@ class L3ExecutionAnalytic(AnalyticSpec):
     MODULE = "execution"
     ConfigModel = L3ExecutionConfig
 
-    @analytic_handler(
+    @analytic_expression(
         "ExecutedVolume",
         pattern=r"^ExecutedVolume(?P<side>Bid|Ask)$",
         unit="Shares",
     )
-    def _handle_executed_volume(self, cond):
+    def _expression_executed_volume(self, cond):
         """Sum of executed volume from L3 executions on {side} side per TimeBucket."""
         return pl.when(cond).then(pl.col("ExecutionSize")).otherwise(0).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "VWAP",
         pattern=r"^Vwap(?P<side>Bid|Ask)$",
         unit="XLOC",
     )
-    def _handle_vwap(self, cond):
+    def _expression_vwap(self, cond):
         """VWAP of executions on {side} side per TimeBucket."""
         num = (
             pl.when(cond)
@@ -117,10 +117,10 @@ class L3ExecutionAnalytic(AnalyticSpec):
         side_val = 1 if side == "Bid" else 2
         cond = pl.col("Side") == side_val
 
-        handler = self.HANDLERS.get(measure)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
             return []
-        expr = handler(self, cond)
+        expr = expression_fn(self, cond)
 
         if config.output_name_pattern:
             alias = config.output_name_pattern.format(**variant)
@@ -139,32 +139,32 @@ class TradeBreakdownAnalytic(AnalyticSpec):
     MODULE = "execution"
     ConfigModel = TradeBreakdownConfig
 
-    @analytic_handler(
+    @analytic_expression(
         "Volume",
         pattern=r"^(?P<trade_type>Lit|Dark)(?P<measure>Volume)(?P<agg_side>Buy|Sell|Unknown)Aggressor$",
         unit="Shares",
     )
-    def _handle_volume(self, cond):
+    def _expression_volume(self, cond):
         """{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket."""
         return pl.when(cond).then(pl.col("Size")).otherwise(0).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "VWAP",
         pattern=r"^(?P<trade_type>Lit|Dark)(?P<measure>VWAP|VolumeWeightedPricePlacement)(?P<agg_side>Buy|Sell|Unknown)Aggressor$",
         unit="XLOC",
     )
-    def _handle_vwap(self, cond):
+    def _expression_vwap(self, cond):
         """{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket."""
         num = pl.when(cond).then(pl.col("LocalPrice") * pl.col("Size")).otherwise(0).sum()
         den = pl.when(cond).then(pl.col("Size")).otherwise(0).sum()
         return num / den
 
-    @analytic_handler(
+    @analytic_expression(
         "VWPP",
         pattern=r"^(?P<trade_type>Lit|Dark)(?P<measure>VWAP|VolumeWeightedPricePlacement)(?P<agg_side>Buy|Sell|Unknown)Aggressor$",
         unit="XLOC",
     )
-    def _handle_vwpp(self, cond):
+    def _expression_vwpp(self, cond):
         """{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket."""
         val = (pl.col("PricePoint").clip(0, 1) * 2 - 1) * pl.col("Size")
         num = pl.when(cond).then(val).otherwise(0).sum()
@@ -184,10 +184,10 @@ class TradeBreakdownAnalytic(AnalyticSpec):
             pl.col("AggressorSide") == agg_side_val
         )
 
-        handler = self.HANDLERS.get(measure)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
             return []
-        expr = handler(self, cond)
+        expr = expression_fn(self, cond)
 
         if config.output_name_pattern:
             alias = config.output_name_pattern.format(**variant)

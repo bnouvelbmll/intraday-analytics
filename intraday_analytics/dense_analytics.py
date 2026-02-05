@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from typing import List
 import polars as pl
 
-from intraday_analytics.bases import BaseAnalytics
+from intraday_analytics.analytics_base import BaseAnalytics
 from intraday_analytics.analytics_registry import register_analytics
 from intraday_analytics.utils import SYMBOL_COL
 from pydantic import BaseModel, Field

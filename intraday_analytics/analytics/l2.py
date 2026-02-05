@@ -1,11 +1,17 @@
 import logging
 import polars as pl
-from intraday_analytics.bases import BaseAnalytics, BaseTWAnalytics
+from intraday_analytics.analytics_base import BaseAnalytics, BaseTWAnalytics
 from pydantic import BaseModel, Field
 from typing import Optional, List, Union, Literal, Dict, Any
 
 from .common import CombinatorialMetricConfig, Side, AggregationMethod
-from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_base import (
+    AnalyticSpec,
+    AnalyticContext,
+    AnalyticDoc,
+    analytic_expression,
+    build_expressions,
+)
 from intraday_analytics.analytics_registry import register_analytics
 
 
@@ -167,6 +173,16 @@ def _liquidity_raw(side: str, level: int, measure: str) -> pl.Expr | None:
     return None
 
 
+def _liquidity_raw_pattern(measure: str, suffix: str = "") -> str:
+    suffix_part = suffix if suffix else ""
+    return rf"^(?P<side>Bid|Ask)(?P<measure>{measure})(?P<level>\d+){suffix_part}$"
+
+
+def _imbalance_raw_pattern(measure: str, suffix: str = "") -> str:
+    suffix_part = suffix if suffix else ""
+    return rf"^Imbalance(?P<measure>{measure})(?P<level>\d+){suffix_part}$"
+
+
 def _imbalance_raw(level: int, measure: str) -> pl.Expr:
     if measure == "CumQuantity":
         bid_val = pl.sum_horizontal(
@@ -210,84 +226,84 @@ class L2LastLiquidityAnalytic(AnalyticSpec):
     MODULE = "l2_last"
     ConfigModel = L2LiquidityConfig
 
-    @analytic_handler(
+    @analytic_expression(
         "Price",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|CumNotional)(?P<level>\d+)$",
+        pattern=_liquidity_raw_pattern("Price"),
         unit="XLOC",
     )
-    def _handle_price(self, side: str, level: int):
+    def _expression_price(self, side: str, level: int):
         """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
         return _liquidity_raw(side, level, "Price")
 
-    @analytic_handler(
+    @analytic_expression(
         "CumNotional",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|CumNotional)(?P<level>\d+)$",
+        pattern=_liquidity_raw_pattern("CumNotional"),
         unit="XLOC",
     )
-    def _handle_cumnotional(self, side: str, level: int):
+    def _expression_cumnotional(self, side: str, level: int):
         """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
         return _liquidity_raw(side, level, "CumNotional")
 
-    @analytic_handler(
+    @analytic_expression(
         "Quantity",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Quantity|CumQuantity|SizeAhead)(?P<level>\d+)$",
+        pattern=_liquidity_raw_pattern("Quantity"),
         unit="Shares",
     )
-    def _handle_quantity(self, side: str, level: int):
+    def _expression_quantity(self, side: str, level: int):
         """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
         return _liquidity_raw(side, level, "Quantity")
 
-    @analytic_handler(
+    @analytic_expression(
         "CumQuantity",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Quantity|CumQuantity|SizeAhead)(?P<level>\d+)$",
+        pattern=_liquidity_raw_pattern("CumQuantity"),
         unit="Shares",
     )
-    def _handle_cumquantity(self, side: str, level: int):
+    def _expression_cumquantity(self, side: str, level: int):
         """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
         return _liquidity_raw(side, level, "CumQuantity")
 
-    @analytic_handler(
+    @analytic_expression(
         "SizeAhead",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Quantity|CumQuantity|SizeAhead)(?P<level>\d+)$",
+        pattern=_liquidity_raw_pattern("SizeAhead"),
         unit="Shares",
     )
-    def _handle_sizeahead(self, side: str, level: int):
+    def _expression_sizeahead(self, side: str, level: int):
         """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
         return _liquidity_raw(side, level, "SizeAhead")
 
-    @analytic_handler(
+    @analytic_expression(
         "NumOrders",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>NumOrders|CumOrders)(?P<level>\d+)$",
+        pattern=_liquidity_raw_pattern("NumOrders"),
         unit="Orders",
     )
-    def _handle_numorders(self, side: str, level: int):
+    def _expression_numorders(self, side: str, level: int):
         """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
         return _liquidity_raw(side, level, "NumOrders")
 
-    @analytic_handler(
+    @analytic_expression(
         "CumOrders",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>NumOrders|CumOrders)(?P<level>\d+)$",
+        pattern=_liquidity_raw_pattern("CumOrders"),
         unit="Orders",
     )
-    def _handle_cumorders(self, side: str, level: int):
+    def _expression_cumorders(self, side: str, level: int):
         """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
         return _liquidity_raw(side, level, "CumOrders")
 
-    @analytic_handler(
+    @analytic_expression(
         "InsertAge",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>InsertAge|LastMod)(?P<level>\d+)$",
+        pattern=_liquidity_raw_pattern("InsertAge"),
         unit="Nanoseconds",
     )
-    def _handle_insertage(self, side: str, level: int):
+    def _expression_insertage(self, side: str, level: int):
         """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
         return _liquidity_raw(side, level, "InsertAge")
 
-    @analytic_handler(
+    @analytic_expression(
         "LastMod",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>InsertAge|LastMod)(?P<level>\d+)$",
+        pattern=_liquidity_raw_pattern("LastMod"),
         unit="Nanoseconds",
     )
-    def _handle_lastmod(self, side: str, level: int):
+    def _expression_lastmod(self, side: str, level: int):
         """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
         return _liquidity_raw(side, level, "LastMod")
 
@@ -298,10 +314,10 @@ class L2LastLiquidityAnalytic(AnalyticSpec):
         level = variant["levels"]
         measure = variant["measures"]
 
-        handler = self.HANDLERS.get(measure)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
             return []
-        base_expr = handler(self, side, level)
+        base_expr = expression_fn(self, side, level)
         if base_expr is None:
             return []
 
@@ -328,21 +344,21 @@ class L2LastSpreadAnalytic(AnalyticSpec):
         )
     ]
 
-    @analytic_handler(
+    @analytic_expression(
         "Abs",
         pattern=r"^SpreadAbs$",
         unit="XLOC",
     )
-    def _handle_abs(self):
+    def _expression_abs(self):
         """Best ask minus best bid in absolute price terms using the last snapshot in the TimeBucket."""
         return pl.col("AskPrice1") - pl.col("BidPrice1")
 
-    @analytic_handler(
+    @analytic_expression(
         "BPS",
         pattern=r"^SpreadBPS$",
         unit="BPS",
     )
-    def _handle_bps(self):
+    def _expression_bps(self):
         """Best ask minus best bid in basis points using the last snapshot in the TimeBucket."""
         return (
             20000
@@ -354,10 +370,10 @@ class L2LastSpreadAnalytic(AnalyticSpec):
         self, ctx: AnalyticContext, config: L2SpreadConfig, variant: Dict[str, Any]
     ) -> List[pl.Expr]:
         v_type = variant["variant"]
-        handler = self.HANDLERS.get(v_type)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(v_type)
+        if expression_fn is None:
             return []
-        base_expr = handler(self)
+        base_expr = expression_fn(self)
 
         if config.market_states:
             base_expr = base_expr.filter(pl.col("MarketState").is_in(config.market_states))
@@ -382,30 +398,30 @@ class L2LastImbalanceAnalytic(AnalyticSpec):
         )
     ]
 
-    @analytic_handler(
+    @analytic_expression(
         "CumQuantity",
-        pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)$",
+        pattern=_imbalance_raw_pattern("CumQuantity"),
         unit="Imbalance",
     )
-    def _handle_cumquantity(self, level: int):
+    def _expression_cumquantity(self, level: int):
         """Order book imbalance for {measure} up to level {level} using the last snapshot, expressed as a normalized difference between bid and ask."""
         return _imbalance_raw(level, "CumQuantity")
 
-    @analytic_handler(
+    @analytic_expression(
         "Orders",
-        pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)$",
+        pattern=_imbalance_raw_pattern("Orders"),
         unit="Imbalance",
     )
-    def _handle_orders(self, level: int):
+    def _expression_orders(self, level: int):
         """Order book imbalance for {measure} up to level {level} using the last snapshot, expressed as a normalized difference between bid and ask."""
         return _imbalance_raw(level, "Orders")
 
-    @analytic_handler(
+    @analytic_expression(
         "CumNotional",
-        pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)$",
+        pattern=_imbalance_raw_pattern("CumNotional"),
         unit="Imbalance",
     )
-    def _handle_cumnotional(self, level: int):
+    def _expression_cumnotional(self, level: int):
         """Order book imbalance for {measure} up to level {level} using the last snapshot, expressed as a normalized difference between bid and ask."""
         return _imbalance_raw(level, "CumNotional")
 
@@ -415,10 +431,10 @@ class L2LastImbalanceAnalytic(AnalyticSpec):
         level = variant["levels"]
         measure = variant["measure"]
 
-        handler = self.HANDLERS.get(measure)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
             return []
-        base_expr = handler(self, level)
+        base_expr = expression_fn(self, level)
 
         if config.market_states:
             base_expr = base_expr.filter(pl.col("MarketState").is_in(config.market_states))
@@ -436,7 +452,7 @@ class L2LastOHLCAnalytic(AnalyticSpec):
     MODULE = "l2_last"
     ConfigModel = L2OHLCConfig
 
-    @analytic_handler(
+    @analytic_expression(
         "OHLC",
         pattern=r"^(?P<source>Bid|Ask|Mid|WeightedMid)(?P<ohlc>Open|High|Low|Close)$",
         unit="XLOC",
@@ -444,7 +460,7 @@ class L2LastOHLCAnalytic(AnalyticSpec):
         group_role="{ohlc}",
         group_semantics="ohlc_bar,ffill_non_naive",
     )
-    def _handle_ohlc(self):
+    def _expression_ohlc(self):
         """L2 {ohlc} for {source} price within the TimeBucket."""
         return None
 
@@ -493,84 +509,84 @@ class L2TWLiquidityAnalytic(AnalyticSpec):
     MODULE = "l2_tw"
     ConfigModel = L2LiquidityConfig
 
-    @analytic_handler(
+    @analytic_expression(
         "Price",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|CumNotional)(?P<level>\d+)TWA$",
+        pattern=_liquidity_raw_pattern("Price", "TWA"),
         unit="XLOC",
     )
-    def _handle_price(self, side: str, level: int):
+    def _expression_price(self, side: str, level: int):
         """{side} {measure} at level {level}, time-weighted average over TimeBucket."""
         return _liquidity_raw(side, level, "Price")
 
-    @analytic_handler(
+    @analytic_expression(
         "CumNotional",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Price|CumNotional)(?P<level>\d+)TWA$",
+        pattern=_liquidity_raw_pattern("CumNotional", "TWA"),
         unit="XLOC",
     )
-    def _handle_cumnotional(self, side: str, level: int):
+    def _expression_cumnotional(self, side: str, level: int):
         """{side} {measure} at level {level}, time-weighted average over TimeBucket."""
         return _liquidity_raw(side, level, "CumNotional")
 
-    @analytic_handler(
+    @analytic_expression(
         "Quantity",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Quantity|CumQuantity|SizeAhead)(?P<level>\d+)TWA$",
+        pattern=_liquidity_raw_pattern("Quantity", "TWA"),
         unit="Shares",
     )
-    def _handle_quantity(self, side: str, level: int):
+    def _expression_quantity(self, side: str, level: int):
         """{side} {measure} at level {level}, time-weighted average over TimeBucket."""
         return _liquidity_raw(side, level, "Quantity")
 
-    @analytic_handler(
+    @analytic_expression(
         "CumQuantity",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Quantity|CumQuantity|SizeAhead)(?P<level>\d+)TWA$",
+        pattern=_liquidity_raw_pattern("CumQuantity", "TWA"),
         unit="Shares",
     )
-    def _handle_cumquantity(self, side: str, level: int):
+    def _expression_cumquantity(self, side: str, level: int):
         """{side} {measure} at level {level}, time-weighted average over TimeBucket."""
         return _liquidity_raw(side, level, "CumQuantity")
 
-    @analytic_handler(
+    @analytic_expression(
         "SizeAhead",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>Quantity|CumQuantity|SizeAhead)(?P<level>\d+)TWA$",
+        pattern=_liquidity_raw_pattern("SizeAhead", "TWA"),
         unit="Shares",
     )
-    def _handle_sizeahead(self, side: str, level: int):
+    def _expression_sizeahead(self, side: str, level: int):
         """{side} {measure} at level {level}, time-weighted average over TimeBucket."""
         return _liquidity_raw(side, level, "SizeAhead")
 
-    @analytic_handler(
+    @analytic_expression(
         "NumOrders",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>NumOrders|CumOrders)(?P<level>\d+)TWA$",
+        pattern=_liquidity_raw_pattern("NumOrders", "TWA"),
         unit="Orders",
     )
-    def _handle_numorders(self, side: str, level: int):
+    def _expression_numorders(self, side: str, level: int):
         """{side} {measure} at level {level}, time-weighted average over TimeBucket."""
         return _liquidity_raw(side, level, "NumOrders")
 
-    @analytic_handler(
+    @analytic_expression(
         "CumOrders",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>NumOrders|CumOrders)(?P<level>\d+)TWA$",
+        pattern=_liquidity_raw_pattern("CumOrders", "TWA"),
         unit="Orders",
     )
-    def _handle_cumorders(self, side: str, level: int):
+    def _expression_cumorders(self, side: str, level: int):
         """{side} {measure} at level {level}, time-weighted average over TimeBucket."""
         return _liquidity_raw(side, level, "CumOrders")
 
-    @analytic_handler(
+    @analytic_expression(
         "InsertAge",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>InsertAge|LastMod)(?P<level>\d+)TWA$",
+        pattern=_liquidity_raw_pattern("InsertAge", "TWA"),
         unit="Nanoseconds",
     )
-    def _handle_insertage(self, side: str, level: int):
+    def _expression_insertage(self, side: str, level: int):
         """{side} {measure} at level {level}, time-weighted average over TimeBucket."""
         return _liquidity_raw(side, level, "InsertAge")
 
-    @analytic_handler(
+    @analytic_expression(
         "LastMod",
-        pattern=r"^(?P<side>Bid|Ask)(?P<measure>InsertAge|LastMod)(?P<level>\d+)TWA$",
+        pattern=_liquidity_raw_pattern("LastMod", "TWA"),
         unit="Nanoseconds",
     )
-    def _handle_lastmod(self, side: str, level: int):
+    def _expression_lastmod(self, side: str, level: int):
         """{side} {measure} at level {level}, time-weighted average over TimeBucket."""
         return _liquidity_raw(side, level, "LastMod")
 
@@ -583,10 +599,10 @@ class L2TWLiquidityAnalytic(AnalyticSpec):
         level = variant["levels"]
         measure = variant["measures"]
 
-        handler = self.HANDLERS.get(measure)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
             return []
-        raw = handler(self, side, level)
+        raw = expression_fn(self, side, level)
         if raw is None:
             return []
 
@@ -619,21 +635,21 @@ class L2TWSpreadAnalytic(AnalyticSpec):
         ),
     ]
 
-    @analytic_handler(
+    @analytic_expression(
         "Abs",
         pattern=r"^SpreadAbsTWA$",
         unit="XLOC",
     )
-    def _handle_abs(self):
+    def _expression_abs(self):
         """Time-weighted average of spread in absolute price terms within the TimeBucket."""
         return pl.col("AskPrice1") - pl.col("BidPrice1")
 
-    @analytic_handler(
+    @analytic_expression(
         "BPS",
         pattern=r"^SpreadBPSTWA$",
         unit="BPS",
     )
-    def _handle_bps(self):
+    def _expression_bps(self):
         """Time-weighted average of spread in basis points within the TimeBucket."""
         return (
             20000
@@ -647,10 +663,10 @@ class L2TWSpreadAnalytic(AnalyticSpec):
         if "TWA" not in config.aggregations:
             return []
         v_type = variant["variant"]
-        handler = self.HANDLERS.get(v_type)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(v_type)
+        if expression_fn is None:
             return []
-        raw = handler(self)
+        raw = expression_fn(self)
         alias = (
             config.output_name_pattern.format(**variant)
             if config.output_name_pattern
@@ -663,30 +679,30 @@ class L2TWImbalanceAnalytic(AnalyticSpec):
     MODULE = "l2_tw"
     ConfigModel = L2ImbalanceConfig
 
-    @analytic_handler(
+    @analytic_expression(
         "CumQuantity",
-        pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)TWA$",
+        pattern=_imbalance_raw_pattern("CumQuantity", "TWA"),
         unit="Imbalance",
     )
-    def _handle_cumquantity(self, level: int):
+    def _expression_cumquantity(self, level: int):
         """Time-weighted average of order book imbalance for {measure} up to level {level}, expressed as a normalized difference between bid and ask."""
         return _imbalance_raw(level, "CumQuantity")
 
-    @analytic_handler(
+    @analytic_expression(
         "Orders",
-        pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)TWA$",
+        pattern=_imbalance_raw_pattern("Orders", "TWA"),
         unit="Imbalance",
     )
-    def _handle_orders(self, level: int):
+    def _expression_orders(self, level: int):
         """Time-weighted average of order book imbalance for {measure} up to level {level}, expressed as a normalized difference between bid and ask."""
         return _imbalance_raw(level, "Orders")
 
-    @analytic_handler(
+    @analytic_expression(
         "CumNotional",
-        pattern=r"^Imbalance(?P<measure>CumQuantity|Orders|CumNotional)(?P<level>\d+)TWA$",
+        pattern=_imbalance_raw_pattern("CumNotional", "TWA"),
         unit="Imbalance",
     )
-    def _handle_cumnotional(self, level: int):
+    def _expression_cumnotional(self, level: int):
         """Time-weighted average of order book imbalance for {measure} up to level {level}, expressed as a normalized difference between bid and ask."""
         return _imbalance_raw(level, "CumNotional")
 
@@ -698,10 +714,10 @@ class L2TWImbalanceAnalytic(AnalyticSpec):
         level = variant["levels"]
         measure = variant["measure"]
 
-        handler = self.HANDLERS.get(measure)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
             return []
-        raw = handler(self, level)
+        raw = expression_fn(self, level)
         alias = (
             config.output_name_pattern.format(**variant)
             if config.output_name_pattern
@@ -714,12 +730,12 @@ class L2TWVolatilityAnalytic(AnalyticSpec):
     MODULE = "l2_tw"
     ConfigModel = L2VolatilityConfig
 
-    @analytic_handler(
+    @analytic_expression(
         "Volatility",
         pattern=r"^L2Volatility(?P<source>Mid|Bid|Ask|WeightedMid)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)$",
         unit="Percentage",
     )
-    def _handle_volatility(self):
+    def _expression_volatility(self):
         """Aggregation ({agg}) of log-returns of {source} price within TimeBucket; Std is annualized."""
         return None
 
@@ -794,25 +810,20 @@ class L2AnalyticsLast(BaseAnalytics):
         gcols = ["MIC", "ListingId", "Ticker", "TimeBucket", "CurrencyCode"]
         ctx = AnalyticContext(base_df=self.l2, cache={}, context=self.context)
 
-        expressions: List[pl.Expr] = []
-        ohlc_specs = []
-
         liquidity = L2LastLiquidityAnalytic()
         spread = L2LastSpreadAnalytic()
         imbalance = L2LastImbalanceAnalytic()
         ohlc = L2LastOHLCAnalytic()
 
-        for req in self.config.liquidity:
-            for variant in req.expand():
-                expressions.extend(liquidity.expressions(ctx, req, variant))
-
-        for req in self.config.spreads:
-            for variant in req.expand():
-                expressions.extend(spread.expressions(ctx, req, variant))
-
-        for req in self.config.imbalances:
-            for variant in req.expand():
-                expressions.extend(imbalance.expressions(ctx, req, variant))
+        expressions: List[pl.Expr] = build_expressions(
+            ctx,
+            [
+                (liquidity, self.config.liquidity),
+                (spread, self.config.spreads),
+                (imbalance, self.config.imbalances),
+            ],
+        )
+        ohlc_specs = []
 
         for req in self.config.ohlc:
             for variant in req.expand():
@@ -1011,28 +1022,20 @@ class L2AnalyticsTW(BaseTWAnalytics):
             context=self.context,
         )
 
-        expressions: List[pl.Expr] = []
-
         liquidity = L2TWLiquidityAnalytic()
         spread = L2TWSpreadAnalytic()
         imbalance = L2TWImbalanceAnalytic()
         volatility = L2TWVolatilityAnalytic()
 
-        for req in self.config.spreads:
-            for variant in req.expand():
-                expressions.extend(spread.expressions(ctx, req, variant))
-
-        for req in self.config.liquidity:
-            for variant in req.expand():
-                expressions.extend(liquidity.expressions(ctx, req, variant))
-
-        for req in self.config.imbalances:
-            for variant in req.expand():
-                expressions.extend(imbalance.expressions(ctx, req, variant))
-
-        for req in self.config.volatility:
-            for variant in req.expand():
-                expressions.extend(volatility.expressions(ctx, req, variant))
+        expressions: List[pl.Expr] = build_expressions(
+            ctx,
+            [
+                (spread, self.config.spreads),
+                (liquidity, self.config.liquidity),
+                (imbalance, self.config.imbalances),
+                (volatility, self.config.volatility),
+            ],
+        )
 
 	# WHY IS this on if not ?
         if not expressions:

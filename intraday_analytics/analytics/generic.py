@@ -2,7 +2,7 @@ import polars as pl
 import numpy as np
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Union, Literal
-from intraday_analytics.bases import BaseAnalytics
+from intraday_analytics.analytics_base import BaseAnalytics
 from intraday_analytics.analytics_registry import register_analytics
 import logging
 

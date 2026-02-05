@@ -82,4 +82,4 @@ The pipeline is designed for easy extension:
 2.  Implement your analytics logic within a class that follows the pattern of the existing analytics modules (e.g., `TradeAnalytics`).
 3.  Add your new analytics class to the `modules` list within the `get_pipeline` function in `main.py`.
 
-Analytics modules can also use `@analytic_handler(...)` to register documentation from handler docstrings.
+Analytics modules can also use `@analytic_expression(...)` to register documentation from expression docstrings.

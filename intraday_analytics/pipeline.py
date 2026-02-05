@@ -9,7 +9,7 @@ from .utils import SYMBOL_COL
 
 logger = logging.getLogger(__name__)
 
-from .bases import BaseAnalytics, BaseTWAnalytics
+from .analytics_base import BaseAnalytics, BaseTWAnalytics
 
 class AnalyticsPipeline:
     """

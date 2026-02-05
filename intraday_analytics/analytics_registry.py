@@ -5,7 +5,7 @@ from typing import Callable, Dict, Type
 import importlib
 import pkgutil
 
-from intraday_analytics.bases import BaseAnalytics
+from intraday_analytics.analytics_base import BaseAnalytics
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,5 @@
 import polars as pl
-from intraday_analytics.bases import BaseAnalytics
+from intraday_analytics.analytics_base import BaseAnalytics
 from pydantic import BaseModel, Field
 from typing import List, Union, Literal, Optional, Dict, Any
 
@@ -10,7 +10,7 @@ from .common import (
     apply_aggregation,
 )
 from .utils import apply_market_state_filter, apply_alias
-from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_handler
+from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_expression
 from intraday_analytics.analytics_registry import register_analytics
 
 
@@ -207,56 +207,56 @@ class TradeGenericAnalytic(AnalyticSpec):
     def _filtered_zero(cond, col):
         return pl.when(cond).then(col).otherwise(0)
 
-    @analytic_handler(
+    @analytic_expression(
         "Volume",
         pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Volume)$",
         unit="Shares",
     )
-    def _handle_volume(self, cond):
+    def _expression_volume(self, cond):
         """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         return self._filtered_zero(cond, pl.col("Size")).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "Count",
         pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Count)$",
         unit="Trades",
     )
-    def _handle_count(self, cond):
+    def _expression_count(self, cond):
         """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         return self._filtered_zero(cond, 1).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "NotionalEUR",
         pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalEUR)$",
         unit="EUR",
     )
-    def _handle_notional_eur(self, cond):
+    def _expression_notional_eur(self, cond):
         """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         return self._filtered_zero(cond, pl.col("TradeNotionalEUR")).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "NotionalUSD",
         pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>NotionalUSD)$",
         unit="USD",
     )
-    def _handle_notional_usd(self, cond):
+    def _expression_notional_usd(self, cond):
         """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         return self._filtered_zero(cond, pl.col("TradeNotionalUSD")).sum()
 
-    @analytic_handler("RetailCount")
-    def _handle_retail_count(self, cond):
+    @analytic_expression("RetailCount")
+    def _expression_retail_count(self, cond):
         return self._filtered_zero(
             cond, pl.when(pl.col("BMLLParticipantType") == "RETAIL").then(1).otherwise(0)
         ).sum()
 
-    @analytic_handler("BlockCount")
-    def _handle_block_count(self, cond):
+    @analytic_expression("BlockCount")
+    def _expression_block_count(self, cond):
         return self._filtered_zero(
             cond, pl.when(pl.col("IsBlock") == "Y").then(1).otherwise(0)
         ).sum()
 
-    @analytic_handler("AuctionNotional")
-    def _handle_auction_notional(self, cond):
+    @analytic_expression("AuctionNotional")
+    def _expression_auction_notional(self, cond):
         return self._filtered_zero(
             cond,
             pl.when(pl.col("Classification").str.contains("AUCTION"))
@@ -264,8 +264,8 @@ class TradeGenericAnalytic(AnalyticSpec):
             .otherwise(0),
         ).sum()
 
-    @analytic_handler("OTCVolume")
-    def _handle_otc_volume(self, cond):
+    @analytic_expression("OTCVolume")
+    def _expression_otc_volume(self, cond):
         return self._filtered_zero(
             cond,
             pl.when(pl.col("Classification").str.contains("OTC"))
@@ -273,36 +273,36 @@ class TradeGenericAnalytic(AnalyticSpec):
             .otherwise(0),
         ).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "VWAP",
         pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice)$",
         unit="XLOC",
     )
-    def _handle_vwap(self, cond):
+    def _expression_vwap(self, cond):
         """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         num = self._filtered_zero(cond, pl.col("LocalPrice") * pl.col("Size")).sum()
         den = self._filtered_zero(cond, pl.col("Size")).sum()
         return num / den
 
-    @analytic_handler(
+    @analytic_expression(
         "AvgPrice",
         pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice)$",
         unit="XLOC",
     )
-    def _handle_avg_price(self, cond):
+    def _expression_avg_price(self, cond):
         """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         return self._filtered(cond, pl.col("LocalPrice")).mean()
 
-    @analytic_handler(
+    @analytic_expression(
         "MedianPrice",
         pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>VWAP|AvgPrice|MedianPrice)$",
         unit="XLOC",
     )
-    def _handle_median_price(self, cond):
+    def _expression_median_price(self, cond):
         """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         return self._filtered(cond, pl.col("LocalPrice")).median()
 
-    @analytic_handler(
+    @analytic_expression(
         "OHLC",
         pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<ohlc>Open|High|Low|Close)$",
         unit="XLOC",
@@ -310,7 +310,7 @@ class TradeGenericAnalytic(AnalyticSpec):
         group_role="{ohlc}",
         group_semantics="ohlc_bar,ffill_non_naive",
     )
-    def _handle_ohlc(self, cond, config: TradeGenericConfig, variant: Dict[str, Any]):
+    def _expression_ohlc(self, cond, config: TradeGenericConfig, variant: Dict[str, Any]):
         """Trade {ohlc} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         side = variant["sides"]
         prefix = (
@@ -335,14 +335,14 @@ class TradeGenericAnalytic(AnalyticSpec):
         measure = variant["measures"]
         cond = self._build_filters(config, side)
 
-        handler = self.HANDLERS.get(measure)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
             return []
 
         if measure == "OHLC":
-            return handler(self, cond, config, variant)
+            return expression_fn(self, cond, config, variant)
 
-        expr = handler(self, cond)
+        expr = expression_fn(self, cond)
         default_name = f"Trade{side}{measure}"
         return [apply_alias(expr, config.output_name_pattern, variant, default_name)]
 
@@ -413,30 +413,30 @@ class TradeFlagAnalytic(AnalyticSpec):
     MODULE = "trade"
     ConfigModel = TradeFlagConfig
 
-    @analytic_handler(
+    @analytic_expression(
         "Volume",
         pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade|IcebergExecution)(?P<measure>Volume)(?P<side>Bid|Ask)?$",
         unit="Shares",
     )
-    def _handle_volume(self, cond):
+    def _expression_volume(self, cond):
         """Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket."""
         return pl.when(cond).then(pl.col("Size")).otherwise(0).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "Count",
         pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade|IcebergExecution)(?P<measure>Count)(?P<side>Bid|Ask)?$",
         unit="Trades",
     )
-    def _handle_count(self, cond):
+    def _expression_count(self, cond):
         """Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket."""
         return pl.when(cond).then(1).otherwise(0).sum()
 
-    @analytic_handler(
+    @analytic_expression(
         "AvgNotional",
         pattern=r"^(?P<flag>NegotiatedTrade|OddLotTrade|BlockTrade|CrossTrade|AlgorithmicTrade|IcebergExecution)(?P<measure>AvgNotional)(?P<side>Bid|Ask)?$",
         unit="EUR",
     )
-    def _handle_avg_notional(self, cond):
+    def _expression_avg_notional(self, cond):
         """Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket."""
         num = pl.when(cond).then(pl.col("TradeNotionalEUR")).otherwise(0).sum()
         den = pl.when(cond).then(1).otherwise(0).sum()
@@ -477,10 +477,10 @@ class TradeFlagAnalytic(AnalyticSpec):
         if config.market_states:
             cond = cond & pl.col("MarketState").is_in(config.market_states)
 
-        handler = self.HANDLERS.get(measure)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
             return []
-        expr = handler(self, cond)
+        expr = expression_fn(self, cond)
 
         default_name = f"{flag_name}{measure}"
         if side != "Total":
@@ -526,35 +526,35 @@ class TradeImpactAnalytic(AnalyticSpec):
     MODULE = "trade"
     ConfigModel = TradeImpactConfig
 
-    @analytic_handler(
+    @analytic_expression(
         "EffectiveSpread",
         pattern=r"^(?P<metric>EffectiveSpread|RealizedSpread|PriceImpact)(?P<horizon>.+)$",
         unit="XLOC",
     )
-    def _handle_effective_spread(self, config: TradeImpactConfig):
+    def _expression_effective_spread(self, config: TradeImpactConfig):
         """Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration."""
         price = pl.col("LocalPrice")
         current_mid = pl.col(config.reference_price_col)
         return 2 * (price - current_mid).abs()
 
-    @analytic_handler(
+    @analytic_expression(
         "RealizedSpread",
         pattern=r"^(?P<metric>EffectiveSpread|RealizedSpread|PriceImpact)(?P<horizon>.+)$",
         unit="XLOC",
     )
-    def _handle_realized_spread(self, config: TradeImpactConfig):
+    def _expression_realized_spread(self, config: TradeImpactConfig):
         """Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration."""
         side_sign = pl.when(pl.col("AggressorSide") == 1).then(1).otherwise(-1)
         price = pl.col("LocalPrice")
         future_mid = pl.col("PostTradeMid")
         return 2 * side_sign * (price - future_mid)
 
-    @analytic_handler(
+    @analytic_expression(
         "PriceImpact",
         pattern=r"^(?P<metric>EffectiveSpread|RealizedSpread|PriceImpact)(?P<horizon>.+)$",
         unit="XLOC",
     )
-    def _handle_price_impact(self, config: TradeImpactConfig):
+    def _expression_price_impact(self, config: TradeImpactConfig):
         """Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration."""
         side_sign = pl.when(pl.col("AggressorSide") == 1).then(1).otherwise(-1)
         future_mid = pl.col("PostTradeMid")
@@ -567,10 +567,10 @@ class TradeImpactAnalytic(AnalyticSpec):
         metric_type = variant["variant"]
         horizon = variant["horizon"]
 
-        handler = self.HANDLERS.get(metric_type)
-        if handler is None:
+        expression_fn = self.EXPRESSIONS.get(metric_type)
+        if expression_fn is None:
             return []
-        expr = handler(self, config)
+        expr = expression_fn(self, config)
 
         expr = apply_market_state_filter(expr, config.market_states)
         default_name = f"{metric_type}{horizon}"
