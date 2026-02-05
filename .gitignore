@@ -35,3 +35,6 @@ Thumbs.db
 # VizTracer output
 .viztracer/
 *.json.gz
+
+# Local archives
+archives/
