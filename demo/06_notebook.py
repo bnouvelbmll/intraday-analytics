@@ -5,7 +5,6 @@ This demo runs the l3_characteristics and trade_characteristics modules on
 a single MIC/date pair using 1-hour time buckets.
 """
 
-import logging
 import bmll.reference
 import polars as pl
 

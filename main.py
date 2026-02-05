@@ -25,7 +25,7 @@ import sys
 import shutil
 import logging
 
-from intraday_analytics.execution import run_metrics_pipeline
+from intraday_analytics.cli import run_cli
 
 from intraday_analytics import cache_universe
 from intraday_analytics.utils import create_date_batches
@@ -264,22 +264,9 @@ if __name__ == "__main__":
     os.environ["POLARS_MAX_THREADS"] = "48"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-    logging.basicConfig(
-        level=CONFIG.LOGGING_LEVEL.upper(),
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        force=True,
-    )
-
     ret_code = 0
     try:
-        from intraday_analytics.execution import run_metrics_pipeline
-
-        run_metrics_pipeline(
-                CONFIG,
-                get_pipeline=get_pipeline,
-                get_universe=get_universe,
-        )
-
+        run_cli(USER_CONFIG, get_universe, get_pipeline=get_pipeline)
     except Exception as e:
         logging.error(f"Pipeline failed: {e}", exc_info=True)
         ret_code = 1

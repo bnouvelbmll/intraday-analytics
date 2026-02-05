@@ -6,20 +6,10 @@ analytics for a given universe of instruments over a 2-month period. The data is
 aggregated into 1-minute bars.
 """
 
-import os
-import logging
 import bmll.reference
 import polars as pl
 
-from intraday_analytics.execution import run_metrics_pipeline
-from intraday_analytics.pipeline import AnalyticsPipeline
-from intraday_analytics.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
-from intraday_analytics.analytics.trade import (
-    TradeAnalytics,
-    TradeAnalyticsConfig,
-    TradeGenericConfig,
-)
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig
+from intraday_analytics.cli import run_cli
 
 # --- Configuration ---
 
@@ -65,19 +55,4 @@ def get_universe(date):
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-
-    # Create the main configuration object
-    config = AnalyticsConfig(**USER_CONFIG)
-
-    # Run the pipeline
-    run_metrics_pipeline(
-        config=config,
-        get_universe=get_universe,
-    )
-
-    logging.info("Pipeline finished successfully.")
-    output_file = f"{config.DATASETNAME}/{config.START_DATE}_{config.END_DATE}.parquet"
-    logging.info(f"Output written to: {output_file}")
+    run_cli(USER_CONFIG, get_universe)

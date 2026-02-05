@@ -10,15 +10,13 @@ in this file. This approach allows for rapid prototyping and testing of new
 metrics without modifying the core library.
 """
 
-import os
-import logging
 import bmll.reference
 import polars as pl
 from intraday_analytics.analytics_base import BaseAnalytics
-from intraday_analytics.pipeline import AnalyticsPipeline, create_pipeline
-from intraday_analytics.execution import run_metrics_pipeline
-from intraday_analytics.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
-from intraday_analytics.analytics.trade import TradeAnalytics, TradeAnalyticsConfig
+from intraday_analytics.pipeline import AnalyticsPipeline
+from intraday_analytics.cli import run_cli
+from intraday_analytics.dense_analytics import DenseAnalytics
+from intraday_analytics.analytics.trade import TradeAnalytics
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig
 
 # --- Configuration ---
@@ -114,18 +112,4 @@ def get_pipeline(
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
-
-    config = AnalyticsConfig(**USER_CONFIG)
-
-    run_metrics_pipeline(
-        config=config,
-        get_universe=get_universe,
-        get_pipeline=get_pipeline,
-    )
-
-    logging.info("Pipeline finished successfully.")
-    output_file = f"{config.DATASETNAME}/{config.START_DATE}_{config.END_DATE}.parquet"
-    logging.info(f"Output written to: {output_file}")
+    run_cli(USER_CONFIG, get_universe, get_pipeline=get_pipeline)
