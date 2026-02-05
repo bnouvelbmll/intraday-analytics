@@ -159,3 +159,16 @@ def demo06_characteristics(context):
 
 defs = Definitions(assets=[demo06_characteristics])
 ```
+
+## Setup Script
+
+The helper script `scripts/setup_dagster_demo.sh`:
+- sets `DAGSTER_HOME=/home/bmll/user/my-dagster`
+- builds universe partitions from `bmll.reference.available_markets()` (Equity + IsAlive)
+- builds date partitions from `2015-01-01` to yesterday
+- honors `PART_DAYS` (environment variable) to group date partitions
+
+Example:
+```bash
+PART_DAYS=7 ./scripts/setup_dagster_demo.sh
+```

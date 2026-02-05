@@ -62,7 +62,12 @@ def build_partition_runs(
     return [PartitionRun(u, d) for u in universes for d in dates]
 
 
-def build_demo_assets(demo_pkg: str = "demo"):
+def build_demo_assets(
+    demo_pkg: str = "demo",
+    partitions_def=None,
+    universe_dim: str = "universe",
+    date_dim: str = "date",
+):
     """
     Discover demo modules and return Dagster assets for each demo.
     """
@@ -86,21 +91,42 @@ def build_demo_assets(demo_pkg: str = "demo"):
         name = module.__name__.split(".")[-1]
         asset_name = f"demo{name}" if name[0].isdigit() else name
 
-        @asset(name=asset_name)
-        def _demo_asset(module=module):
+        @asset(name=asset_name, partitions_def=partitions_def)
+        def _demo_asset(context=None, module=module):
             base_config = module.USER_CONFIG
             default_get_universe = module.get_universe
             get_pipeline = getattr(module, "get_pipeline", None)
-            run_partition(
-                base_config=base_config,
-                default_get_universe=default_get_universe,
-                partition=PartitionRun(
+            if context and getattr(context, "partition_key", None):
+                keys = getattr(context.partition_key, "keys_by_dimension", None)
+                if keys and universe_dim in keys and date_dim in keys:
+                    partition = PartitionRun(
+                        universe=parse_universe_spec(keys[universe_dim]),
+                        dates=DatePartition(
+                            start_date=keys[date_dim],
+                            end_date=keys[date_dim],
+                        ),
+                    )
+                else:
+                    partition = PartitionRun(
+                        universe=UniversePartition(name="default", value=None),
+                        dates=DatePartition(
+                            start_date=base_config["START_DATE"],
+                            end_date=base_config["END_DATE"],
+                        ),
+                    )
+            else:
+                partition = PartitionRun(
                     universe=UniversePartition(name="default", value=None),
                     dates=DatePartition(
                         start_date=base_config["START_DATE"],
                         end_date=base_config["END_DATE"],
                     ),
-                ),
+                )
+
+            run_partition(
+                base_config=base_config,
+                default_get_universe=default_get_universe,
+                partition=partition,
                 get_pipeline=get_pipeline,
             )
 
