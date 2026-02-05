@@ -274,7 +274,6 @@ class ProcessInterval(Process):
             tasks.append(i)
 
 
-        print("TASKS=", len(tasks))
         # 3. Process batches in parallel
         n_jobs = self.config.NUM_WORKERS
         if n_jobs == -1:
@@ -301,7 +300,6 @@ class ProcessInterval(Process):
             )
             for name in tables_to_load_names
         }
-        print(s3_file_lists)
 
         table_definitions = [ALL_TABLES[name] for name in tables_to_load_names]
 
@@ -324,7 +322,6 @@ class ProcessInterval(Process):
             future.result()
 
         # Determine batch indices from available tables in priority order.
-        print(os.listdir(self.config.TEMP_DIR))
         priority_tables = [
             "reference",
             "marketstate",
@@ -362,7 +359,6 @@ class ProcessInterval(Process):
         if max_workers <= 0:
             max_workers = os.cpu_count()
 
-        print("TASKS=",len(batch_indices))
         with ProcessPoolExecutor(
             max_workers=max_workers, mp_context=get_context("spawn")
         ) as executor:

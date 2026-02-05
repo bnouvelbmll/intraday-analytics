@@ -39,8 +39,6 @@ class AnalyticsPipeline:
         """
         base: pl.LazyFrame | None = None
         prev_specific_cols = {}
-        print("MODULES")
-        print (self.modules)
 
         join_keys_override = None
         if self.pass_config.sort_keys:
