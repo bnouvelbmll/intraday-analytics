@@ -10,6 +10,7 @@ from intraday_analytics.analytics_base import (
     AnalyticContext,
     AnalyticDoc,
     analytic_expression,
+    build_expressions,
 )
 from intraday_analytics.analytics_registry import register_analytics
 
@@ -164,6 +165,11 @@ class L3GenericAnalytic(AnalyticSpec):
 class L3AdvancedAnalytic(AnalyticSpec):
     MODULE = "l3"
     ConfigModel = L3AdvancedConfig
+    REQUIRED_OUTPUTS: Dict[str, List[str]] = {
+        "ArrivalFlowImbalance": ["InsertVolumeBid", "InsertVolumeAsk"],
+        "CancelToTradeRatio": ["RemoveCountBid", "RemoveCountAsk"],
+        "FleetingLiquidityRatio": ["InsertVolumeBid", "InsertVolumeAsk"],
+    }
 
     @analytic_expression(
         "ArrivalFlowImbalance",
@@ -313,12 +319,22 @@ class L3AdvancedAnalytic(AnalyticSpec):
         advanced_variants: List[Dict[str, Any]],
         prefix: str,
     ) -> pl.LazyFrame:
+        required_outputs = self._collect_required_outputs(advanced_variants)
         for adv in advanced_variants:
             v = adv["variant"]
             expression_fn = self.EXPRESSIONS.get(v)
             if expression_fn is None:
                 continue
             base_df = expression_fn(self, base_df, l3, adv, prefix)
+
+        if required_outputs:
+            cols = base_df.collect_schema().names()
+            missing = [name for name in required_outputs if name not in cols]
+            if missing:
+                logging.warning(
+                    "Missing required L3 intermediate outputs for advanced analytics: %s",
+                    ", ".join(missing),
+                )
 
         return base_df
 
@@ -329,6 +345,13 @@ class L3AdvancedAnalytic(AnalyticSpec):
         if prefix:
             return f"{prefix}{col_name}"
         return col_name
+
+    def _collect_required_outputs(self, advanced_variants: List[Dict[str, Any]]) -> List[str]:
+        required: Set[str] = set()
+        for adv in advanced_variants:
+            for name in self.REQUIRED_OUTPUTS.get(adv.get("variant"), []):
+                required.add(name)
+        return list(required)
 
     def _compute_lifetimes(
         self, l3: pl.LazyFrame, config_dict: Dict[str, Any], market_states: Optional[List[str]] = None
@@ -419,53 +442,82 @@ class L3Analytics(BaseAnalytics):
         super().__init__("l3", {}, metric_prefix=config.metric_prefix)
 
     def compute(self) -> pl.LazyFrame:
-        gcols = ["ListingId", "TimeBucket"]
-        ctx = AnalyticContext(
+        ctx = self._build_context()
+        generic_analytic = L3GenericAnalytic()
+        expressions = self._build_generic_expressions(ctx, generic_analytic)
+        advanced_variants = self._collect_advanced_variants()
+        required_intermediates = self._required_intermediates(advanced_variants)
+
+        if not expressions and not advanced_variants:
+            expressions = self._default_expressions(ctx, generic_analytic)
+
+        if required_intermediates:
+            self._inject_required_intermediates(
+                ctx, generic_analytic, expressions, required_intermediates
+            )
+
+        base_df = self._aggregate_base(expressions)
+        base_df = self._apply_advanced(base_df, advanced_variants)
+
+        self.df = base_df
+        return base_df
+
+    def _build_context(self) -> AnalyticContext:
+        """Build the context used by L3 analytics for expression generation."""
+        return AnalyticContext(
             base_df=self.l3,
             cache={"metric_prefix": self.metric_prefix},
             context=self.context,
         )
 
-        requested_generics = []
-        for req in self.config.generic_metrics:
-            requested_generics.extend(req.expand())
-        requested_aliases = {
-            self.apply_prefix(
-                req.get("output_name_pattern")
-                or f"{req['actions']}{req['measures']}{req['sides']}"
-            )
-            for req in requested_generics
-        }
+    def _build_generic_expressions(
+        self, ctx: AnalyticContext, generic_analytic: L3GenericAnalytic
+    ) -> List[pl.Expr]:
+        """Generate expressions for configured generic L3 metrics."""
+        return build_expressions(ctx, [(generic_analytic, self.config.generic_metrics)])
 
+    def _collect_advanced_variants(self) -> List[Dict[str, Any]]:
+        """Expand advanced metric configs into concrete variants with naming info."""
         advanced_variants = []
         for req in self.config.advanced_metrics:
             for variant in req.expand():
                 variant["_output_name_pattern"] = req.output_name_pattern
                 advanced_variants.append(variant)
+        return advanced_variants
 
-        required_intermediates = set()
-        for adv in advanced_variants:
-            v = adv["variant"]
-            if v == "ArrivalFlowImbalance":
-                required_intermediates.add("InsertVolumeBid")
-                required_intermediates.add("InsertVolumeAsk")
-            elif v == "CancelToTradeRatio":
-                required_intermediates.add("RemoveCountBid")
-                required_intermediates.add("RemoveCountAsk")
-            elif v == "FleetingLiquidityRatio":
-                required_intermediates.add("InsertVolumeBid")
-                required_intermediates.add("InsertVolumeAsk")
+    def _required_intermediates(self, advanced_variants: List[Dict[str, Any]]) -> Set[str]:
+        """Determine required intermediate generic outputs for advanced metrics."""
+        if not advanced_variants:
+            return set()
+        return set(L3AdvancedAnalytic()._collect_required_outputs(advanced_variants))
 
-        generic_analytic = L3GenericAnalytic()
-        expressions: List[pl.Expr] = []
+    def _default_expressions(
+        self, ctx: AnalyticContext, generic_analytic: L3GenericAnalytic
+    ) -> List[pl.Expr]:
+        """Generate a default generic metric set when no metrics are configured."""
+        default_configs = [
+            L3MetricConfig(
+                sides=["Bid", "Ask"],
+                actions=["Insert", "Remove"],
+                measures=["Count", "Volume"],
+            )
+        ]
+        return build_expressions(ctx, [(generic_analytic, default_configs)])
 
+    def _inject_required_intermediates(
+        self,
+        ctx: AnalyticContext,
+        generic_analytic: L3GenericAnalytic,
+        expressions: List[pl.Expr],
+        required_intermediates: Set[str],
+    ) -> None:
+        """Ensure required generic intermediates exist for advanced metrics."""
+        requested_aliases = self._requested_aliases()
         required_map = {
             "InsertVolumeBid": {"sides": "Bid", "actions": "Insert", "measures": "Volume"},
             "InsertVolumeAsk": {"sides": "Ask", "actions": "Insert", "measures": "Volume"},
             "RemoveCountBid": {"sides": "Bid", "actions": "Remove", "measures": "Count"},
             "RemoveCountAsk": {"sides": "Ask", "actions": "Remove", "measures": "Count"},
-            "InsertCountBid": {"sides": "Bid", "actions": "Insert", "measures": "Count"},
-            "InsertCountAsk": {"sides": "Ask", "actions": "Insert", "measures": "Count"},
         }
         for name in required_intermediates:
             prefixed_name = self.apply_prefix(name)
@@ -481,26 +533,39 @@ class L3Analytics(BaseAnalytics):
                 aggregations=["Sum"],
             )
             for variant in generic_analytic.expand_config(dummy_cfg):
-                exprs = generic_analytic.expressions(ctx, dummy_cfg, variant)
-                for expr in exprs:
+                for expr in generic_analytic.expressions(ctx, dummy_cfg, variant):
                     expressions.append(expr.alias(prefixed_name))
 
+    def _requested_aliases(self) -> Set[str]:
+        """Collect the set of output aliases already covered by generic configs."""
+        requested_aliases = set()
         for req in self.config.generic_metrics:
-            for variant in generic_analytic.expand_config(req):
-                expressions.extend(generic_analytic.expressions(ctx, req, variant))
+            for variant in req.expand():
+                alias = (
+                    req.output_name_pattern.format(**variant)
+                    if req.output_name_pattern
+                    else f"{variant['actions']}{variant['measures']}{variant['sides']}"
+                )
+                requested_aliases.add(self.apply_prefix(alias))
+        return requested_aliases
 
+    def _aggregate_base(self, expressions: List[pl.Expr]) -> pl.LazyFrame:
+        """Aggregate the L3 table using the provided expressions."""
+        gcols = ["ListingId", "TimeBucket"]
         if expressions:
-            base_df = self.l3.group_by(gcols).agg(expressions)
-        else:
-            base_df = self.l3.group_by(gcols).agg(pl.len().alias("_count"))
+            return self.l3.group_by(gcols).agg(expressions)
+        return self.l3.group_by(gcols).agg(pl.len().alias("_count"))
 
+    def _apply_advanced(
+        self, base_df: pl.LazyFrame, advanced_variants: List[Dict[str, Any]]
+    ) -> pl.LazyFrame:
+        """Apply advanced analytics to the aggregated base output."""
+        if not advanced_variants:
+            return base_df
         advanced_analytic = L3AdvancedAnalytic()
-        base_df = advanced_analytic.apply(
+        return advanced_analytic.apply(
             base_df,
             self.l3,
             advanced_variants,
             self.metric_prefix,
         )
-
-        self.df = base_df
-        return base_df

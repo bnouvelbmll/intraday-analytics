@@ -8,6 +8,7 @@ from intraday_analytics.analytics_base import (
     AnalyticContext,
     analytic_expression,
     apply_metric_prefix,
+    build_expressions,
 )
 from intraday_analytics.analytics_registry import register_analytics
 
@@ -206,6 +207,7 @@ class CBBOAnalytics(BaseAnalytics):
         )
 
         analytic = CBBOAnalytic()
+
         expressions: list[pl.Expr] = []
         for measure in self.config.measures:
             variant = {"measures": measure}

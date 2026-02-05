@@ -974,7 +974,7 @@ class L2AnalyticsTW(BaseTWAnalytics):
         super().__init__(
             "l2tw",
             {},
-            nanoseconds=int(config.time_bucket_seconds * 1e9),
+            nanoseconds=int(config.time_bucket_seconds * 1e9) if config.time_bucket_seconds else 0,
             metric_prefix=config.metric_prefix,
         )
         self.config = config
@@ -1005,41 +1005,62 @@ class L2AnalyticsTW(BaseTWAnalytics):
             ],
         )
 
-	# WHY IS this on if not ?
         if not expressions:
-            expressions.append(
-                (
-                    (pl.col("AskPrice1") - pl.col("BidPrice1"))
-                    / (pl.col("AskPrice1") + pl.col("BidPrice1"))
-                    * 20000
+            expressions.extend(
+                build_expressions(
+                    ctx,
+                    [
+                        (
+                            spread,
+                            [
+                                L2SpreadConfig(
+                                    variant=["Abs", "BPS"], aggregations=["TWA"]
+                                )
+                            ],
+                        ),
+                        (
+                            liquidity,
+                            [
+                                L2LiquidityConfig(
+                                    sides=["Bid", "Ask"],
+                                    levels=list(range(1, self.config.levels + 1)),
+                                    measures=["Price", "Quantity"],
+                                    aggregations=["TWA"],
+                                )
+                            ],
+                        ),
+                    ],
                 )
-                .mul(pl.col("DT"))
-                .sum()
-                .truediv(pl.col("DT").sum())
-                .alias("SpreadRelTWA")
             )
-            expressions.append(
-                (
-                    0.5 * (pl.col("AskPrice1") + pl.col("BidPrice1"))
-                )
-                .mul(pl.col("DT"))
-                .sum()
-                .truediv(pl.col("DT").sum())
-                .alias("MidTWA")
-            )
-            expressions.append(
-                pl.col("AskPrice1")
-                .mul(pl.col("DT"))
-                .sum()
-                .truediv(pl.col("DT").sum())
-                .alias("AskTWA")
-            )
-            expressions.append(
-                pl.col("BidPrice1")
-                .mul(pl.col("DT"))
-                .sum()
-                .truediv(pl.col("DT").sum())
-                .alias("BidTWA")
+            expressions.extend(
+                [
+                    (
+                        (pl.col("AskPrice1") - pl.col("BidPrice1"))
+                        / (pl.col("AskPrice1") + pl.col("BidPrice1"))
+                        * 20000
+                    )
+                    .mul(pl.col("DT"))
+                    .sum()
+                    .truediv(pl.col("DT").sum())
+                    .alias(self.apply_prefix("SpreadRelTWA")),
+                    (
+                        0.5 * (pl.col("AskPrice1") + pl.col("BidPrice1"))
+                    )
+                    .mul(pl.col("DT"))
+                    .sum()
+                    .truediv(pl.col("DT").sum())
+                    .alias(self.apply_prefix("MidTWA")),
+                    pl.col("AskPrice1")
+                    .mul(pl.col("DT"))
+                    .sum()
+                    .truediv(pl.col("DT").sum())
+                    .alias(self.apply_prefix("AskTWA")),
+                    pl.col("BidPrice1")
+                    .mul(pl.col("DT"))
+                    .sum()
+                    .truediv(pl.col("DT").sum())
+                    .alias(self.apply_prefix("BidTWA")),
+                ]
             )
 
         return l2.agg(expressions)
