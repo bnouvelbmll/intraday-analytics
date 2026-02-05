@@ -1,0 +1,10 @@
+ColumnName,DataType
+TimestampNanoseconds,"Datetime(time_unit='ns', time_zone=None)"
+MarketState,String
+MIC,String
+ExchangeMarketState,String
+ListingId,Int64
+InstrumentId,Int64
+ExchangeSequenceNo,Int64
+BMLLSequenceNo,Int64
+BMLLSequenceSource,Int64

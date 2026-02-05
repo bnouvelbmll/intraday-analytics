@@ -142,6 +142,7 @@ class DenseAnalytics(BaseAnalytics):
                 .collect()
                 .to_pandas()
             )
+            continuous_intervals = continuous_intervals.dropna(subset=[tsc, "nts"])
             res = []
             failed_listings = []
             frequency = str(int(self.config.time_bucket_seconds * 1e9)) + "ns"
@@ -155,26 +156,32 @@ class DenseAnalytics(BaseAnalytics):
                 if len(ciq) == 0:
                     failed_listings.append(row)
                     continue
-                start_dt = pd.Timestamp(ciq.iloc[0]).floor(str(frequency)) - TS_PADDING
-                end_dt = (
-                    pd.Timestamp(continuous_intervals.loc[mask, "nts"].iloc[-1]).ceil(
-                        str(frequency)
+                try:
+                    start_dt = (
+                        pd.Timestamp(ciq.iloc[0]).floor(str(frequency)) - TS_PADDING
                     )
-                    + TS_PADDING
-                )
-                res.append(
-                    pl.DataFrame(
-                        {
-                            "TimeBucket": pl.datetime_range(
-                                start=start_dt,
-                                end=end_dt,
-                                interval=str(frequency),
-                                closed="left",
-                                eager=True,
-                            ).cast(pl.Datetime("ns"))
-                        }
-                    ).with_columns(**{c: row[c] for c in scs})
-                )
+                    end_dt = (
+                        pd.Timestamp(continuous_intervals.loc[mask, "nts"].iloc[-1]).ceil(
+                            str(frequency)
+                        )
+                        + TS_PADDING
+                    )
+                    res.append(
+                        pl.DataFrame(
+                            {
+                                "TimeBucket": pl.datetime_range(
+                                    start=start_dt,
+                                    end=end_dt,
+                                    interval=str(frequency),
+                                    closed="left",
+                                    eager=True,
+                                ).cast(pl.Datetime("ns"))
+                            }
+                        ).with_columns(**{c: row[c] for c in scs})
+                    )
+                except (TypeError, ValueError) as exc:
+                    failed_listings.append({**row, "error": str(exc)})
+                    continue
 
             if failed_listings:
                 logger.warning(

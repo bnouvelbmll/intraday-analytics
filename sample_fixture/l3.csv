@@ -1,0 +1,37 @@
+ColumnName,DataType
+Ticker,String
+ListingId,Int64
+InstrumentId,Int64
+TradeDate,"Datetime(time_unit='ms', time_zone=None)"
+TimestampNanoseconds,"Datetime(time_unit='ns', time_zone=None)"
+ReceiveTimestamp,Int64
+EventNo,Int64
+Side,Int64
+LobAction,Int64
+OriginalOrderId,String
+Price,Float64
+Size,Int64
+OrderId,String
+OldPrice,Float64
+OldSize,Int64
+OldOrderId,String
+OrderExecuted,Boolean
+ExecutionPrice,Float64
+ExecutionSize,Int64
+TradeId,String
+PriceLevel,Int64
+OldPriceLevel,Int64
+SizeAhead,Int64
+OrdersAhead,Int64
+PosChange,Boolean
+EndOfEvent,Boolean
+MarketState,String
+Printable,Boolean
+DelOrderIndex,Int64
+AddOrderIndex,Int64
+MPIDAttribution,String
+ExchangeSequenceNo,Int64
+BMLLSequenceNo,Int64
+BMLLSequenceSource,Int64
+OrderType,Int64
+OriginalExchangeMessage,String

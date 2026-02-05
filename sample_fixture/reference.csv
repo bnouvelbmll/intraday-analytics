@@ -1,0 +1,23 @@
+ColumnName,DataType
+ListingId,Int64
+InstrumentId,Int64
+CurrencyCode,String
+Description,String
+DisplayName,String
+FIGI,String
+FIGIComposite,String
+FIGIShareClass,String
+ISIN,String
+InstrumentType,String
+IsAlive,Boolean
+IsPrimary,Boolean
+MIC,String
+MarketDataLevel,String
+OPOL,String
+OperatingMic,String
+ReutersInstrumentId,String
+ReutersOrganizationId,String
+ReutersQuoteId,String
+SegmentCode,String
+Ticker,String
+Date,"Datetime(time_unit='ms', time_zone=None)"
