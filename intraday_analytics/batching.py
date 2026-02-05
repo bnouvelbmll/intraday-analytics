@@ -539,58 +539,53 @@ def _process_s3_chunk(
             f"No readable files found for table {table_name} (worker {worker_id})."
         )
         return
+    def _stream_and_write(lf_filtered: pl.LazyFrame) -> int:
+        total_rows = 0
+        pl_map = pl.from_arrow(batch_map_table)
+        chunk_idx = 0
+        for df_chunk in lf_filtered.collect_batches():
+            if df_chunk.is_empty():
+                continue
+            total_rows += len(df_chunk)
+            shredded = df_chunk.join(pl_map, on="ListingId", how="inner")
+            if shredded.is_empty():
+                continue
+            ds.write_dataset(
+                shredded.to_arrow(),
+                base_dir=f"{output_root}/{table_name}",
+                partitioning=["batch_id"],
+                format="parquet",
+                existing_data_behavior="overwrite_or_ignore",
+                max_rows_per_group=1_000_000,
+                basename_template=f"f-{worker_id}-{chunk_idx}-{{i}}.parquet",
+            )
+            chunk_idx += 1
+        return total_rows
+
     try:
-        # Optimistic path: Try reading all files at once
         lf = pl.scan_parquet(s3_files, storage_options=storage_options)
         lf_filtered = transform_fn(lf)
-        df_chunk = lf_filtered.collect()
+        total_rows = _stream_and_write(lf_filtered)
     except Exception as e:
         logging.warning(
             f"Batch read failed for chunk starting with {s3_files[0] if s3_files else 'N/A'}. Falling back to individual file read. Error: {e}"
         )
-        # Fallback: Try reading files one by one
-        valid_dfs = []
+        total_rows = 0
         for f in s3_files:
             try:
                 lf_single = pl.scan_parquet(f, storage_options=storage_options)
                 lf_single_filtered = transform_fn(lf_single)
-                valid_dfs.append(lf_single_filtered.collect())
+                total_rows += _stream_and_write(lf_single_filtered)
             except Exception as inner_e:
                 logging.warning(
                     f"Skipping missing or corrupt file: {f}. Error: {inner_e}"
                 )
 
-        if not valid_dfs:
-            return
-
-        df_chunk = pl.concat(valid_dfs)
-
-    if df_chunk.is_empty():
+    if total_rows == 0:
+        logging.warning(f"Worker {worker_id}: No rows read.")
         return
 
-    # 4. Join with Batch Map
-    pl_map = pl.from_arrow(batch_map_table)
-
-    # Inner join attaches 'batch_id' and filters out symbols not in any batch
-    shredded = df_chunk.join(pl_map, on="ListingId", how="inner")
-    logging.info(
-        f"Worker {worker_id}: Read {len(df_chunk)} rows. Shredded {len(shredded)} rows."
-    )
-
-    if shredded.is_empty():
-        logging.warning(f"Worker {worker_id}: Shredded dataframe is empty.")
-        return
-
-    # 5. Write to Local Partitioned Dataset
-    ds.write_dataset(
-        shredded.to_arrow(),
-        base_dir=f"{output_root}/{table_name}",
-        partitioning=["batch_id"],
-        format="parquet",
-        existing_data_behavior="overwrite_or_ignore",
-        max_rows_per_group=1_000_000,
-        basename_template=f"f-{worker_id}-{{i}}.parquet",
-    )
+    logging.info(f"Worker {worker_id}: Read {total_rows} rows.")
 
 
 class S3SymbolBatcher:
