@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class DenseAnalyticsConfig(BaseModel):
     ENABLED: bool = True
+    metric_prefix: Optional[str] = None
     mode: Literal["adaptative", "uniform"] = "adaptative"
     time_interval: Optional[List[str]] = None
     time_bucket_seconds: Optional[float] = None
@@ -36,7 +37,7 @@ class DenseAnalytics(BaseAnalytics):
     def __init__(self, ref: pl.DataFrame, config: DenseAnalyticsConfig):
         self.ref = ref
         self.config = config
-        super().__init__("da")
+        super().__init__("da", metric_prefix=config.metric_prefix)
 
     def compute(self) -> pl.LazyFrame:
         # (Keep original logic as it's structural, not metric-generating in the same sense)

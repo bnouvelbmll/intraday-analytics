@@ -231,6 +231,7 @@ class BaseAnalytics(ABC):
         name: str,
         specific_fill_cols=None,
         join_keys: List[str] = ["ListingId", "TimeBucket"],
+        metric_prefix: str | None = None,
     ):
         self.name = name
         self.join_keys = join_keys
@@ -241,6 +242,7 @@ class BaseAnalytics(ABC):
         self.marketstate = None
         self.specific_fill_cols = specific_fill_cols or {}
         self.context: Dict[str, Any] = {}
+        self.metric_prefix = metric_prefix or ""
 
     @abstractmethod
     def compute(self, **kwargs) -> pl.LazyFrame:
@@ -289,6 +291,68 @@ class BaseAnalytics(ABC):
             r = r.with_columns(**ra)
         return r
 
+    def apply_prefix(self, name: str) -> str:
+        """Apply the module prefix to an output name if configured."""
+        if self.metric_prefix:
+            return f"{self.metric_prefix}{name}"
+        return name
+
+    def _ohlc_names(self, req: Any, variant: Dict[str, Any]) -> dict[str, str]:
+        names = {}
+        source = variant["source"]
+        for ohlc in ["Open", "High", "Low", "Close"]:
+            variant_with_ohlc = {**variant, "ohlc": ohlc}
+            default_name = f"{source}{ohlc}"
+            alias = (
+                req.output_name_pattern.format(**variant_with_ohlc)
+                if req.output_name_pattern
+                else default_name
+            )
+            names[ohlc] = self.apply_prefix(alias)
+        return names
+
+    def _apply_prev_close_ohlc(
+        self, df: pl.LazyFrame, gcols: list[str], names: dict[str, str]
+    ) -> pl.LazyFrame:
+        group_cols = [c for c in gcols if c != "TimeBucket"]
+        open_col = names["Open"]
+        high_col = names["High"]
+        low_col = names["Low"]
+        close_col = names["Close"]
+        temp_col = f"__{close_col}_filled"
+
+        no_event = (
+            pl.col(open_col).is_null()
+            & pl.col(high_col).is_null()
+            & pl.col(low_col).is_null()
+            & pl.col(close_col).is_null()
+        )
+
+        df = df.with_columns(
+            pl.when(no_event)
+            .then(pl.col(close_col).shift(1).over(group_cols))
+            .otherwise(pl.col(close_col))
+            .alias(temp_col)
+        ).with_columns(pl.col(temp_col).forward_fill().over(group_cols).alias(temp_col))
+
+        return df.with_columns(
+            [
+                pl.when(no_event)
+                .then(pl.col(temp_col))
+                .otherwise(pl.col(open_col))
+                .alias(open_col),
+                pl.when(no_event)
+                .then(pl.col(temp_col))
+                .otherwise(pl.col(high_col))
+                .alias(high_col),
+                pl.when(no_event)
+                .then(pl.col(temp_col))
+                .otherwise(pl.col(low_col))
+                .alias(low_col),
+                pl.col(temp_col).alias(close_col),
+            ]
+        ).drop(temp_col)
+
 
 class BaseTWAnalytics(BaseAnalytics):
     """
@@ -299,8 +363,14 @@ class BaseTWAnalytics(BaseAnalytics):
     by subclasses.
     """
 
-    def __init__(self, name: str, specific_fill_cols=None, nanoseconds=None):
-        super().__init__(name, specific_fill_cols=specific_fill_cols)
+    def __init__(
+        self, name: str, specific_fill_cols=None, nanoseconds=None, metric_prefix: str | None = None
+    ):
+        super().__init__(
+            name,
+            specific_fill_cols=specific_fill_cols,
+            metric_prefix=metric_prefix,
+        )
         self.nanoseconds = nanoseconds
         self._tables = {"l2": None, "l3": None, "trades": None}
 
@@ -374,3 +444,11 @@ def build_expressions(
             for variant in spec.expand_config(config):
                 expressions.extend(spec.expressions(ctx, config, variant))
     return expressions
+
+
+def apply_metric_prefix(ctx: AnalyticContext, name: str) -> str:
+    """Apply a metric prefix stored in context cache to an output name."""
+    prefix = ctx.cache.get("metric_prefix") if ctx and ctx.cache else ""
+    if prefix:
+        return f"{prefix}{name}"
+    return name

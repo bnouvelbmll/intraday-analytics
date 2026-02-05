@@ -1,6 +1,6 @@
 import polars as pl
 from pydantic import BaseModel, Field
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from intraday_analytics.analytics_base import BaseAnalytics
 from intraday_analytics.analytics_registry import register_analytics
@@ -12,6 +12,7 @@ CBBOQuantityAgg = Literal["TWMean", "Min", "Max", "Median"]
 
 class CBBOAnalyticsConfig(BaseModel):
     ENABLED: bool = True
+    metric_prefix: Optional[str] = None
     measures: List[CBBOMeasure] = Field(
         default_factory=lambda: [
             "TimeAtCBB",
@@ -36,7 +37,7 @@ class CBBOAnalytics(BaseAnalytics):
     def __init__(self, ref: pl.DataFrame, config: CBBOAnalyticsConfig):
         self.ref = ref
         self.config = config
-        super().__init__("cbbo", {})
+        super().__init__("cbbo", {}, metric_prefix=config.metric_prefix)
 
     def compute(self) -> pl.LazyFrame:
         if self.ref is None:
@@ -99,14 +100,20 @@ class CBBOAnalytics(BaseAnalytics):
             denom = dt.sum()
             numer = dt_match_bid.sum()
             expressions.append(
-                pl.when(denom > 0).then(numer / denom).otherwise(None).alias("TimeAtCBB")
+                pl.when(denom > 0)
+                .then(numer / denom)
+                .otherwise(None)
+                .alias(self.apply_prefix("TimeAtCBB"))
             )
 
         if "TimeAtCBO" in self.config.measures:
             denom = dt.sum()
             numer = dt_match_ask.sum()
             expressions.append(
-                pl.when(denom > 0).then(numer / denom).otherwise(None).alias("TimeAtCBO")
+                pl.when(denom > 0)
+                .then(numer / denom)
+                .otherwise(None)
+                .alias(self.apply_prefix("TimeAtCBO"))
             )
 
         if "QuantityAtCBB" in self.config.measures:
@@ -127,7 +134,7 @@ class CBBOAnalytics(BaseAnalytics):
                     name = "QuantityAtCBBMedian"
                 else:
                     continue
-                expressions.append(expr.alias(name))
+                expressions.append(expr.alias(self.apply_prefix(name)))
 
         if "QuantityAtCBO" in self.config.measures:
             for agg in self.config.quantity_aggregations:
@@ -147,7 +154,7 @@ class CBBOAnalytics(BaseAnalytics):
                     name = "QuantityAtCBOMedian"
                 else:
                     continue
-                expressions.append(expr.alias(name))
+                expressions.append(expr.alias(self.apply_prefix(name)))
 
         gcols = ["ListingId", "TimeBucket"]
         df = joined.group_by(gcols).agg(expressions)

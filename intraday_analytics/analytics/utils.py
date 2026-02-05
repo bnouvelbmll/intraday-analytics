@@ -14,12 +14,18 @@ def apply_market_state_filter(
 
 
 def apply_alias(
-    expr: pl.Expr, pattern: Optional[str], variant: Dict[str, Any], default_name: str
+    expr: pl.Expr,
+    pattern: Optional[str],
+    variant: Dict[str, Any],
+    default_name: str,
+    prefix: Optional[str] = None,
 ) -> pl.Expr:
     """
     Applies an alias to a Polars expression based on a pattern or default name.
     """
     alias = pattern.format(**variant) if pattern else default_name
+    if prefix:
+        alias = f"{prefix}{alias}"
     return expr.alias(alias)
 
 

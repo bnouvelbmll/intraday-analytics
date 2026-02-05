@@ -65,6 +65,7 @@ class L3AdvancedConfig(CombinatorialMetricConfig):
 
 class L3AnalyticsConfig(BaseModel):
     ENABLED: bool = True
+    metric_prefix: Optional[str] = None
     generic_metrics: List[L3MetricConfig] = Field(default_factory=list)
     advanced_metrics: List[L3AdvancedConfig] = Field(default_factory=list)
 
@@ -179,6 +180,7 @@ class L3GenericAnalytic(AnalyticSpec):
                     config.output_name_pattern,
                     {**variant, "agg": agg},
                     default_name,
+                    prefix=ctx.cache.get("metric_prefix"),
                 )
             )
         return outputs
@@ -198,6 +200,7 @@ class L3AdvancedAnalytic(AnalyticSpec):
         base_df: pl.LazyFrame,
         l3: pl.LazyFrame,
         advanced_variants: List[Dict[str, Any]],
+        prefix: str,
     ) -> pl.LazyFrame:
         gcols = ["ListingId", "TimeBucket"]
 
@@ -208,10 +211,14 @@ class L3AdvancedAnalytic(AnalyticSpec):
             if v == "ArrivalFlowImbalance":
                 pattern = adv.get("_output_name_pattern")
                 col_name = pattern.format(**adv) if pattern else "ArrivalFlowImbalance"
+                if prefix:
+                    col_name = f"{prefix}{col_name}"
+                bid_col = f"{prefix}InsertVolumeBid" if prefix else "InsertVolumeBid"
+                ask_col = f"{prefix}InsertVolumeAsk" if prefix else "InsertVolumeAsk"
                 base_df = base_df.with_columns(
                     (
-                        (pl.col("InsertVolumeBid") - pl.col("InsertVolumeAsk"))
-                        / (pl.col("InsertVolumeBid") + pl.col("InsertVolumeAsk") + 1e-9)
+                        (pl.col(bid_col) - pl.col(ask_col))
+                        / (pl.col(bid_col) + pl.col(ask_col) + 1e-9)
                     ).alias(col_name)
                 )
 
@@ -227,9 +234,13 @@ class L3AdvancedAnalytic(AnalyticSpec):
 
                 pattern = adv.get("_output_name_pattern")
                 col_name = pattern.format(**adv) if pattern else "CancelToTradeRatio"
+                if prefix:
+                    col_name = f"{prefix}{col_name}"
+                bid_col = f"{prefix}RemoveCountBid" if prefix else "RemoveCountBid"
+                ask_col = f"{prefix}RemoveCountAsk" if prefix else "RemoveCountAsk"
                 base_df = base_df.with_columns(
                     (
-                        (pl.col("RemoveCountBid") + pl.col("RemoveCountAsk"))
+                        (pl.col(bid_col) + pl.col(ask_col))
                         / (pl.col("ExecCount") + 1e-9)
                     ).alias(col_name)
                 ).drop("ExecCount")
@@ -242,6 +253,8 @@ class L3AdvancedAnalytic(AnalyticSpec):
                 )
                 pattern = adv.get("_output_name_pattern")
                 col_name = pattern.format(**adv) if pattern else "AvgQueuePosition"
+                if prefix:
+                    col_name = f"{prefix}{col_name}"
                 if col_name != "AvgQueuePosition":
                     queue_pos = queue_pos.rename({"AvgQueuePosition": col_name})
                 base_df = base_df.join(queue_pos, on=gcols, how="left")
@@ -254,6 +267,8 @@ class L3AdvancedAnalytic(AnalyticSpec):
                 )
                 pattern = adv.get("_output_name_pattern")
                 col_name = pattern.format(**adv) if pattern else "AvgRestingTime"
+                if prefix:
+                    col_name = f"{prefix}{col_name}"
                 if col_name != "AvgRestingTime":
                     resting_metrics = resting_metrics.rename({"AvgRestingTime": col_name})
                 base_df = base_df.join(resting_metrics, on=gcols, how="left")
@@ -276,10 +291,14 @@ class L3AdvancedAnalytic(AnalyticSpec):
                 base_df = base_df.join(fleeting_metrics, on=gcols, how="left")
                 pattern = adv.get("_output_name_pattern")
                 col_name = pattern.format(**adv) if pattern else "FleetingLiquidityRatio"
+                if prefix:
+                    col_name = f"{prefix}{col_name}"
+                bid_col = f"{prefix}InsertVolumeBid" if prefix else "InsertVolumeBid"
+                ask_col = f"{prefix}InsertVolumeAsk" if prefix else "InsertVolumeAsk"
                 base_df = base_df.with_columns(
                     (
                         pl.col("FleetingVolume")
-                        / (pl.col("InsertVolumeBid") + pl.col("InsertVolumeAsk") + 1e-9)
+                        / (pl.col(bid_col) + pl.col(ask_col) + 1e-9)
                     ).alias(col_name)
                 ).drop("FleetingVolume")
 
@@ -289,6 +308,8 @@ class L3AdvancedAnalytic(AnalyticSpec):
                 )
                 pattern = adv.get("_output_name_pattern")
                 col_name = pattern.format(**adv) if pattern else "AvgReplacementLatency"
+                if prefix:
+                    col_name = f"{prefix}{col_name}"
                 if col_name != "AvgReplacementLatency":
                     latency = latency.rename({"AvgReplacementLatency": col_name})
                 base_df = base_df.join(latency, on=gcols, how="left")
@@ -381,18 +402,24 @@ class L3Analytics(BaseAnalytics):
 
     def __init__(self, config: L3AnalyticsConfig):
         self.config = config
-        super().__init__("l3", {})
+        super().__init__("l3", {}, metric_prefix=config.metric_prefix)
 
     def compute(self) -> pl.LazyFrame:
         gcols = ["ListingId", "TimeBucket"]
-        ctx = AnalyticContext(base_df=self.l3, cache={}, context=self.context)
+        ctx = AnalyticContext(
+            base_df=self.l3,
+            cache={"metric_prefix": self.metric_prefix},
+            context=self.context,
+        )
 
         requested_generics = []
         for req in self.config.generic_metrics:
             requested_generics.extend(req.expand())
         requested_aliases = {
-            req.get("output_name_pattern")
-            or f"{req['actions']}{req['measures']}{req['sides']}"
+            self.apply_prefix(
+                req.get("output_name_pattern")
+                or f"{req['actions']}{req['measures']}{req['sides']}"
+            )
             for req in requested_generics
         }
 
@@ -427,7 +454,8 @@ class L3Analytics(BaseAnalytics):
             "InsertCountAsk": {"sides": "Ask", "actions": "Insert", "measures": "Count"},
         }
         for name in required_intermediates:
-            if name in requested_aliases:
+            prefixed_name = self.apply_prefix(name)
+            if prefixed_name in requested_aliases:
                 continue
             params = required_map.get(name)
             if not params:
@@ -441,7 +469,7 @@ class L3Analytics(BaseAnalytics):
             for variant in generic_analytic.expand_config(dummy_cfg):
                 exprs = generic_analytic.expressions(ctx, dummy_cfg, variant)
                 for expr in exprs:
-                    expressions.append(expr.alias(name))
+                    expressions.append(expr.alias(prefixed_name))
 
         for req in self.config.generic_metrics:
             for variant in generic_analytic.expand_config(req):
@@ -453,7 +481,12 @@ class L3Analytics(BaseAnalytics):
             base_df = self.l3.group_by(gcols).agg(pl.len().alias("_count"))
 
         advanced_analytic = L3AdvancedAnalytic()
-        base_df = advanced_analytic.apply(base_df, self.l3, advanced_variants)
+        base_df = advanced_analytic.apply(
+            base_df,
+            self.l3,
+            advanced_variants,
+            self.metric_prefix,
+        )
 
         self.df = base_df
         return base_df

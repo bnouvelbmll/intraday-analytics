@@ -10,7 +10,13 @@ from .common import (
     apply_aggregation,
 )
 from .utils import apply_market_state_filter, apply_alias
-from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_expression
+from intraday_analytics.analytics_base import (
+    AnalyticSpec,
+    AnalyticContext,
+    AnalyticDoc,
+    analytic_expression,
+    apply_metric_prefix,
+)
 from intraday_analytics.analytics_registry import register_analytics
 
 
@@ -164,6 +170,7 @@ class TradeImpactConfig(CombinatorialMetricConfig):
 
 class TradeAnalyticsConfig(BaseModel):
     ENABLED: bool = True
+    metric_prefix: Optional[str] = None
     generic_metrics: List[TradeGenericConfig] = Field(default_factory=list)
     discrepancy_metrics: List[TradeDiscrepancyConfig] = Field(default_factory=list)
     flag_metrics: List[TradeFlagConfig] = Field(default_factory=list)
@@ -310,22 +317,30 @@ class TradeGenericAnalytic(AnalyticSpec):
         group_role="{ohlc}",
         group_semantics="ohlc_bar,ffill_non_naive",
     )
-    def _expression_ohlc(self, cond, config: TradeGenericConfig, variant: Dict[str, Any]):
+    def _expression_ohlc(
+        self,
+        cond,
+        config: TradeGenericConfig,
+        variant: Dict[str, Any],
+        prefix: str,
+    ):
         """Trade {ohlc} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         side = variant["sides"]
-        prefix = (
+        base_prefix = (
             f"Trade{side}"
             if not config.output_name_pattern
             else config.output_name_pattern.format(**variant)
         )
         if side == "Total" and not config.output_name_pattern:
-            prefix = ""
+            base_prefix = ""
+        prefix = f"{prefix}{base_prefix}" if prefix else base_prefix
         price_col = self._filtered(cond, pl.col("LocalPrice")).drop_nans()
+        names = [f"{prefix}Open", f"{prefix}High", f"{prefix}Low", f"{prefix}Close"]
         return [
-            price_col.first().alias(f"{prefix}Open"),
-            price_col.max().alias(f"{prefix}High"),
-            price_col.min().alias(f"{prefix}Low"),
-            price_col.last().alias(f"{prefix}Close"),
+            price_col.first().alias(names[0]),
+            price_col.max().alias(names[1]),
+            price_col.min().alias(names[2]),
+            price_col.last().alias(names[3]),
         ]
 
     def expressions(
@@ -340,11 +355,20 @@ class TradeGenericAnalytic(AnalyticSpec):
             return []
 
         if measure == "OHLC":
-            return expression_fn(self, cond, config, variant)
+            prefix = apply_metric_prefix(ctx, "")
+            return expression_fn(self, cond, config, variant, prefix)
 
         expr = expression_fn(self, cond)
         default_name = f"Trade{side}{measure}"
-        return [apply_alias(expr, config.output_name_pattern, variant, default_name)]
+        return [
+            apply_alias(
+                expr,
+                config.output_name_pattern,
+                variant,
+                default_name,
+                prefix=ctx.cache.get("metric_prefix"),
+            )
+        ]
 
 
 class TradeDiscrepancyAnalytic(AnalyticSpec):
@@ -403,7 +427,11 @@ class TradeDiscrepancyAnalytic(AnalyticSpec):
             )
             outputs.append(
                 apply_alias(
-                    agg_expr, config.output_name_pattern, {**variant, "agg": agg}, default_name
+                    agg_expr,
+                    config.output_name_pattern,
+                    {**variant, "agg": agg},
+                    default_name,
+                    prefix=ctx.cache.get("metric_prefix"),
                 )
             )
         return outputs
@@ -485,7 +513,15 @@ class TradeFlagAnalytic(AnalyticSpec):
         default_name = f"{flag_name}{measure}"
         if side != "Total":
             default_name += f"{side}"
-        return [apply_alias(expr, config.output_name_pattern, variant, default_name)]
+        return [
+            apply_alias(
+                expr,
+                config.output_name_pattern,
+                variant,
+                default_name,
+                prefix=ctx.cache.get("metric_prefix"),
+            )
+        ]
 
 
 class TradeChangeAnalytic(AnalyticSpec):
@@ -519,7 +555,15 @@ class TradeChangeAnalytic(AnalyticSpec):
         expr = pl.col(col_name)
         expr = apply_market_state_filter(expr, config.market_states)
 
-        return [apply_alias(expr.mean(), config.output_name_pattern, variant, col_name)]
+        return [
+            apply_alias(
+                expr.mean(),
+                config.output_name_pattern,
+                variant,
+                col_name,
+                prefix=ctx.cache.get("metric_prefix"),
+            )
+        ]
 
 
 class TradeImpactAnalytic(AnalyticSpec):
@@ -574,7 +618,15 @@ class TradeImpactAnalytic(AnalyticSpec):
 
         expr = apply_market_state_filter(expr, config.market_states)
         default_name = f"{metric_type}{horizon}"
-        return [apply_alias(expr.mean(), config.output_name_pattern, variant, default_name)]
+        return [
+            apply_alias(
+                expr.mean(),
+                config.output_name_pattern,
+                variant,
+                default_name,
+                prefix=ctx.cache.get("metric_prefix"),
+            )
+        ]
 
 
 class TradeDefaultAnalytic(AnalyticSpec):
@@ -696,6 +748,7 @@ class TradeAnalytics(BaseAnalytics):
         super().__init__(
             "trades",
             {},
+            metric_prefix=config.metric_prefix,
         )
 
     def compute(self) -> pl.LazyFrame:
@@ -711,7 +764,11 @@ class TradeAnalytics(BaseAnalytics):
         base_df = base_df.filter(pl.col("Classification") == "LIT_CONTINUOUS")
         gcols = ["MIC", "ListingId", "Ticker", "TimeBucket"]
 
-        ctx = AnalyticContext(base_df=base_df, cache={}, context=self.context)
+        ctx = AnalyticContext(
+            base_df=base_df,
+            cache={"metric_prefix": self.metric_prefix},
+            context=self.context,
+        )
         expressions = []
 
         analytic_config_pairs = [

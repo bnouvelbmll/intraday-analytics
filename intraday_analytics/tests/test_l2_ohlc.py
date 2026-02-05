@@ -86,3 +86,20 @@ class TestL2Ohlc(unittest.TestCase):
         self.assertAlmostEqual(row2[col_index["MidLow"]], expected_close_bucket1, places=6)
         self.assertAlmostEqual(row2[col_index["MidClose"]], expected_close_bucket1, places=6)
 
+    def test_metric_prefix_applies_to_ohlc(self):
+        df, _, _, _ = self._base_df()
+        analytics = L2AnalyticsLast(
+            L2AnalyticsConfig(
+                time_bucket_seconds=60,
+                metric_prefix="P_",
+                ohlc=[L2OHLCConfig(source="Mid", open_mode="event")],
+            )
+        )
+        analytics.l2 = df
+        result = analytics.compute().collect()
+
+        self.assertIn("P_MidOpen", result.columns)
+        self.assertIn("P_MidClose", result.columns)
+        self.assertIn("P_MarketState", result.columns)
+        self.assertNotIn("MidOpen", result.columns)
+        self.assertNotIn("MarketState", result.columns)

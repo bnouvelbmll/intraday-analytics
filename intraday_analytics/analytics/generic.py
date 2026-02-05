@@ -23,6 +23,7 @@ class TalibIndicatorConfig(BaseModel):
 
 class GenericAnalyticsConfig(BaseModel):
     ENABLED: bool = True
+    metric_prefix: Optional[str] = None
     source_pass: str = "pass1"
     group_by: List[str] = ["ListingId", "TimeBucket"]
     resample_rule: Optional[str] = None  # e.g., "15m"
@@ -37,7 +38,12 @@ class GenericAnalytics(BaseAnalytics):
     REQUIRES = []  # Depends on previous pass, not raw tables directly
 
     def __init__(self, config: GenericAnalyticsConfig):
-        super().__init__("generic", {}, join_keys=config.group_by)
+        super().__init__(
+            "generic",
+            {},
+            join_keys=config.group_by,
+            metric_prefix=config.metric_prefix,
+        )
         self.config = config
         self.ref = None
 
@@ -148,6 +154,16 @@ class GenericAnalytics(BaseAnalytics):
                             )
                             .alias(out_col)
                         )
+
+        if self.metric_prefix:
+            schema_cols = lf.collect_schema().names()
+            rename_map = {
+                col: self.apply_prefix(col)
+                for col in schema_cols
+                if col not in self.config.group_by
+            }
+            if rename_map:
+                lf = lf.rename(rename_map)
 
         self.df = lf
         return self.df

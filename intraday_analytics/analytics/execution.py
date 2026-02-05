@@ -1,10 +1,16 @@
 import polars as pl
 from intraday_analytics.analytics_base import BaseAnalytics
 from pydantic import BaseModel, Field
-from typing import List, Union, Literal, Dict, Any
+from typing import List, Union, Literal, Dict, Any, Optional
 
 from .common import CombinatorialMetricConfig, Side
-from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_expression
+from intraday_analytics.analytics_base import (
+    AnalyticSpec,
+    AnalyticContext,
+    AnalyticDoc,
+    analytic_expression,
+    apply_metric_prefix,
+)
 from intraday_analytics.analytics_registry import register_analytics
 
 
@@ -70,6 +76,7 @@ class ExecutionDerivedConfig(CombinatorialMetricConfig):
 
 class ExecutionAnalyticsConfig(BaseModel):
     ENABLED: bool = True
+    metric_prefix: Optional[str] = None
     l3_execution: List[L3ExecutionConfig] = Field(default_factory=list)
     trade_breakdown: List[TradeBreakdownConfig] = Field(default_factory=list)
     derived_metrics: List[ExecutionDerivedConfig] = Field(default_factory=list)
@@ -132,7 +139,7 @@ class L3ExecutionAnalytic(AnalyticSpec):
             else:
                 alias = f"{measure}{side}"
 
-        return [expr.alias(alias)]
+        return [expr.alias(apply_metric_prefix(ctx, alias))]
 
 
 class TradeBreakdownAnalytic(AnalyticSpec):
@@ -198,7 +205,7 @@ class TradeBreakdownAnalytic(AnalyticSpec):
             )
             alias = f"{t_type_str}{measure_str}{agg_side_str}Aggressor"
 
-        return [expr.alias(alias)]
+        return [expr.alias(apply_metric_prefix(ctx, alias))]
 
 
 class ExecutionDerivedAnalytic(AnalyticSpec):
@@ -217,17 +224,26 @@ class ExecutionDerivedAnalytic(AnalyticSpec):
     ) -> List[pl.Expr]:
         return []
 
-    def apply(self, df: pl.LazyFrame, config: ExecutionDerivedConfig, variant: Dict[str, Any]) -> pl.LazyFrame:
+    def apply(
+        self,
+        df: pl.LazyFrame,
+        config: ExecutionDerivedConfig,
+        variant: Dict[str, Any],
+        prefix: str,
+    ) -> pl.LazyFrame:
         v_name = variant["variant"]
         if v_name != "TradeImbalance":
             return df
         cols = df.collect_schema().names()
-        if "ExecutedVolumeAsk" in cols and "ExecutedVolumeBid" in cols:
+        ask_col = f"{prefix}ExecutedVolumeAsk" if prefix else "ExecutedVolumeAsk"
+        bid_col = f"{prefix}ExecutedVolumeBid" if prefix else "ExecutedVolumeBid"
+        out_col = f"{prefix}TradeImbalance" if prefix else "TradeImbalance"
+        if ask_col in cols and bid_col in cols:
             return df.with_columns(
                 (
-                    (pl.col("ExecutedVolumeAsk") - pl.col("ExecutedVolumeBid"))
-                    / (pl.col("ExecutedVolumeAsk") + pl.col("ExecutedVolumeBid"))
-                ).alias("TradeImbalance")
+                    (pl.col(ask_col) - pl.col(bid_col))
+                    / (pl.col(ask_col) + pl.col(bid_col))
+                ).alias(out_col)
             )
         return df
 
@@ -248,7 +264,7 @@ class ExecutionAnalytics(BaseAnalytics):
 
     def __init__(self, config: ExecutionAnalyticsConfig):
         self.config = config
-        super().__init__("execution", {})
+        super().__init__("execution", {}, metric_prefix=config.metric_prefix)
 
     def compute(self) -> pl.LazyFrame:
         l3 = self.l3.with_columns(
@@ -257,7 +273,11 @@ class ExecutionAnalytics(BaseAnalytics):
         trades = self.trades.with_columns(
             pl.col("TimeBucket").cast(pl.Int64).alias("TimeBucketInt")
         )
-        ctx = AnalyticContext(base_df=l3, cache={}, context=self.context)
+        ctx = AnalyticContext(
+            base_df=l3,
+            cache={"metric_prefix": self.metric_prefix},
+            context=self.context,
+        )
 
         l3_exprs = []
 
@@ -337,7 +357,7 @@ class ExecutionAnalytics(BaseAnalytics):
         derived_analytic = ExecutionDerivedAnalytic()
         for req in derived_configs:
             for variant in req.expand():
-                df = derived_analytic.apply(df, req, variant)
+                df = derived_analytic.apply(df, req, variant, self.metric_prefix)
 
         self.df = df
         return df

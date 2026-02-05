@@ -11,6 +11,7 @@ from intraday_analytics.analytics_base import (
     AnalyticDoc,
     analytic_expression,
     build_expressions,
+    apply_metric_prefix,
 )
 from intraday_analytics.analytics_registry import register_analytics
 
@@ -122,6 +123,7 @@ class L2OHLCConfig(CombinatorialMetricConfig):
 
 class L2AnalyticsConfig(BaseModel):
     ENABLED: bool = True
+    metric_prefix: Optional[str] = None
     time_bucket_seconds: Optional[float] = None
     time_bucket_anchor: Literal["end", "start"] = "end"
     time_bucket_closed: Literal["right", "left"] = "right"
@@ -330,7 +332,7 @@ class L2LastLiquidityAnalytic(AnalyticSpec):
             if config.output_name_pattern
             else f"{side}{measure}{level}"
         )
-        return [expr.alias(alias)]
+        return [expr.alias(apply_metric_prefix(ctx, alias))]
 
 
 class L2LastSpreadAnalytic(AnalyticSpec):
@@ -384,7 +386,7 @@ class L2LastSpreadAnalytic(AnalyticSpec):
             if config.output_name_pattern
             else f"Spread{v_type}"
         )
-        return [expr.alias(alias)]
+        return [expr.alias(apply_metric_prefix(ctx, alias))]
 
 
 class L2LastImbalanceAnalytic(AnalyticSpec):
@@ -445,7 +447,7 @@ class L2LastImbalanceAnalytic(AnalyticSpec):
             if config.output_name_pattern
             else f"Imbalance{measure}{level}"
         )
-        return [expr.alias(alias)]
+        return [expr.alias(apply_metric_prefix(ctx, alias))]
 
 
 class L2LastOHLCAnalytic(AnalyticSpec):
@@ -490,7 +492,7 @@ class L2LastOHLCAnalytic(AnalyticSpec):
                 if config.output_name_pattern
                 else default_name
             )
-            expressions.append(expr.alias(alias))
+            expressions.append(expr.alias(apply_metric_prefix(ctx, alias)))
         return expressions
 
 
@@ -611,7 +613,7 @@ class L2TWLiquidityAnalytic(AnalyticSpec):
             if config.output_name_pattern
             else f"{side}{measure}{level}TWA"
         )
-        return [_twa(raw, config.market_states).alias(alias)]
+        return [_twa(raw, config.market_states).alias(apply_metric_prefix(ctx, alias))]
 
 
 class L2TWSpreadAnalytic(AnalyticSpec):
@@ -672,7 +674,7 @@ class L2TWSpreadAnalytic(AnalyticSpec):
             if config.output_name_pattern
             else f"Spread{v_type}TWA"
         )
-        return [_twa(raw, config.market_states).alias(alias)]
+        return [_twa(raw, config.market_states).alias(apply_metric_prefix(ctx, alias))]
 
 
 class L2TWImbalanceAnalytic(AnalyticSpec):
@@ -723,7 +725,7 @@ class L2TWImbalanceAnalytic(AnalyticSpec):
             if config.output_name_pattern
             else f"Imbalance{measure}{level}TWA"
         )
-        return [_twa(raw, config.market_states).alias(alias)]
+        return [_twa(raw, config.market_states).alias(apply_metric_prefix(ctx, alias))]
 
 
 class L2TWVolatilityAnalytic(AnalyticSpec):
@@ -784,7 +786,7 @@ class L2TWVolatilityAnalytic(AnalyticSpec):
                 if config.output_name_pattern
                 else f"L2Volatility{source}{agg}"
             )
-            expressions.append(expr.alias(alias))
+            expressions.append(expr.alias(apply_metric_prefix(ctx, alias)))
 
         return expressions
 
@@ -804,11 +806,15 @@ class L2AnalyticsLast(BaseAnalytics):
 
     def __init__(self, config: L2AnalyticsConfig):
         self.config = config
-        super().__init__("l2last", {})
+        super().__init__("l2last", {}, metric_prefix=config.metric_prefix)
 
     def compute(self) -> pl.LazyFrame:
         gcols = ["MIC", "ListingId", "Ticker", "TimeBucket", "CurrencyCode"]
-        ctx = AnalyticContext(base_df=self.l2, cache={}, context=self.context)
+        ctx = AnalyticContext(
+            base_df=self.l2,
+            cache={"metric_prefix": self.metric_prefix},
+            context=self.context,
+        )
 
         liquidity = L2LastLiquidityAnalytic()
         spread = L2LastSpreadAnalytic()
@@ -846,9 +852,21 @@ class L2AnalyticsLast(BaseAnalytics):
             N = self.config.levels
             for i in range(1, N + 1):
                 for side in ["Bid", "Ask"]:
-                    expressions.append(pl.col(f"{side}Price{i}").last())
-                    expressions.append(pl.col(f"{side}Quantity{i}").last())
-                    expressions.append(pl.col(f"{side}NumOrders{i}").last())
+                    expressions.append(
+                        pl.col(f"{side}Price{i}")
+                        .last()
+                        .alias(self.apply_prefix(f"{side}Price{i}"))
+                    )
+                    expressions.append(
+                        pl.col(f"{side}Quantity{i}")
+                        .last()
+                        .alias(self.apply_prefix(f"{side}Quantity{i}"))
+                    )
+                    expressions.append(
+                        pl.col(f"{side}NumOrders{i}")
+                        .last()
+                        .alias(self.apply_prefix(f"{side}NumOrders{i}"))
+                    )
                     expressions.append(
                         pl.sum_horizontal(
                             [f"{side}Quantity{j}" for j in range(1, i + 1)]
@@ -899,7 +917,9 @@ class L2AnalyticsLast(BaseAnalytics):
                 .alias("SpreadBps")
             )
 
-        expressions.append(pl.col("MarketState").last())
+        expressions.append(
+            pl.col("MarketState").last().alias(self.apply_prefix("MarketState"))
+        )
 
         l2_last = self.l2.group_by(gcols).agg(expressions)
 
@@ -940,62 +960,6 @@ class L2AnalyticsLast(BaseAnalytics):
 
         return ranges.join(df, on=group_cols + ["TimeBucket"], how="left")
 
-    def _apply_prev_close_ohlc(
-        self, df: pl.LazyFrame, gcols: list[str], names: dict[str, str]
-    ) -> pl.LazyFrame:
-        group_cols = [c for c in gcols if c != "TimeBucket"]
-        open_col = names["Open"]
-        high_col = names["High"]
-        low_col = names["Low"]
-        close_col = names["Close"]
-        temp_col = f"__{close_col}_filled"
-
-        no_event = (
-            pl.col(open_col).is_null()
-            & pl.col(high_col).is_null()
-            & pl.col(low_col).is_null()
-            & pl.col(close_col).is_null()
-        )
-
-        df = df.with_columns(
-            pl.when(no_event)
-            .then(pl.col(close_col).shift(1).over(group_cols))
-            .otherwise(pl.col(close_col))
-            .alias(temp_col)
-        ).with_columns(pl.col(temp_col).forward_fill().over(group_cols).alias(temp_col))
-
-        return df.with_columns(
-            [
-                pl.when(no_event)
-                .then(pl.col(temp_col))
-                .otherwise(pl.col(open_col))
-                .alias(open_col),
-                pl.when(no_event)
-                .then(pl.col(temp_col))
-                .otherwise(pl.col(high_col))
-                .alias(high_col),
-                pl.when(no_event)
-                .then(pl.col(temp_col))
-                .otherwise(pl.col(low_col))
-                .alias(low_col),
-                pl.col(temp_col).alias(close_col),
-            ]
-        ).drop(temp_col)
-
-    @staticmethod
-    def _ohlc_names(req: L2OHLCConfig, variant: dict) -> dict[str, str]:
-        source = variant["source"]
-        names = {}
-        for ohlc in ["Open", "High", "Low", "Close"]:
-            variant_with_ohlc = {**variant, "ohlc": ohlc}
-            default_name = f"{source}{ohlc}"
-            alias = (
-                req.output_name_pattern.format(**variant_with_ohlc)
-                if req.output_name_pattern
-                else default_name
-            )
-            names[ohlc] = alias
-        return names
 
 
 @register_analytics("l2tw", config_attr="l2_analytics")
@@ -1011,6 +975,7 @@ class L2AnalyticsTW(BaseTWAnalytics):
             "l2tw",
             {},
             nanoseconds=int(config.time_bucket_seconds * 1e9),
+            metric_prefix=config.metric_prefix,
         )
         self.config = config
 
@@ -1018,7 +983,10 @@ class L2AnalyticsTW(BaseTWAnalytics):
         l2 = l2.group_by(["ListingId", "TimeBucket"])
         ctx = AnalyticContext(
             base_df=l2,
-            cache={"time_bucket_seconds": self.config.time_bucket_seconds},
+            cache={
+                "time_bucket_seconds": self.config.time_bucket_seconds,
+                "metric_prefix": self.metric_prefix,
+            },
             context=self.context,
         )
 

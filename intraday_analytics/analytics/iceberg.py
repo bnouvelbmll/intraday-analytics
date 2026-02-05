@@ -1,10 +1,15 @@
 import polars as pl
 from pydantic import BaseModel, Field
-from typing import List, Union, Literal, Dict, Any
+from typing import List, Union, Literal, Dict, Any, Optional
 
 from intraday_analytics.analytics_base import BaseAnalytics
 from .common import CombinatorialMetricConfig
-from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc, analytic_expression
+from intraday_analytics.analytics_base import (
+    AnalyticSpec,
+    AnalyticContext,
+    AnalyticDoc,
+    analytic_expression,
+)
 from intraday_analytics.analytics_registry import register_analytics
 from .utils import apply_alias
 
@@ -37,6 +42,7 @@ class IcebergMetricConfig(CombinatorialMetricConfig):
 
 class IcebergAnalyticsConfig(BaseModel):
     ENABLED: bool = True
+    metric_prefix: Optional[str] = None
     metrics: List[IcebergMetricConfig] = Field(default_factory=list)
 
     tag_trades: bool = True
@@ -187,7 +193,15 @@ class IcebergExecutionAnalytic(AnalyticSpec):
         default_name = f"Iceberg{measure}"
         if measure != "OrderImbalance" and side != "Total":
             default_name = f"{default_name}{side}"
-        return [apply_alias(base_expr, config.output_name_pattern, variant, default_name)]
+        return [
+            apply_alias(
+                base_expr,
+                config.output_name_pattern,
+                variant,
+                default_name,
+                prefix=ctx.cache.get("metric_prefix"),
+            )
+        ]
 
 
 @register_analytics("iceberg", config_attr="iceberg_analytics")
@@ -200,7 +214,7 @@ class IcebergAnalytics(BaseAnalytics):
 
     def __init__(self, config: IcebergAnalyticsConfig):
         self.config = config
-        super().__init__("iceberg", {})
+        super().__init__("iceberg", {}, metric_prefix=config.metric_prefix)
 
     def _iceberg_execution_df(self) -> pl.LazyFrame:
         base = self._l3_execution_df()
@@ -468,6 +482,7 @@ class IcebergAnalytics(BaseAnalytics):
             cache={
                 "avg_size_col": self.config.avg_size_source,
                 "imbalance_col": self.config.imbalance_source,
+                "metric_prefix": self.metric_prefix,
             },
             context=self.context,
         )
@@ -509,11 +524,17 @@ class IcebergAnalytics(BaseAnalytics):
                 .group_by(["ListingId", "TimeBucket", "IcebergId"])
                 .agg(pl.col("IcebergEventCount").max().alias("_IcebergPeakMax"))
                 .group_by(["ListingId", "TimeBucket"])
-                .agg(pl.col("_IcebergPeakMax").mean().alias("IcebergAveragePeakCount"))
+                .agg(
+                    pl.col("_IcebergPeakMax")
+                    .mean()
+                    .alias(self.apply_prefix("IcebergAveragePeakCount"))
+                )
             )
             df = df.join(peak_avg, on=gcols, how="left")
         elif "AveragePeakCount" in requested_measures:
-            df = df.with_columns(pl.lit(None).alias("IcebergAveragePeakCount"))
+            df = df.with_columns(
+                pl.lit(None).alias(self.apply_prefix("IcebergAveragePeakCount"))
+            )
 
         self.df = df
         return df
