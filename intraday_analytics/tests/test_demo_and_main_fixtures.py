@@ -76,6 +76,19 @@ def _run_with_fixtures(config: AnalyticsConfig, get_pipeline=None):
             get_universe=fixture_universe,
             get_pipeline=get_pipeline,
         )
+    return [
+        os.path.join(config.TEMP_DIR, fname)
+        for fname in os.listdir(config.TEMP_DIR)
+        if fname.startswith("final_") and fname.endswith(".parquet")
+    ]
+
+
+def _assert_nonempty_outputs(paths):
+    assert paths, "No output parquet files were produced."
+    total_rows = 0
+    for path in paths:
+        total_rows += pl.read_parquet(path).height
+    assert total_rows > 0, "Output parquet files are empty."
 
 
 class TestDemoAndMainFixtures(unittest.TestCase):
@@ -85,7 +98,11 @@ class TestDemoAndMainFixtures(unittest.TestCase):
 
         sys.modules.setdefault("bmll2", MagicMock())
         sys.modules.setdefault("bmll", MagicMock())
-        sys.modules.setdefault("bmll.reference", MagicMock())
+        bmll_reference = MagicMock()
+        bmll_reference.query = MagicMock(
+            side_effect=lambda *args, **kwargs: fixture_universe("2025-01-02").to_pandas()
+        )
+        sys.modules.setdefault("bmll.reference", bmll_reference)
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -107,7 +124,8 @@ class TestDemoAndMainFixtures(unittest.TestCase):
                 "BATCH_FREQ": None,
             }
         )
-        _run_with_fixtures(cfg)
+        outputs = _run_with_fixtures(cfg)
+        _assert_nonempty_outputs(outputs)
 
     def test_demo_03_custom_metric(self):
         demo03 = importlib.import_module("demo.03_custom_metric")
@@ -123,7 +141,8 @@ class TestDemoAndMainFixtures(unittest.TestCase):
                 "BATCH_FREQ": None,
             }
         )
-        _run_with_fixtures(cfg, get_pipeline=demo03.get_pipeline)
+        outputs = _run_with_fixtures(cfg, get_pipeline=demo03.get_pipeline)
+        _assert_nonempty_outputs(outputs)
 
     def test_demo_04_market_impact(self):
         demo04 = importlib.import_module("demo.04_market_impact")
@@ -139,7 +158,8 @@ class TestDemoAndMainFixtures(unittest.TestCase):
                 "BATCH_FREQ": None,
             }
         )
-        _run_with_fixtures(cfg)
+        outputs = _run_with_fixtures(cfg)
+        _assert_nonempty_outputs(outputs)
 
     def test_main_config(self):
         import main as main_script
@@ -157,4 +177,5 @@ class TestDemoAndMainFixtures(unittest.TestCase):
                 "NUM_WORKERS": 1,
             }
         )
-        _run_with_fixtures(cfg)
+        outputs = _run_with_fixtures(cfg)
+        _assert_nonempty_outputs(outputs)
