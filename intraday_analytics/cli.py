@@ -1,11 +1,22 @@
 import importlib
 import logging
+from functools import partial
 from typing import Callable, Optional
 
 import fire
 
 from intraday_analytics.configuration import AnalyticsConfig
 from intraday_analytics.execution import run_multiday_pipeline
+
+
+def _get_universe_from_spec(date, spec: str):
+    module_name, value = (spec.split("=", 1) + [None])[:2] if "=" in spec else (spec, None)
+    module = importlib.import_module(f"intraday_analytics.universes.{module_name}")
+    if not hasattr(module, "get_universe"):
+        raise ValueError(
+            f"Universe module {module_name} must define get_universe(date, value)."
+        )
+    return module.get_universe(date, value)
 
 
 def _load_universe_override(spec: str) -> Callable:
@@ -15,19 +26,7 @@ def _load_universe_override(spec: str) -> Callable:
     Spec format: "<module>=<value>" or "<module>".
     Module must expose get_universe(date, value).
     """
-    if "=" in spec:
-        module_name, value = spec.split("=", 1)
-    else:
-        module_name, value = spec, None
-
-    module = importlib.import_module(f"intraday_analytics.universes.{module_name}")
-    if not hasattr(module, "get_universe"):
-        raise ValueError(f"Universe module {module_name} must define get_universe(date, value).")
-
-    def _wrapper(date):
-        return module.get_universe(date, value)
-
-    return _wrapper
+    return partial(_get_universe_from_spec, spec=spec)
 
 
 def run_cli(

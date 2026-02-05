@@ -11,11 +11,19 @@ python3 -m pip install dagster dagster-webserver
 dagster project scaffold --name "${PROJECT_NAME}"
 
 cat > "${DEFINITIONS_FILE}" <<'PY'
-from dagster import Definitions, asset
+from dagster import (
+    Definitions,
+    StaticPartitionsDefinition,
+    DailyPartitionsDefinition,
+    MultiPartitionsDefinition,
+    define_asset_job,
+    asset,
+)
 from intraday_analytics.dagster_compat import (
     UniversePartition,
     DatePartition,
     PartitionRun,
+    parse_universe_spec,
     run_partition,
 )
 
@@ -36,20 +44,34 @@ def default_get_universe(date):
     q = bmll.reference.query(Index="bezacp", object_type="Instrument", start_date=date).query("IsAlive")
     return pl.DataFrame(q)
 
-@asset
-def intraday_partition():
-    partition = PartitionRun(
-        universe=UniversePartition(name="mic", value="XLON"),
-        dates=DatePartition(start_date="2025-01-02", end_date="2025-01-02"),
-    )
+universe_partitions = StaticPartitionsDefinition(["mic=XLON", "mic=XPAR"])
+date_partitions = DailyPartitionsDefinition(start_date="2025-01-02", end_date="2025-01-03")
+partitions_def = MultiPartitionsDefinition(
+    {"universe": universe_partitions, "date": date_partitions}
+)
 
+@asset(name="demo06_characteristics", partitions_def=partitions_def)
+def demo06_characteristics(context):
+    keys = context.partition_key.keys_by_dimension
+    universe_spec = keys["universe"]
+    date_key = keys["date"]
+    partition = PartitionRun(
+        universe=parse_universe_spec(universe_spec),
+        dates=DatePartition(start_date=date_key, end_date=date_key),
+    )
     run_partition(
         base_config=BASE_CONFIG,
         default_get_universe=default_get_universe,
         partition=partition,
     )
 
-defs = Definitions(assets=[intraday_partition])
+demo_job = define_asset_job(
+    name="demo06_characteristics",
+    selection=["demo06_characteristics"],
+    partitions_def=partitions_def,
+)
+
+defs = Definitions(assets=[demo06_characteristics], jobs=[demo_job])
 PY
 
 echo "Starting Dagster UI..."

@@ -112,3 +112,55 @@ Use the `on_result` callback in `run_partition` to integrate with Dagster's
 asset store or metadata. The callback receives the partition and the resolved
 `AnalyticsConfig`, so it can compute output paths and register artifacts
 per partition.
+
+## Demo Discovery
+
+If you want to expose all demo scripts as Dagster assets, use
+`build_demo_assets`:
+
+```python
+from dagster import Definitions
+from intraday_analytics.dagster_compat import build_demo_assets
+
+defs = Definitions(assets=build_demo_assets())
+```
+
+## Dagster UI Partitions
+
+To see partitions in the UI, define a Dagster partitions definition and attach
+it to your asset/job. For example:
+
+```python
+from dagster import (
+    StaticPartitionsDefinition,
+    DailyPartitionsDefinition,
+    MultiPartitionsDefinition,
+    define_asset_job,
+    asset,
+)
+from intraday_analytics.dagster_compat import (
+    DatePartition,
+    PartitionRun,
+    parse_universe_spec,
+    run_partition,
+)
+
+universe_partitions = StaticPartitionsDefinition(["mic=XLON", "mic=XPAR"])
+date_partitions = DailyPartitionsDefinition(start_date="2025-01-02", end_date="2025-01-03")
+partitions_def = MultiPartitionsDefinition({"universe": universe_partitions, "date": date_partitions})
+
+@asset(name="demo06_characteristics", partitions_def=partitions_def)
+def demo06_characteristics(context):
+    keys = context.partition_key.keys_by_dimension
+    partition = PartitionRun(
+        universe=parse_universe_spec(keys["universe"]),
+        dates=DatePartition(start_date=keys["date"], end_date=keys["date"]),
+    )
+    run_partition(base_config=BASE_CONFIG, default_get_universe=default_get_universe, partition=partition)
+
+demo_job = define_asset_job(
+    name="demo06_characteristics",
+    selection=["demo06_characteristics"],
+    partitions_def=partitions_def,
+)
+```

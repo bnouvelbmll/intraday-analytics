@@ -179,7 +179,7 @@ class TestDemoAndMainFixtures(unittest.TestCase):
         _assert_nonempty_outputs(outputs)
 
     def test_demo_06_characteristics(self):
-        demo06 = importlib.import_module("demo.06_notebook")
+        demo06 = importlib.import_module("demo.06_characteristics")
 
         cfg = AnalyticsConfig(
             **{
