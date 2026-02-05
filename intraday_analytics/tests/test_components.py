@@ -92,6 +92,53 @@ class TestBatching(unittest.TestCase):
         self.assertEqual(batches[0], ["SymA", "SymB"])
         self.assertEqual(batches[1], ["SymC"])
 
+    def test_heuristic_batching_multiple_tables(self):
+        estimator = MagicMock()
+        estimator.get_estimates_for_symbols.return_value = {
+            "trades": {"A": 300, "B": 500, "C": 200},
+            "l2": {"A": 500, "B": 300, "C": 600},
+        }
+
+        strategy = HeuristicBatchingStrategy(
+            estimator,
+            {"trades": 700, "l2": 700},
+        )
+        batches = strategy.create_batches(["A", "B", "C"])
+
+        self.assertEqual(batches[0], ["A"])
+        self.assertEqual(batches[1], ["B"])
+        self.assertEqual(batches[2], ["C"])
+
+    def test_symbol_size_estimator_estimates(self):
+        def mock_get_universe(_date):
+            return pl.DataFrame({"ListingId": [1, 2], "MIC": ["X", "X"]})
+
+        def mock_query(object_ids, metric, start_date, end_date):
+            return pd.DataFrame(
+                {
+                    "ObjectId": [1, 2],
+                    "TradeCount|Lit": [10, 20],
+                }
+            )
+
+        mock_bmll = MagicMock()
+        mock_bmll.time_series.query = mock_query
+
+        with patch.dict("sys.modules", {"bmll": mock_bmll}), patch(
+            "intraday_analytics.api_stats.api_call"
+        ) as mock_api_call:
+            mock_api_call.side_effect = lambda _name, fn, extra=None: fn()
+
+            estimator = SymbolSizeEstimator("2025-01-01", mock_get_universe)
+            estimates = estimator.get_estimates_for_symbols([1, 2])
+
+        self.assertEqual(estimates["trades"][1], 10)
+        self.assertEqual(estimates["trades"][2], 20)
+        self.assertEqual(estimates["l2"][1], 200)
+        self.assertEqual(estimates["l2"][2], 400)
+        self.assertEqual(estimates["l3"][1], 500)
+        self.assertEqual(estimates["l3"][2], 1000)
+
 
 class TestL2Metrics(unittest.TestCase):
     def test_l2_last_calculation(self):
@@ -178,6 +225,8 @@ class TestS3SymbolBatcherIntegration(unittest.TestCase):
         # Run process
         batcher.process(num_workers=1)
 
+        self.assertEqual(batcher.batches, [["A"], ["B"]])
+
         # Check if output files exist
         # We expect batch-trades-0.parquet and batch-trades-1.parquet
         out_0 = os.path.join(self.temp_dir, "batch-trades-0.parquet")
@@ -197,6 +246,47 @@ class TestS3SymbolBatcherIntegration(unittest.TestCase):
 
         df1 = pl.read_parquet(out_1)
         self.assertEqual(df1["ListingId"][0], "B")
+
+    def test_process_creates_many_batches(self):
+        symbols = [f"S{i:03d}" for i in range(100)]
+        df = pl.DataFrame(
+            {
+                "ListingId": symbols,
+                "TradeTimestamp": list(range(100)),
+                "Price": [10.0] * 100,
+            }
+        )
+        source_file = os.path.join(self.source_dir, "trades-many.parquet")
+        df.write_parquet(source_file)
+
+        mock_estimator = MagicMock()
+        mock_estimator.get_estimates_for_symbols.return_value = {
+            "trades": {sym: 1 for sym in symbols}
+        }
+
+        strategy = HeuristicBatchingStrategy(mock_estimator, {"trades": 1})
+
+        def mock_get_universe(_date):
+            return pl.DataFrame({"ListingId": symbols, "mic": ["X"] * len(symbols)})
+
+        batcher = S3SymbolBatcher(
+            s3_file_lists={"trades": [source_file]},
+            transform_fns={"trades": lambda x: x},
+            batching_strategy=strategy,
+            temp_dir=self.temp_dir,
+            storage_options={},
+            date="2025-01-01",
+            get_universe=mock_get_universe,
+        )
+
+        batcher.process(num_workers=1)
+
+        outputs = [
+            fname
+            for fname in os.listdir(self.temp_dir)
+            if fname.startswith("batch-trades-") and fname.endswith(".parquet")
+        ]
+        self.assertEqual(len(outputs), 100)
 
 
 class TestAnalyticsModuleOutputs(unittest.TestCase):
