@@ -47,7 +47,6 @@ USER_CONFIG = {
     # --- Date & Scope ---
     "START_DATE": "2025-11-01",
     "END_DATE": "2025-12-31",
-    "UNIVERSE": {"Index": "bepacp"},
     "DATASETNAME": "sample2d",
     # --- Analytics Passes ---
     "PASSES": [

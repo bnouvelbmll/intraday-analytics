@@ -37,7 +37,6 @@ The pipeline's behavior is controlled by the `AnalyticsConfig` dataclass, which 
 This dictionary allows you to override default settings for a specific run. Key options include:
 
 -   `START_DATE`, `END_DATE`: The date range for data processing.
--   `UNIVERSE`: Defines the set of symbols to analyze (e.g., `{"Index": "bepacp"}`).
 -   `TIME_BUCKET_SECONDS`: Granularity for time-series aggregations.
 -   `BATCH_FREQ`: The frequency for creating date batches (e.g., "W" for weekly, "M" for monthly). If `None`, it's auto-detected.
 -   `TABLES_TO_LOAD`: List of table names to load (e.g., `["trades", "l2", "l3"]`).
@@ -48,7 +47,6 @@ Example `USER_CONFIG`:
 USER_CONFIG = {
     "START_DATE": "2025-11-01",
     "END_DATE": "2025-12-31",
-    "UNIVERSE": {"Index": "bepacp"},
     "TIME_BUCKET_SECONDS": 60,
     "BATCH_FREQ": "W", # Force weekly batches
     "TABLES_TO_LOAD": ["trades", "l2"], # Only load trades and L2 data

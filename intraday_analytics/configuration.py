@@ -77,7 +77,6 @@ class AnalyticsConfig(BaseModel):
     END_DATE: Optional[str] = None
     EXCLUDE_WEEKENDS: bool = True
     DATASETNAME: str = "sample2d"
-    UNIVERSE: Optional[Dict[str, str]] = None
 
     # --- Analytics Passes ---
     PASSES: List[PassConfig] = Field(default_factory=list)

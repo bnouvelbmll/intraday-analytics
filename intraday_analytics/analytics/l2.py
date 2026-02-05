@@ -357,7 +357,7 @@ class L2LastSpreadAnalytic(AnalyticSpec):
 
     @analytic_expression(
         "BPS",
-        pattern=r"^SpreadBPS$",
+        pattern=r"^SpreadBps$",
         unit="BPS",
     )
     def _expression_bps(self):
@@ -381,11 +381,12 @@ class L2LastSpreadAnalytic(AnalyticSpec):
             base_expr = base_expr.filter(pl.col("MarketState").is_in(config.market_states))
 
         expr = base_expr.last()
-        alias = (
-            config.output_name_pattern.format(**variant)
-            if config.output_name_pattern
-            else f"Spread{v_type}"
-        )
+        if config.output_name_pattern:
+            alias = config.output_name_pattern.format(**variant)
+        elif v_type == "BPS":
+            alias = "SpreadBps"
+        else:
+            alias = f"Spread{v_type}"
         return [expr.alias(apply_metric_prefix(ctx, alias))]
 
 
@@ -648,7 +649,7 @@ class L2TWSpreadAnalytic(AnalyticSpec):
 
     @analytic_expression(
         "BPS",
-        pattern=r"^SpreadBPSTWA$",
+        pattern=r"^SpreadBpsTWA$",
         unit="BPS",
     )
     def _expression_bps(self):
@@ -669,11 +670,12 @@ class L2TWSpreadAnalytic(AnalyticSpec):
         if expression_fn is None:
             return []
         raw = expression_fn(self)
-        alias = (
-            config.output_name_pattern.format(**variant)
-            if config.output_name_pattern
-            else f"Spread{v_type}TWA"
-        )
+        if config.output_name_pattern:
+            alias = config.output_name_pattern.format(**variant)
+        elif v_type == "BPS":
+            alias = "SpreadBpsTWA"
+        else:
+            alias = f"Spread{v_type}TWA"
         return [_twa(raw, config.market_states).alias(apply_metric_prefix(ctx, alias))]
 
 
@@ -848,7 +850,7 @@ class L2AnalyticsLast(BaseAnalytics):
                     }
                 )
 
-        if not expressions:
+        if not (self.config.liquidity or self.config.spreads or self.config.imbalances or self.config.ohlc):
             levels = list(range(1, self.config.levels + 1))
             default_configs = [
                 (
@@ -870,7 +872,7 @@ class L2AnalyticsLast(BaseAnalytics):
                 (imbalance, [L2ImbalanceConfig(levels=levels, measure=["CumQuantity", "Orders"])]),
                 (spread, [L2SpreadConfig(variant=["BPS"])]),
             ]
-            expressions = build_expressions(ctx, default_configs)
+            expressions.extend(build_expressions(ctx, default_configs))
 
         expressions.append(
             pl.col("MarketState").last().alias(self.apply_prefix("MarketState"))

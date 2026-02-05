@@ -578,3 +578,10 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
             os.remove(context_path)
 
     logging.info("✅ All analytics passes completed.")
+
+
+def run_multiday_pipeline(config, get_universe, get_pipeline=None):
+    """
+    Compatibility wrapper for running multi-day pipelines.
+    """
+    return run_metrics_pipeline(config, get_universe, get_pipeline=get_pipeline)

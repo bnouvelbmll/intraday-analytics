@@ -198,7 +198,7 @@ class TradeGenericAnalytic(AnalyticSpec):
     ConfigModel = TradeGenericConfig
 
     def _build_filters(self, config: TradeGenericConfig, side: str):
-        cond = pl.lit(True)
+        cond = pl.col("Size").is_not_null()
         if side == "Bid":
             cond = pl.col("AggressorSide") == 2
         elif side == "Ask":
