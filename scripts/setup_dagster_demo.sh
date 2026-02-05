@@ -16,7 +16,6 @@ from dagster import (
     StaticPartitionsDefinition,
     DailyPartitionsDefinition,
     MultiPartitionsDefinition,
-    define_asset_job,
     asset,
 )
 from intraday_analytics.dagster_compat import (
@@ -65,13 +64,7 @@ def demo06_characteristics(context):
         partition=partition,
     )
 
-demo_job = define_asset_job(
-    name="demo06_characteristics",
-    selection=["demo06_characteristics"],
-    partitions_def=partitions_def,
-)
-
-defs = Definitions(assets=[demo06_characteristics], jobs=[demo_job])
+defs = Definitions(assets=[demo06_characteristics])
 PY
 
 echo "Starting Dagster UI..."

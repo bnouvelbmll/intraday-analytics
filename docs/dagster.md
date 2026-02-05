@@ -135,7 +135,6 @@ from dagster import (
     StaticPartitionsDefinition,
     DailyPartitionsDefinition,
     MultiPartitionsDefinition,
-    define_asset_job,
     asset,
 )
 from intraday_analytics.dagster_compat import (
@@ -158,9 +157,5 @@ def demo06_characteristics(context):
     )
     run_partition(base_config=BASE_CONFIG, default_get_universe=default_get_universe, partition=partition)
 
-demo_job = define_asset_job(
-    name="demo06_characteristics",
-    selection=["demo06_characteristics"],
-    partitions_def=partitions_def,
-)
+defs = Definitions(assets=[demo06_characteristics])
 ```
