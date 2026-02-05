@@ -1,8 +1,14 @@
 import polars as pl
 from pydantic import BaseModel, Field
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Dict, Any
 
-from intraday_analytics.analytics_base import BaseAnalytics
+from intraday_analytics.analytics_base import (
+    BaseAnalytics,
+    AnalyticSpec,
+    AnalyticContext,
+    analytic_expression,
+    apply_metric_prefix,
+)
 from intraday_analytics.analytics_registry import register_analytics
 
 
@@ -24,6 +30,104 @@ class CBBOAnalyticsConfig(BaseModel):
     quantity_aggregations: List[CBBOQuantityAgg] = Field(
         default_factory=lambda: ["TWMean", "Min", "Max", "Median"]
     )
+
+
+class CBBOAnalytic(AnalyticSpec):
+    MODULE = "cbbo"
+    ConfigModel = CBBOAnalyticsConfig
+
+    @analytic_expression(
+        "TimeAtCBB",
+        pattern=r"^TimeAtCBB$",
+        unit="Ratio",
+    )
+    def _expression_time_at_cbb(self, ctx: AnalyticContext) -> pl.Expr:
+        """Share of time spent at CBB (best bid matches CBBO bid) within the TimeBucket."""
+        dt = ctx.cache["dt"]
+        dt_match = ctx.cache["dt_match_bid"]
+        denom = dt.sum()
+        numer = dt_match.sum()
+        return pl.when(denom > 0).then(numer / denom).otherwise(None)
+
+    @analytic_expression(
+        "TimeAtCBO",
+        pattern=r"^TimeAtCBO$",
+        unit="Ratio",
+    )
+    def _expression_time_at_cbo(self, ctx: AnalyticContext) -> pl.Expr:
+        """Share of time spent at CBO (best ask matches CBBO ask) within the TimeBucket."""
+        dt = ctx.cache["dt"]
+        dt_match = ctx.cache["dt_match_ask"]
+        denom = dt.sum()
+        numer = dt_match.sum()
+        return pl.when(denom > 0).then(numer / denom).otherwise(None)
+
+    @analytic_expression(
+        "QuantityAtCBB",
+        pattern=r"^QuantityAtCBB(?:Min|Max|Median)?$",
+        unit="Shares",
+    )
+    def _expression_quantity_at_cbb(
+        self, ctx: AnalyticContext, agg: CBBOQuantityAgg
+    ) -> tuple[pl.Expr, str] | None:
+        """Quantity available at CBB within the TimeBucket (aggregation varies by suffix)."""
+        qty = ctx.cache["qty_match_bid"]
+        dt = ctx.cache["dt"]
+        if agg == "TWMean":
+            denom = dt.sum()
+            numer = (dt * qty).sum()
+            return pl.when(denom > 0).then(numer / denom).otherwise(None), "QuantityAtCBB"
+        if agg == "Min":
+            return qty.min(), "QuantityAtCBBMin"
+        if agg == "Max":
+            return qty.max(), "QuantityAtCBBMax"
+        if agg == "Median":
+            return qty.median(), "QuantityAtCBBMedian"
+        return None
+
+    @analytic_expression(
+        "QuantityAtCBO",
+        pattern=r"^QuantityAtCBO(?:Min|Max|Median)?$",
+        unit="Shares",
+    )
+    def _expression_quantity_at_cbo(
+        self, ctx: AnalyticContext, agg: CBBOQuantityAgg
+    ) -> tuple[pl.Expr, str] | None:
+        """Quantity available at CBO within the TimeBucket (aggregation varies by suffix)."""
+        qty = ctx.cache["qty_match_ask"]
+        dt = ctx.cache["dt"]
+        if agg == "TWMean":
+            denom = dt.sum()
+            numer = (dt * qty).sum()
+            return pl.when(denom > 0).then(numer / denom).otherwise(None), "QuantityAtCBO"
+        if agg == "Min":
+            return qty.min(), "QuantityAtCBOMin"
+        if agg == "Max":
+            return qty.max(), "QuantityAtCBOMax"
+        if agg == "Median":
+            return qty.median(), "QuantityAtCBOMedian"
+        return None
+
+    def expressions(
+        self, ctx: AnalyticContext, config: CBBOAnalyticsConfig, variant: Dict[str, Any]
+    ) -> List[pl.Expr]:
+        measure = variant["measures"]
+        expression_fn = self.EXPRESSIONS.get(measure)
+        if expression_fn is None:
+            return []
+
+        if measure in ("QuantityAtCBB", "QuantityAtCBO"):
+            outputs: List[pl.Expr] = []
+            for agg in config.quantity_aggregations:
+                result = expression_fn(self, ctx, agg)
+                if result is None:
+                    continue
+                expr, name = result
+                outputs.append(expr.alias(apply_metric_prefix(ctx, name)))
+            return outputs
+
+        expr = expression_fn(self, ctx)
+        return [expr.alias(apply_metric_prefix(ctx, measure))]
 
 
 @register_analytics("cbbo", config_attr="cbbo_analytics", needs_ref=True)
@@ -88,73 +192,24 @@ class CBBOAnalytics(BaseAnalytics):
         match_bid = (pl.col("BidPrice1") == pl.col("CBBOBidPrice1")).fill_null(False)
         match_ask = (pl.col("AskPrice1") == pl.col("CBBOAskPrice1")).fill_null(False)
 
-        dt = pl.col("DT")
-        dt_match_bid = dt * match_bid.cast(pl.Int64)
-        dt_match_ask = dt * match_ask.cast(pl.Int64)
-        qty_match_bid = (pl.col("BidQuantity1") * match_bid.cast(pl.Int64))
-        qty_match_ask = (pl.col("AskQuantity1") * match_ask.cast(pl.Int64))
+        ctx = AnalyticContext(
+            base_df=joined,
+            cache={
+                "dt": pl.col("DT"),
+                "dt_match_bid": pl.col("DT") * match_bid.cast(pl.Int64),
+                "dt_match_ask": pl.col("DT") * match_ask.cast(pl.Int64),
+                "qty_match_bid": pl.col("BidQuantity1") * match_bid.cast(pl.Int64),
+                "qty_match_ask": pl.col("AskQuantity1") * match_ask.cast(pl.Int64),
+                "metric_prefix": self.metric_prefix,
+            },
+            context=self.context,
+        )
 
+        analytic = CBBOAnalytic()
         expressions: list[pl.Expr] = []
-
-        if "TimeAtCBB" in self.config.measures:
-            denom = dt.sum()
-            numer = dt_match_bid.sum()
-            expressions.append(
-                pl.when(denom > 0)
-                .then(numer / denom)
-                .otherwise(None)
-                .alias(self.apply_prefix("TimeAtCBB"))
-            )
-
-        if "TimeAtCBO" in self.config.measures:
-            denom = dt.sum()
-            numer = dt_match_ask.sum()
-            expressions.append(
-                pl.when(denom > 0)
-                .then(numer / denom)
-                .otherwise(None)
-                .alias(self.apply_prefix("TimeAtCBO"))
-            )
-
-        if "QuantityAtCBB" in self.config.measures:
-            for agg in self.config.quantity_aggregations:
-                if agg == "TWMean":
-                    denom = dt.sum()
-                    numer = (dt * qty_match_bid).sum()
-                    expr = pl.when(denom > 0).then(numer / denom).otherwise(None)
-                    name = "QuantityAtCBB"
-                elif agg == "Min":
-                    expr = qty_match_bid.min()
-                    name = "QuantityAtCBBMin"
-                elif agg == "Max":
-                    expr = qty_match_bid.max()
-                    name = "QuantityAtCBBMax"
-                elif agg == "Median":
-                    expr = qty_match_bid.median()
-                    name = "QuantityAtCBBMedian"
-                else:
-                    continue
-                expressions.append(expr.alias(self.apply_prefix(name)))
-
-        if "QuantityAtCBO" in self.config.measures:
-            for agg in self.config.quantity_aggregations:
-                if agg == "TWMean":
-                    denom = dt.sum()
-                    numer = (dt * qty_match_ask).sum()
-                    expr = pl.when(denom > 0).then(numer / denom).otherwise(None)
-                    name = "QuantityAtCBO"
-                elif agg == "Min":
-                    expr = qty_match_ask.min()
-                    name = "QuantityAtCBOMin"
-                elif agg == "Max":
-                    expr = qty_match_ask.max()
-                    name = "QuantityAtCBOMax"
-                elif agg == "Median":
-                    expr = qty_match_ask.median()
-                    name = "QuantityAtCBOMedian"
-                else:
-                    continue
-                expressions.append(expr.alias(self.apply_prefix(name)))
+        for measure in self.config.measures:
+            variant = {"measures": measure}
+            expressions.extend(analytic.expressions(ctx, self.config, variant))
 
         gcols = ["ListingId", "TimeBucket"]
         df = joined.group_by(gcols).agg(expressions)

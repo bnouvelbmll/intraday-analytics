@@ -7,7 +7,6 @@ from .common import CombinatorialMetricConfig, Side
 from intraday_analytics.analytics_base import (
     AnalyticSpec,
     AnalyticContext,
-    AnalyticDoc,
     analytic_expression,
     apply_metric_prefix,
 )
@@ -210,14 +209,27 @@ class TradeBreakdownAnalytic(AnalyticSpec):
 
 class ExecutionDerivedAnalytic(AnalyticSpec):
     MODULE = "execution"
-    DOCS = [
-        AnalyticDoc(
-            pattern=r"^TradeImbalance$",
-            template="Normalized trade volume imbalance between buy and sell aggressor sides per TimeBucket.",
-            unit="Imbalance",
-        )
-    ]
     ConfigModel = ExecutionDerivedConfig
+
+    @analytic_expression(
+        "TradeImbalance",
+        pattern=r"^TradeImbalance$",
+        unit="Imbalance",
+    )
+    def _expression_trade_imbalance(self, df: pl.LazyFrame, prefix: str) -> pl.LazyFrame:
+        """Normalized trade volume imbalance between buy and sell aggressor sides per TimeBucket."""
+        cols = df.collect_schema().names()
+        ask_col = f"{prefix}ExecutedVolumeAsk" if prefix else "ExecutedVolumeAsk"
+        bid_col = f"{prefix}ExecutedVolumeBid" if prefix else "ExecutedVolumeBid"
+        out_col = f"{prefix}TradeImbalance" if prefix else "TradeImbalance"
+        if ask_col in cols and bid_col in cols:
+            return df.with_columns(
+                (
+                    (pl.col(ask_col) - pl.col(bid_col))
+                    / (pl.col(ask_col) + pl.col(bid_col))
+                ).alias(out_col)
+            )
+        return df
 
     def expressions(
         self, ctx: AnalyticContext, config: ExecutionDerivedConfig, variant: Dict[str, Any]
@@ -232,20 +244,10 @@ class ExecutionDerivedAnalytic(AnalyticSpec):
         prefix: str,
     ) -> pl.LazyFrame:
         v_name = variant["variant"]
-        if v_name != "TradeImbalance":
+        expression_fn = self.EXPRESSIONS.get(v_name)
+        if expression_fn is None:
             return df
-        cols = df.collect_schema().names()
-        ask_col = f"{prefix}ExecutedVolumeAsk" if prefix else "ExecutedVolumeAsk"
-        bid_col = f"{prefix}ExecutedVolumeBid" if prefix else "ExecutedVolumeBid"
-        out_col = f"{prefix}TradeImbalance" if prefix else "TradeImbalance"
-        if ask_col in cols and bid_col in cols:
-            return df.with_columns(
-                (
-                    (pl.col(ask_col) - pl.col(bid_col))
-                    / (pl.col(ask_col) + pl.col(bid_col))
-                ).alias(out_col)
-            )
-        return df
+        return expression_fn(self, df, prefix)
 
 
 # =============================

@@ -5,7 +5,12 @@ from typing import List, Union, Literal, Optional, Set, Dict, Any
 
 from .common import CombinatorialMetricConfig, Side, AggregationMethod, apply_aggregation
 from .utils import apply_alias
-from intraday_analytics.analytics_base import AnalyticSpec, AnalyticContext, AnalyticDoc
+from intraday_analytics.analytics_base import (
+    AnalyticSpec,
+    AnalyticContext,
+    AnalyticDoc,
+    analytic_expression,
+)
 from intraday_analytics.analytics_registry import register_analytics
 
 
@@ -89,36 +94,6 @@ class L3GenericAnalytic(AnalyticSpec):
             unit="Shares",
         ),
         AnalyticDoc(
-            pattern=r"^ArrivalFlowImbalance$",
-            template="Normalized difference between bid-side and ask-side insert volume per TimeBucket.",
-            unit="Imbalance",
-        ),
-        AnalyticDoc(
-            pattern=r"^CancelToTradeRatio$",
-            template="Ratio of cancellations to executions per TimeBucket.",
-            unit="Percentage",
-        ),
-        AnalyticDoc(
-            pattern=r"^AvgQueuePosition$",
-            template="Mean SizeAhead for executions within the TimeBucket.",
-            unit="Shares",
-        ),
-        AnalyticDoc(
-            pattern=r"^AvgRestingTime$",
-            template="Mean lifetime (ns) of orders from insert to end within the TimeBucket.",
-            unit="Nanoseconds",
-        ),
-        AnalyticDoc(
-            pattern=r"^FleetingLiquidityRatio$",
-            template="Share of inserted volume that is cancelled within the fleeting threshold in the TimeBucket.",
-            unit="Percentage",
-        ),
-        AnalyticDoc(
-            pattern=r"^AvgReplacementLatency$",
-            template="Mean latency (ns) between an execution and the next insert on the same side within the TimeBucket.",
-            unit="Nanoseconds",
-        ),
-        AnalyticDoc(
             pattern=r"^_count$",
             template="Count of L3 events in the TimeBucket.",
             unit="Orders",
@@ -190,6 +165,142 @@ class L3AdvancedAnalytic(AnalyticSpec):
     MODULE = "l3"
     ConfigModel = L3AdvancedConfig
 
+    @analytic_expression(
+        "ArrivalFlowImbalance",
+        pattern=r"^ArrivalFlowImbalance$",
+        unit="Imbalance",
+    )
+    def _expression_arrival_flow_imbalance(
+        self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
+    ) -> pl.LazyFrame:
+        """Normalized difference between bid-side and ask-side insert volume per TimeBucket."""
+        col_name = self._output_name(adv, "ArrivalFlowImbalance", prefix)
+        bid_col = f"{prefix}InsertVolumeBid" if prefix else "InsertVolumeBid"
+        ask_col = f"{prefix}InsertVolumeAsk" if prefix else "InsertVolumeAsk"
+        return base_df.with_columns(
+            (
+                (pl.col(bid_col) - pl.col(ask_col))
+                / (pl.col(bid_col) + pl.col(ask_col) + 1e-9)
+            ).alias(col_name)
+        )
+
+    @analytic_expression(
+        "CancelToTradeRatio",
+        pattern=r"^CancelToTradeRatio$",
+        unit="Percentage",
+    )
+    def _expression_cancel_to_trade_ratio(
+        self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
+    ) -> pl.LazyFrame:
+        """Ratio of cancellations to executions per TimeBucket."""
+        gcols = ["ListingId", "TimeBucket"]
+        exec_counts = (
+            l3.filter(pl.col("ExecutionSize") > 0)
+            .group_by(gcols)
+            .agg(pl.len().alias("ExecCount"))
+        )
+        base_df = base_df.join(exec_counts, on=gcols, how="left").with_columns(
+            pl.col("ExecCount").fill_null(0)
+        )
+        col_name = self._output_name(adv, "CancelToTradeRatio", prefix)
+        bid_col = f"{prefix}RemoveCountBid" if prefix else "RemoveCountBid"
+        ask_col = f"{prefix}RemoveCountAsk" if prefix else "RemoveCountAsk"
+        return base_df.with_columns(
+            (
+                (pl.col(bid_col) + pl.col(ask_col))
+                / (pl.col("ExecCount") + 1e-9)
+            ).alias(col_name)
+        ).drop("ExecCount")
+
+    @analytic_expression(
+        "AvgQueuePosition",
+        pattern=r"^AvgQueuePosition$",
+        unit="Shares",
+    )
+    def _expression_avg_queue_position(
+        self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
+    ) -> pl.LazyFrame:
+        """Mean SizeAhead for executions within the TimeBucket."""
+        gcols = ["ListingId", "TimeBucket"]
+        queue_pos = (
+            l3.filter(pl.col("ExecutionSize") > 0)
+            .group_by(gcols)
+            .agg(pl.col("SizeAhead").mean().alias("AvgQueuePosition"))
+        )
+        col_name = self._output_name(adv, "AvgQueuePosition", prefix)
+        if col_name != "AvgQueuePosition":
+            queue_pos = queue_pos.rename({"AvgQueuePosition": col_name})
+        return base_df.join(queue_pos, on=gcols, how="left")
+
+    @analytic_expression(
+        "AvgRestingTime",
+        pattern=r"^AvgRestingTime$",
+        unit="Nanoseconds",
+    )
+    def _expression_avg_resting_time(
+        self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
+    ) -> pl.LazyFrame:
+        """Mean lifetime (ns) of orders from insert to end within the TimeBucket."""
+        gcols = ["ListingId", "TimeBucket"]
+        resting_metrics = (
+            self._compute_lifetimes(l3, adv, adv.get("market_states"))
+            .group_by(gcols)
+            .agg(pl.col("DurationNs").mean().alias("AvgRestingTime"))
+        )
+        col_name = self._output_name(adv, "AvgRestingTime", prefix)
+        if col_name != "AvgRestingTime":
+            resting_metrics = resting_metrics.rename({"AvgRestingTime": col_name})
+        return base_df.join(resting_metrics, on=gcols, how="left")
+
+    @analytic_expression(
+        "FleetingLiquidityRatio",
+        pattern=r"^FleetingLiquidityRatio$",
+        unit="Percentage",
+    )
+    def _expression_fleeting_liquidity_ratio(
+        self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
+    ) -> pl.LazyFrame:
+        """Share of inserted volume that is cancelled within the fleeting threshold in the TimeBucket."""
+        gcols = ["ListingId", "TimeBucket"]
+        threshold_ms = adv.get("fleeting_threshold_ms", 100)
+        threshold_ns = threshold_ms * 1_000_000
+        lifetimes = self._compute_lifetimes(l3, adv, adv.get("market_states"))
+        fleeting_metrics = lifetimes.group_by(gcols).agg(
+            (
+                pl.when(pl.col("DurationNs") < threshold_ns)
+                .then(pl.col("InsertSize"))
+                .otherwise(pl.lit(0))
+            )
+            .sum()
+            .alias("FleetingVolume")
+        )
+        base_df = base_df.join(fleeting_metrics, on=gcols, how="left")
+        col_name = self._output_name(adv, "FleetingLiquidityRatio", prefix)
+        bid_col = f"{prefix}InsertVolumeBid" if prefix else "InsertVolumeBid"
+        ask_col = f"{prefix}InsertVolumeAsk" if prefix else "InsertVolumeAsk"
+        return base_df.with_columns(
+            (
+                pl.col("FleetingVolume")
+                / (pl.col(bid_col) + pl.col(ask_col) + 1e-9)
+            ).alias(col_name)
+        ).drop("FleetingVolume")
+
+    @analytic_expression(
+        "AvgReplacementLatency",
+        pattern=r"^AvgReplacementLatency$",
+        unit="Nanoseconds",
+    )
+    def _expression_avg_replacement_latency(
+        self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
+    ) -> pl.LazyFrame:
+        """Mean latency (ns) between an execution and the next insert on the same side within the TimeBucket."""
+        gcols = ["ListingId", "TimeBucket"]
+        latency = self._compute_replacement_latency(l3, adv.get("market_states"))
+        col_name = self._output_name(adv, "AvgReplacementLatency", prefix)
+        if col_name != "AvgReplacementLatency":
+            latency = latency.rename({"AvgReplacementLatency": col_name})
+        return base_df.join(latency, on=gcols, how="left")
+
     def expressions(
         self, ctx: AnalyticContext, config: L3AdvancedConfig, variant: Dict[str, Any]
     ) -> List[pl.Expr]:
@@ -202,119 +313,22 @@ class L3AdvancedAnalytic(AnalyticSpec):
         advanced_variants: List[Dict[str, Any]],
         prefix: str,
     ) -> pl.LazyFrame:
-        gcols = ["ListingId", "TimeBucket"]
-
         for adv in advanced_variants:
             v = adv["variant"]
-            output_name_pattern = adv.get("_output_name_pattern")
-
-            if v == "ArrivalFlowImbalance":
-                pattern = adv.get("_output_name_pattern")
-                col_name = pattern.format(**adv) if pattern else "ArrivalFlowImbalance"
-                if prefix:
-                    col_name = f"{prefix}{col_name}"
-                bid_col = f"{prefix}InsertVolumeBid" if prefix else "InsertVolumeBid"
-                ask_col = f"{prefix}InsertVolumeAsk" if prefix else "InsertVolumeAsk"
-                base_df = base_df.with_columns(
-                    (
-                        (pl.col(bid_col) - pl.col(ask_col))
-                        / (pl.col(bid_col) + pl.col(ask_col) + 1e-9)
-                    ).alias(col_name)
-                )
-
-            elif v == "CancelToTradeRatio":
-                exec_counts = (
-                    l3.filter(pl.col("ExecutionSize") > 0)
-                    .group_by(gcols)
-                    .agg(pl.len().alias("ExecCount"))
-                )
-                base_df = base_df.join(exec_counts, on=gcols, how="left").with_columns(
-                    pl.col("ExecCount").fill_null(0)
-                )
-
-                pattern = adv.get("_output_name_pattern")
-                col_name = pattern.format(**adv) if pattern else "CancelToTradeRatio"
-                if prefix:
-                    col_name = f"{prefix}{col_name}"
-                bid_col = f"{prefix}RemoveCountBid" if prefix else "RemoveCountBid"
-                ask_col = f"{prefix}RemoveCountAsk" if prefix else "RemoveCountAsk"
-                base_df = base_df.with_columns(
-                    (
-                        (pl.col(bid_col) + pl.col(ask_col))
-                        / (pl.col("ExecCount") + 1e-9)
-                    ).alias(col_name)
-                ).drop("ExecCount")
-
-            elif v == "AvgQueuePosition":
-                queue_pos = (
-                    l3.filter(pl.col("ExecutionSize") > 0)
-                    .group_by(gcols)
-                    .agg(pl.col("SizeAhead").mean().alias("AvgQueuePosition"))
-                )
-                pattern = adv.get("_output_name_pattern")
-                col_name = pattern.format(**adv) if pattern else "AvgQueuePosition"
-                if prefix:
-                    col_name = f"{prefix}{col_name}"
-                if col_name != "AvgQueuePosition":
-                    queue_pos = queue_pos.rename({"AvgQueuePosition": col_name})
-                base_df = base_df.join(queue_pos, on=gcols, how="left")
-
-            elif v == "AvgRestingTime":
-                resting_metrics = (
-                    self._compute_lifetimes(l3, adv, adv.get("market_states"))
-                    .group_by(gcols)
-                    .agg(pl.col("DurationNs").mean().alias("AvgRestingTime"))
-                )
-                pattern = adv.get("_output_name_pattern")
-                col_name = pattern.format(**adv) if pattern else "AvgRestingTime"
-                if prefix:
-                    col_name = f"{prefix}{col_name}"
-                if col_name != "AvgRestingTime":
-                    resting_metrics = resting_metrics.rename({"AvgRestingTime": col_name})
-                base_df = base_df.join(resting_metrics, on=gcols, how="left")
-
-            elif v == "FleetingLiquidityRatio":
-                threshold_ms = adv.get("fleeting_threshold_ms", 100)
-                threshold_ns = threshold_ms * 1_000_000
-
-                lifetimes = self._compute_lifetimes(l3, adv, adv.get("market_states"))
-                fleeting_metrics = lifetimes.group_by(gcols).agg(
-                    (
-                        pl.when(pl.col("DurationNs") < threshold_ns)
-                        .then(pl.col("InsertSize"))
-                        .otherwise(pl.lit(0))
-                    )
-                    .sum()
-                    .alias("FleetingVolume")
-                )
-
-                base_df = base_df.join(fleeting_metrics, on=gcols, how="left")
-                pattern = adv.get("_output_name_pattern")
-                col_name = pattern.format(**adv) if pattern else "FleetingLiquidityRatio"
-                if prefix:
-                    col_name = f"{prefix}{col_name}"
-                bid_col = f"{prefix}InsertVolumeBid" if prefix else "InsertVolumeBid"
-                ask_col = f"{prefix}InsertVolumeAsk" if prefix else "InsertVolumeAsk"
-                base_df = base_df.with_columns(
-                    (
-                        pl.col("FleetingVolume")
-                        / (pl.col(bid_col) + pl.col(ask_col) + 1e-9)
-                    ).alias(col_name)
-                ).drop("FleetingVolume")
-
-            elif v == "AvgReplacementLatency":
-                latency = self._compute_replacement_latency(
-                    l3, adv.get("market_states")
-                )
-                pattern = adv.get("_output_name_pattern")
-                col_name = pattern.format(**adv) if pattern else "AvgReplacementLatency"
-                if prefix:
-                    col_name = f"{prefix}{col_name}"
-                if col_name != "AvgReplacementLatency":
-                    latency = latency.rename({"AvgReplacementLatency": col_name})
-                base_df = base_df.join(latency, on=gcols, how="left")
+            expression_fn = self.EXPRESSIONS.get(v)
+            if expression_fn is None:
+                continue
+            base_df = expression_fn(self, base_df, l3, adv, prefix)
 
         return base_df
+
+    @staticmethod
+    def _output_name(adv: Dict[str, Any], default: str, prefix: str) -> str:
+        pattern = adv.get("_output_name_pattern")
+        col_name = pattern.format(**adv) if pattern else default
+        if prefix:
+            return f"{prefix}{col_name}"
+        return col_name
 
     def _compute_lifetimes(
         self, l3: pl.LazyFrame, config_dict: Dict[str, Any], market_states: Optional[List[str]] = None
