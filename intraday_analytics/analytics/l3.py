@@ -2,6 +2,7 @@ import polars as pl
 from intraday_analytics.analytics_base import BaseAnalytics
 from pydantic import BaseModel, Field
 from typing import List, Union, Literal, Optional, Set, Dict, Any
+import logging
 
 from .common import CombinatorialMetricConfig, Side, AggregationMethod, apply_aggregation
 from .utils import apply_alias

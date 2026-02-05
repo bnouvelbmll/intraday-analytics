@@ -849,73 +849,28 @@ class L2AnalyticsLast(BaseAnalytics):
                 )
 
         if not expressions:
-            N = self.config.levels
-            for i in range(1, N + 1):
-                for side in ["Bid", "Ask"]:
-                    expressions.append(
-                        pl.col(f"{side}Price{i}")
-                        .last()
-                        .alias(self.apply_prefix(f"{side}Price{i}"))
-                    )
-                    expressions.append(
-                        pl.col(f"{side}Quantity{i}")
-                        .last()
-                        .alias(self.apply_prefix(f"{side}Quantity{i}"))
-                    )
-                    expressions.append(
-                        pl.col(f"{side}NumOrders{i}")
-                        .last()
-                        .alias(self.apply_prefix(f"{side}NumOrders{i}"))
-                    )
-                    expressions.append(
-                        pl.sum_horizontal(
-                            [f"{side}Quantity{j}" for j in range(1, i + 1)]
-                        )
-                        .last()
-                        .alias(f"{side}CumQuantity{i}")
-                    )
-                    expressions.append(
-                        pl.sum_horizontal(
-                            [f"{side}NumOrders{j}" for j in range(1, i + 1)]
-                        )
-                        .last()
-                        .alias(f"{side}CumOrders{i}")
-                    )
-
-            for i in range(1, N + 1):
-                bid_cum = pl.sum_horizontal(
-                    [f"BidQuantity{j}" for j in range(1, i + 1)]
-                )
-                ask_cum = pl.sum_horizontal(
-                    [f"AskQuantity{j}" for j in range(1, i + 1)]
-                )
-                expressions.append(
-                    ((bid_cum - ask_cum) / (bid_cum + ask_cum))
-                    .last()
-                    .alias(f"VolumeImbalance{i}")
-                )
-
-                bid_ord = pl.sum_horizontal(
-                    [f"BidNumOrders{j}" for j in range(1, i + 1)]
-                )
-                ask_ord = pl.sum_horizontal(
-                    [f"AskNumOrders{j}" for j in range(1, i + 1)]
-                )
-                expressions.append(
-                    ((bid_ord - ask_ord) / (bid_ord + ask_ord))
-                    .last()
-                    .alias(f"OrdersImbalance{i}")
-                )
-
-            expressions.append(
+            levels = list(range(1, self.config.levels + 1))
+            default_configs = [
                 (
-                    20000
-                    * (pl.col("AskPrice1") - pl.col("BidPrice1"))
-                    / (pl.col("AskPrice1") + pl.col("BidPrice1"))
-                )
-                .last()
-                .alias("SpreadBps")
-            )
+                    liquidity,
+                    [
+                        L2LiquidityConfig(
+                            sides=["Bid", "Ask"],
+                            levels=levels,
+                            measures=[
+                                "Price",
+                                "Quantity",
+                                "NumOrders",
+                                "CumQuantity",
+                                "CumOrders",
+                            ],
+                        )
+                    ],
+                ),
+                (imbalance, [L2ImbalanceConfig(levels=levels, measure=["CumQuantity", "Orders"])]),
+                (spread, [L2SpreadConfig(variant=["BPS"])]),
+            ]
+            expressions = build_expressions(ctx, default_configs)
 
         expressions.append(
             pl.col("MarketState").last().alias(self.apply_prefix("MarketState"))
@@ -1006,29 +961,21 @@ class L2AnalyticsTW(BaseTWAnalytics):
         )
 
         if not expressions:
+            default_spread_config = [L2SpreadConfig(variant=["Abs", "BPS"], aggregations=["TWA"])]
+            default_liquidity_config = [
+                L2LiquidityConfig(
+                    sides=["Bid", "Ask"],
+                    levels=list(range(1, self.config.levels + 1)),
+                    measures=["Price", "Quantity"],
+                    aggregations=["TWA"],
+                )
+            ]
             expressions.extend(
                 build_expressions(
                     ctx,
                     [
-                        (
-                            spread,
-                            [
-                                L2SpreadConfig(
-                                    variant=["Abs", "BPS"], aggregations=["TWA"]
-                                )
-                            ],
-                        ),
-                        (
-                            liquidity,
-                            [
-                                L2LiquidityConfig(
-                                    sides=["Bid", "Ask"],
-                                    levels=list(range(1, self.config.levels + 1)),
-                                    measures=["Price", "Quantity"],
-                                    aggregations=["TWA"],
-                                )
-                            ],
-                        ),
+                        (spread, default_spread_config),
+                        (liquidity, default_liquidity_config),
                     ],
                 )
             )

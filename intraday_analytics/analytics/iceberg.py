@@ -9,6 +9,7 @@ from intraday_analytics.analytics_base import (
     AnalyticContext,
     AnalyticDoc,
     analytic_expression,
+    build_expressions,
 )
 from intraday_analytics.analytics_registry import register_analytics
 from .utils import apply_alias
@@ -487,36 +488,36 @@ class IcebergAnalytics(BaseAnalytics):
             context=self.context,
         )
 
-        expressions: List[pl.Expr] = []
-        requested_measures: set[str] = set()
         analytic = IcebergExecutionAnalytic()
-        for cfg in self.config.metrics:
-            for variant in analytic.expand_config(cfg):
-                if isinstance(cfg.measures, str):
-                    requested_measures.add(cfg.measures)
-                elif isinstance(cfg.measures, list):
-                    requested_measures.update(cfg.measures)
-                expressions.extend(analytic.expressions(ctx, cfg, variant))
-
+        expressions = build_expressions(ctx, [(analytic, self.config.metrics)])
+        
         if not expressions:
-            default_cfg = IcebergMetricConfig(
-                measures=[
-                    "ExecutionVolume",
-                    "ExecutionCount",
-                    "AverageSize",
-                    "RevealedPeakCount",
-                    "AveragePeakCount",
-                    "OrderImbalance",
-                ],
-                sides="Total",
-                aggregations=["Sum"],
-            )
-            for variant in analytic.expand_config(default_cfg):
-                expressions.extend(analytic.expressions(ctx, default_cfg, variant))
-            requested_measures.update(default_cfg.measures)
+            default_cfg = [
+                IcebergMetricConfig(
+                    measures=[
+                        "ExecutionVolume",
+                        "ExecutionCount",
+                        "AverageSize",
+                        "RevealedPeakCount",
+                        "AveragePeakCount",
+                        "OrderImbalance",
+                    ],
+                    sides="Total",
+                    aggregations=["Sum"],
+                )
+            ]
+            expressions = build_expressions(ctx, [(analytic, default_cfg)])
 
         gcols = ["ListingId", "TimeBucket"]
         df = iceberg_exec.group_by(gcols).agg(expressions)
+
+        requested_measures = {
+            measure
+            for cfg in self.config.metrics
+            for measure in (
+                [cfg.measures] if isinstance(cfg.measures, str) else cfg.measures
+            )
+        }
 
         if "AveragePeakCount" in requested_measures and "IcebergEventCount" in iceberg_exec.collect_schema().names():
             peak_avg = (

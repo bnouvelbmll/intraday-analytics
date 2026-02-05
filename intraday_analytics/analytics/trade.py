@@ -16,6 +16,7 @@ from intraday_analytics.analytics_base import (
     AnalyticDoc,
     analytic_expression,
     apply_metric_prefix,
+    build_expressions,
 )
 from intraday_analytics.analytics_registry import register_analytics
 
@@ -769,9 +770,8 @@ class TradeAnalytics(BaseAnalytics):
             cache={"metric_prefix": self.metric_prefix},
             context=self.context,
         )
-        expressions = []
-
-        analytic_config_pairs = [
+        
+        analytic_specs = [
             (TradeGenericAnalytic(), self.config.generic_metrics),
             (TradeDiscrepancyAnalytic(), self.config.discrepancy_metrics),
             (TradeFlagAnalytic(), self.config.flag_metrics),
@@ -779,10 +779,7 @@ class TradeAnalytics(BaseAnalytics):
             (TradeImpactAnalytic(), self.config.impact_metrics),
         ]
 
-        for analytic, configs in analytic_config_pairs:
-            for cfg in configs:
-                for variant in analytic.expand_config(cfg):
-                    expressions.extend(analytic.expressions(ctx, cfg, variant))
+        expressions = build_expressions(ctx, analytic_specs)
 
         if not expressions:
             expressions.extend(TradeDefaultAnalytic().default_expressions(ctx))
@@ -792,4 +789,4 @@ class TradeAnalytics(BaseAnalytics):
         df = base_df.group_by(gcols).agg(expressions)
 
         self.df = df
-        return self.df
+        return df

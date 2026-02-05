@@ -384,6 +384,21 @@ class BaseTWAnalytics(BaseAnalytics):
     def compute(self) -> pl.LazyFrame:
         """
         Computes the time-weighted analytics for the module.
+
+        This method resamples the input tables to a common time grid and then
+        computes the time difference (DT) between consecutive events. This DT
+        is used for time-weighting the analytics.
+
+        The resampling strategy involves the following steps:
+        1.  For each time bucket, we find the last event of the previous bucket,
+            the events within the current bucket, and the first event of the
+            next bucket.
+        2.  We use `ffill_with_shifts` to create a dense time grid by forward-
+            filling the data from the last known event. This ensures that each
+            time bucket has a defined state at its boundaries.
+        3.  We then calculate the `DT` column, which represents the time
+            duration (in nanoseconds) for which a given state was valid. This
+            is used as the weight in the time-weighted average calculation.
         """
         nanoseconds = self.nanoseconds
         gcol_list = ["MIC", "ListingId", "Ticker", "TimeBucket", "CurrencyCode"]
@@ -452,3 +467,35 @@ def apply_metric_prefix(ctx: AnalyticContext, name: str) -> str:
     if prefix:
         return f"{prefix}{name}"
     return name
+
+
+def run_analytics_from_config(
+    config: dict,
+    context: dict,
+    **kwargs,
+) -> pl.LazyFrame:
+    """
+    Run analytics based on a configuration dictionary.
+    """
+    from intraday_analytics.analytics_registry import get_analytics_registry
+
+    analytics_registry = get_analytics_registry()
+    analytics_class = analytics_registry.get(config["name"])
+    if analytics_class is None:
+        raise ValueError(f"Unknown analytics module: {config['name']}")
+
+    return run_analytics(analytics_class, config, context, **kwargs)
+
+
+def run_analytics(
+    analytics_class: Type[BaseAnalytics],
+    config: dict,
+    context: dict,
+    **kwargs,
+) -> pl.LazyFrame:
+    """
+    Run a single analytics module.
+    """
+    module_instance = analytics_class(config=config, **kwargs)
+    module_instance.set_context(context)
+    return module_instance.compute()
