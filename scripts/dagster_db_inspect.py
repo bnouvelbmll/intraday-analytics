@@ -46,6 +46,7 @@ def inspect_db(
     limit: int = 10,
     run_id: str = RUNLESS_RUN_ID,
     dagster_home: str | None = None,
+    show_materializations: bool = True,
 ):
     """
     Inspect event log and asset index tables for a given run_id (default: RUNLESS).
@@ -85,6 +86,32 @@ def inspect_db(
             print("event_log_by_type:")
             for event_type, count in by_type:
                 print(f"  {event_type}: {count}")
+
+        if show_materializations:
+            q = select(
+                SqlEventLogStorageTable.c.id,
+                SqlEventLogStorageTable.c.run_id,
+                SqlEventLogStorageTable.c.dagster_event_type,
+                SqlEventLogStorageTable.c.timestamp,
+                SqlEventLogStorageTable.c.asset_key,
+                SqlEventLogStorageTable.c.partition,
+            ).where(
+                SqlEventLogStorageTable.c.dagster_event_type == "ASSET_MATERIALIZATION"
+            )
+            if asset_key:
+                q = q.where(SqlEventLogStorageTable.c.asset_key == asset_key)
+            rows = conn.execute(q.order_by(SqlEventLogStorageTable.c.id.desc()).limit(limit)).fetchall()
+            print(f"materialization_rows: {len(rows)}")
+            for row in rows:
+                print(
+                    "  id={} run_id={} ts={} asset_key={} partition={}".format(
+                        row.id,
+                        row.run_id,
+                        row.timestamp,
+                        row.asset_key,
+                        row.partition,
+                    )
+                )
 
         if asset_key:
             rows = conn.execute(
