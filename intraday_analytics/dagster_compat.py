@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import datetime as dt
 import json
+import logging
 import os
 import time
 from hashlib import sha1
@@ -219,6 +220,11 @@ def build_demo_materialization_checks(
         def _make_materialized_check(base_config, asset_key, pass_name: str | None):
             @asset_check(asset=asset_key, name="s3_materialized")
             def _materialized_check(context):
+                logging.info(
+                    "materialization check start asset=%s mode=%s",
+                    asset_key,
+                    check_mode,
+                )
                 keys = _safe_partition_keys(context)
                 if keys and universe_dim in keys and date_dim in keys:
                     partition = PartitionRun(
@@ -377,6 +383,11 @@ def build_s3_input_asset_checks(
         def _make_input_check(table):
             @asset_check(asset=asset, name="s3_exists")
             def _input_check(context):
+                logging.info(
+                    "s3_exists check start asset=%s mode=%s",
+                    asset.key,
+                    check_mode,
+                )
                 keys = _safe_partition_keys(context)
                 if not keys:
                     if check_mode == "recursive" and _full_check_on_unpartitioned():
@@ -389,6 +400,11 @@ def build_s3_input_asset_checks(
                                 },
                             )
                         objects = _s3_list_all_objects(prefix)
+                        logging.info(
+                            "s3_exists unpartitioned recursive prefix=%s objects=%d",
+                            prefix,
+                            len(objects),
+                        )
                         return AssetCheckResult(
                             passed=bool(objects),
                             metadata={
@@ -398,6 +414,10 @@ def build_s3_input_asset_checks(
                                 "check_mode": check_mode,
                             },
                         )
+                    logging.info(
+                        "s3_exists skipped (no partition key) asset=%s",
+                        asset.key,
+                    )
                     return AssetCheckResult(
                         passed=True,
                         metadata={
@@ -428,6 +448,12 @@ def build_s3_input_asset_checks(
                     s3_paths = table.get_s3_paths([mic], y, m, d)
 
                 exists = all(_s3_path_exists(p, check_mode=check_mode) for p in s3_paths)
+                logging.info(
+                    "s3_exists partitioned asset=%s exists=%s paths=%s",
+                    asset.key,
+                    exists,
+                    s3_paths,
+                )
                 return AssetCheckResult(
                     passed=exists,
                     metadata={
@@ -479,6 +505,13 @@ def build_s3_input_observation_sensor(
         max_events = int(os.getenv("S3_SENSOR_MAX_OBSERVATIONS", "1000"))
 
         events = []
+        logging.info(
+            "s3 sensor tick name=%s mode=%s emit_all=%s date=%s",
+            name,
+            check_mode,
+            emit_all,
+            date_key,
+        )
         for asset in assets:
             table = table_map.get(asset.key)
             if not table:
@@ -489,6 +522,12 @@ def build_s3_input_observation_sensor(
                 if not prefix:
                     continue
                 objects = _s3_list_all_objects(prefix)
+                logging.info(
+                    "s3 sensor recursive prefix=%s objects=%d asset=%s",
+                    prefix,
+                    len(objects),
+                    asset.key,
+                )
                 for path in objects:
                     parsed = _parse_table_s3_path(table, path)
                     if not parsed:
@@ -539,7 +578,9 @@ def build_s3_input_observation_sensor(
                 break
 
         if not events:
+            logging.info("s3 sensor no observations emitted")
             return SensorResult(skip_reason="No S3 inputs detected")
+        logging.info("s3 sensor emitted observations=%d", len(events))
         return SensorResult(asset_events=events)
 
     return _sensor
@@ -648,6 +689,11 @@ def _s3_list_all_objects(prefix: str) -> set[str]:
 
     cached = _s3_cache_load(prefix)
     if cached is not None:
+        logging.info(
+            "s3 list cache hit prefix=%s objects=%d",
+            prefix,
+            len(cached),
+        )
         return cached
 
     _, _, rest = prefix.partition("s3://")
@@ -659,6 +705,11 @@ def _s3_list_all_objects(prefix: str) -> set[str]:
         for item in page.get("Contents", []):
             keys.add(f"s3://{bucket}/{item['Key']}")
     _s3_cache_store(prefix, keys)
+    logging.info(
+        "s3 list refresh prefix=%s objects=%d",
+        prefix,
+        len(keys),
+    )
     return keys
 
 
@@ -768,7 +819,7 @@ def _filter_input_deps(input_asset_keys, pass_config) -> list:
 
     required_tables = _required_tables_for_pass(pass_config)
     if not required_tables:
-        return list(input_asset_keys or [])
+        return []
 
     deps = []
     for key in input_asset_keys:
