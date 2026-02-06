@@ -70,10 +70,17 @@ def _build_event(asset_event, ts: float) -> EventLogEntry:
     else:
         raise ValueError(f"Unsupported event type {type(asset_event)}")
 
+    step_key = None
+    if getattr(asset_event, "asset_key", None):
+        step_key = f"asset:{asset_event.asset_key.to_user_string()}"
+        if getattr(asset_event, "partition", None):
+            step_key = f"{step_key}:{asset_event.partition}"
+
     dagster_event = DagsterEvent(
         event_type_value=event_type,
         event_specific_data=data_payload,
         job_name=RUNLESS_JOB_NAME,
+        step_key=step_key,
     )
     return EventLogEntry(
         user_message="",
