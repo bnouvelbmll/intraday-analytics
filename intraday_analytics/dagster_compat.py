@@ -529,7 +529,7 @@ def build_s3_input_observation_sensor(
                     len(objects),
                     asset.key,
                 )
-                for path, meta in objects.items():
+                for path, meta in _iter_objects_newest_first(objects):
                     parsed = _parse_table_s3_path(table, path)
                     if not parsed:
                         continue
@@ -643,7 +643,7 @@ def build_s3_input_sync_job(
                 continue
 
             objects = _s3_list_all_objects(prefix, force_refresh=force_refresh)
-            paths = sorted(objects.keys())
+            paths = [path for path, _ in _iter_objects_newest_first(objects)]
 
             cursor_path = _s3_sync_cursor_path(table)
             cursor = 0
@@ -829,6 +829,15 @@ def _s3_list_all_objects(prefix: str, *, force_refresh: bool = False) -> dict[st
     return objects
 
 
+def _iter_objects_newest_first(objects: dict[str, dict]):
+    def sort_key(item):
+        meta = item[1] or {}
+        ts = meta.get("last_modified") or ""
+        return ts
+
+    return sorted(objects.items(), key=sort_key, reverse=True)
+
+
 def _s3_cache_path(prefix: str) -> str:
     os.makedirs(_S3_CACHE_DIR, exist_ok=True)
     digest = sha1(prefix.encode("utf-8")).hexdigest()
@@ -900,6 +909,24 @@ def _s3_table_root_prefix(table) -> str | None:
         return None
     ap = bmll2._configure.L2_ACCESS_POINT_ALIAS
     return f"s3://{ap}/{table.s3_folder_name}/"
+
+
+def list_cbbo_partitions_from_s3() -> list[str]:
+    table = ALL_TABLES.get("cbbo")
+    if not table:
+        return ["cbbo"]
+    prefix = _s3_table_root_prefix(table)
+    if not prefix:
+        return ["cbbo"]
+    objects = _s3_list_all_objects(prefix)
+    mics = set()
+    for path in objects.keys():
+        parsed = _parse_table_s3_path(table, path)
+        if not parsed:
+            continue
+        mic, _ = parsed
+        mics.add(mic)
+    return sorted(mics) if mics else ["cbbo"]
 
 
 def _parse_table_s3_path(table, path: str) -> tuple[str, str] | None:

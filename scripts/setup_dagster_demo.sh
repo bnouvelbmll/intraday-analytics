@@ -29,6 +29,7 @@ from intraday_analytics.dagster_compat import (
     build_s3_input_asset_checks,
     build_s3_input_observation_sensor,
     build_s3_input_sync_job,
+    list_cbbo_partitions_from_s3,
 )
 from intraday_analytics.utils import create_date_batches
 
@@ -72,7 +73,9 @@ def _build_daily_partitions():
 def _cbbo_partitions():
     cbbo = os.getenv("CBBO_PARTITIONS", "cbbo")
     values = [v.strip() for v in cbbo.split(",") if v.strip()]
-    return StaticPartitionsDefinition(values)
+    if values != ["cbbo"]:
+        return StaticPartitionsDefinition(values)
+    return StaticPartitionsDefinition(list_cbbo_partitions_from_s3())
 
 partitions_def = _build_date_partitions()
 daily_partitions = _build_daily_partitions()
