@@ -212,6 +212,7 @@ def build_demo_materialization_checks(
     for module in demos:
         name = module.__name__.split(".")[-1]
         asset_base = f"demo{name}" if name[0].isdigit() else name
+        package_root = module.__name__.split(".")[0]
         base_config = module.USER_CONFIG
         passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
 
