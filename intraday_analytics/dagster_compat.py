@@ -317,6 +317,25 @@ def build_s3_input_asset_checks(
             def _input_check(context):
                 keys = _safe_partition_keys(context)
                 if not keys:
+                    if check_mode == "recursive" and _full_check_on_unpartitioned():
+                        prefix = _s3_table_root_prefix(table)
+                        if not prefix:
+                            return AssetCheckResult(
+                                passed=False,
+                                metadata={
+                                    "reason": "partitioned asset check requires a partition key"
+                                },
+                            )
+                        objects = _s3_list_all_objects(prefix)
+                        return AssetCheckResult(
+                            passed=bool(objects),
+                            metadata={
+                                "reason": "checked table root recursively",
+                                "prefix": prefix,
+                                "object_count": len(objects),
+                                "check_mode": check_mode,
+                            },
+                        )
                     return AssetCheckResult(
                         passed=False,
                         metadata={"reason": "partitioned asset check requires a partition key"},
@@ -599,3 +618,16 @@ def _safe_partition_keys(context) -> dict | None:
     except Exception:
         return None
     return getattr(partition_key, "keys_by_dimension", None)
+
+
+def _full_check_on_unpartitioned() -> bool:
+    return os.getenv("S3_CHECK_FULL_ON_UNPARTITIONED", "1") not in {"0", "false", "False"}
+
+
+def _s3_table_root_prefix(table) -> str | None:
+    try:
+        import bmll2
+    except Exception:
+        return None
+    ap = bmll2._configure.L2_ACCESS_POINT_ALIAS
+    return f"s3://{ap}/{table.s3_folder_name}/"
