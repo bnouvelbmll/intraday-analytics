@@ -624,6 +624,10 @@ def build_s3_input_sync_job(
         force_refresh = os.getenv("S3_SYNC_FORCE_REFRESH", "0") in {"1", "true", "True"}
         reset = os.getenv("S3_SYNC_RESET", "0") in {"1", "true", "True"}
         max_events = int(os.getenv("S3_SYNC_MAX_OBSERVATIONS", "100000"))
+        date_start = os.getenv("S3_SYNC_START_DATE")
+        date_end = os.getenv("S3_SYNC_END_DATE")
+        shard_total = int(os.getenv("S3_SYNC_SHARD_TOTAL", "1"))
+        shard_index = int(os.getenv("S3_SYNC_SHARD_INDEX", "0"))
 
         emitted = 0
         for asset in assets:
@@ -663,6 +667,12 @@ def build_s3_input_sync_job(
                     cursor += 1
                     continue
                 part_mic, part_date = parsed
+                if not _date_in_range(part_date, date_start, date_end):
+                    cursor += 1
+                    continue
+                if not _shard_accept(part_mic, shard_index, shard_total):
+                    cursor += 1
+                    continue
                 if asset.metadata.get("partitioning") == "cbbo_date":
                     pk = MultiPartitionKey({date_dim: part_date, cbbo_dim: part_mic})
                 else:
@@ -704,6 +714,103 @@ def build_s3_input_sync_job(
         _sync_op()
 
     return _sync_job
+
+
+def build_s3_input_sync_asset(
+    *,
+    name: str,
+    assets: Sequence,
+    table_map: dict,
+    date_partitions_def,
+    date_dim: str = "date",
+    mic_dim: str = "mic",
+    cbbo_dim: str = "cbbo",
+    check_mode: str = "recursive",
+    group_name: str = "BMLL",
+):
+    """
+    Build a partitioned asset for per-date sync of S3 input observations/materializations.
+    """
+    try:
+        from dagster import AssetMaterialization, AssetObservation, asset
+    except Exception as exc:
+        raise ImportError("Dagster is required to build sync assets.") from exc
+
+    @asset(
+        name=name,
+        partitions_def=date_partitions_def,
+        group_name=group_name,
+        key_prefix=[group_name],
+    )
+    def _sync_asset(context):
+        if check_mode != "recursive":
+            context.log.warning("sync asset requires recursive mode")
+            return
+
+        date_key = getattr(context, "partition_key", None)
+        if not date_key:
+            context.log.warning("sync asset requires a date partition")
+            return
+
+        force_refresh = os.getenv("S3_SYNC_FORCE_REFRESH", "0") in {"1", "true", "True"}
+        max_events = int(os.getenv("S3_SYNC_MAX_OBSERVATIONS", "100000"))
+        shard_total = int(os.getenv("S3_SYNC_SHARD_TOTAL", "1"))
+        shard_index = int(os.getenv("S3_SYNC_SHARD_INDEX", "0"))
+
+        emitted = 0
+        for asset in assets:
+            table = table_map.get(asset.key)
+            if not table:
+                continue
+
+            prefix = _s3_table_root_prefix(table)
+            if not prefix:
+                context.log.warning("missing s3 prefix for asset=%s", asset.key)
+                continue
+
+            objects = _s3_list_all_objects(prefix, force_refresh=force_refresh)
+            for path, meta in _iter_objects_newest_first(objects):
+                parsed = _parse_table_s3_path(table, path)
+                if not parsed:
+                    continue
+                part_mic, part_date = parsed
+                if part_date != date_key:
+                    continue
+                if not _shard_accept(part_mic, shard_index, shard_total):
+                    continue
+                if asset.metadata.get("partitioning") == "cbbo_date":
+                    pk = f"{date_key}|{part_mic}"
+                else:
+                    pk = f"{date_key}|{part_mic}"
+                yield AssetObservation(
+                    asset_key=asset.key,
+                    partition=pk,
+                    metadata={
+                        "s3_path": path,
+                        "size_bytes": meta.get("size_bytes"),
+                        "last_modified": meta.get("last_modified"),
+                        "source": "s3_sync_asset",
+                    },
+                )
+                yield AssetMaterialization(
+                    asset_key=asset.key,
+                    partition=pk,
+                    metadata={
+                        "s3_path": path,
+                        "size_bytes": meta.get("size_bytes"),
+                        "last_modified": meta.get("last_modified"),
+                        "source": "s3_sync_asset",
+                    },
+                )
+                emitted += 1
+                if emitted >= max_events:
+                    break
+            if emitted >= max_events:
+                break
+
+        context.log.info("sync asset emitted=%d", emitted)
+
+    return _sync_asset
 
 
 def run_partition(
@@ -966,6 +1073,36 @@ def _sanitize_name(name: str) -> str:
     if not name:
         return "pass"
     return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
+
+
+def _date_in_range(date_key: str, start: str | None, end: str | None) -> bool:
+    if not start and not end:
+        return True
+    try:
+        value = dt.date.fromisoformat(date_key)
+    except Exception:
+        return False
+    if start:
+        try:
+            if value < dt.date.fromisoformat(start):
+                return False
+        except Exception:
+            return False
+    if end:
+        try:
+            if value > dt.date.fromisoformat(end):
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _shard_accept(value: str, index: int, total: int) -> bool:
+    if total <= 1:
+        return True
+    digest = sha1(value.encode("utf-8")).hexdigest()
+    bucket = int(digest, 16) % total
+    return bucket == index
 
 
 def _s3_sync_cursor_path(table) -> str:

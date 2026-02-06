@@ -29,6 +29,7 @@ from intraday_analytics.dagster_compat import (
     build_s3_input_asset_checks,
     build_s3_input_observation_sensor,
     build_s3_input_sync_job,
+    build_s3_input_sync_asset,
     list_cbbo_partitions_from_s3,
 )
 from intraday_analytics.utils import create_date_batches
@@ -120,9 +121,17 @@ input_sync_job = build_s3_input_sync_job(
     table_map=input_table_map,
     check_mode=os.getenv("S3_CHECK_MODE", "recursive"),
 )
+input_sync_asset = build_s3_input_sync_asset(
+    name="s3_input_sync_by_date",
+    assets=input_assets,
+    table_map=input_table_map,
+    date_partitions_def=daily_partitions,
+    check_mode=os.getenv("S3_CHECK_MODE", "recursive"),
+    group_name="BMLL",
+)
 
 defs = Definitions(
-    assets=[*demo_assets, *input_assets],
+    assets=[*demo_assets, *input_assets, input_sync_asset],
     asset_checks=[*demo_checks, *input_checks],
     sensors=[input_sensor],
     jobs=[input_sync_job],
