@@ -478,7 +478,9 @@ def build_s3_input_observation_sensor(
                         pk = MultiPartitionKey({date_dim: part_date, cbbo_dim: part_mic})
                     else:
                         pk = MultiPartitionKey({date_dim: part_date, mic_dim: part_mic})
-                    events.append(AssetObservation(asset_key=asset.key, partition_key=pk))
+                    events.append(
+                        AssetObservation(asset_key=asset.key, partition=str(pk))
+                    )
                     if len(events) >= max_events:
                         break
                 if len(events) >= max_events:
@@ -492,7 +494,9 @@ def build_s3_input_observation_sensor(
                 s3_paths = table.get_s3_paths([cbbo_value], y, m, d)
                 if all(_s3_path_exists(p, check_mode=check_mode) for p in s3_paths):
                     events.append(
-                        AssetObservation(asset_key=asset.key, partition_key=partition_key)
+                        AssetObservation(
+                            asset_key=asset.key, partition=str(partition_key)
+                        )
                     )
                 continue
 
@@ -505,7 +509,9 @@ def build_s3_input_observation_sensor(
                 s3_paths = table.get_s3_paths([mic], y, m, d)
                 if all(_s3_path_exists(p, check_mode=check_mode) for p in s3_paths):
                     events.append(
-                        AssetObservation(asset_key=asset.key, partition_key=partition_key)
+                        AssetObservation(
+                            asset_key=asset.key, partition=str(partition_key)
+                        )
                     )
                     if len(events) >= max_events:
                         break
