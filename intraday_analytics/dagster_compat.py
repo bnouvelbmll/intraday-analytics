@@ -172,21 +172,12 @@ def build_demo_materialization_checks(
         def _make_materialized_check(base_config):
             @asset_check(asset=AssetKey(asset_name), name="s3_materialized")
             def _materialized_check(context):
-                if context and getattr(context, "partition_key", None):
-                    keys = getattr(context.partition_key, "keys_by_dimension", None)
-                    if keys and universe_dim in keys and date_dim in keys:
-                        partition = PartitionRun(
-                            universe=parse_universe_spec(keys[universe_dim]),
-                            dates=parse_date_key(keys[date_dim]),
-                        )
-                    else:
-                        partition = PartitionRun(
-                            universe=UniversePartition(name="default", value=None),
-                            dates=DatePartition(
-                                start_date=base_config["START_DATE"],
-                                end_date=base_config["END_DATE"],
-                            ),
-                        )
+                keys = _safe_partition_keys(context)
+                if keys and universe_dim in keys and date_dim in keys:
+                    partition = PartitionRun(
+                        universe=parse_universe_spec(keys[universe_dim]),
+                        dates=parse_date_key(keys[date_dim]),
+                    )
                 else:
                     partition = PartitionRun(
                         universe=UniversePartition(name="default", value=None),
@@ -324,19 +315,11 @@ def build_s3_input_asset_checks(
         def _make_input_check(table):
             @asset_check(asset=asset, name="s3_exists")
             def _input_check(context):
-                if not context or not getattr(context, "partition_key", None):
-                    return AssetCheckResult(
-                        passed=False,
-                        metadata={
-                            "reason": "partitioned asset check requires a partition key"
-                        },
-                    )
-
-                keys = getattr(context.partition_key, "keys_by_dimension", None)
+                keys = _safe_partition_keys(context)
                 if not keys:
                     return AssetCheckResult(
                         passed=False,
-                        metadata={"reason": "missing partition dimensions"},
+                        metadata={"reason": "partitioned asset check requires a partition key"},
                     )
 
                 date_key = keys.get(date_dim)
@@ -603,3 +586,16 @@ def _s3_cache_expired(prefix: str) -> bool:
         return time.time() - ts > _S3_CACHE_TTL_SECONDS
     except Exception:
         return True
+
+
+def _safe_partition_keys(context) -> dict | None:
+    if not context:
+        return None
+    has_partition = getattr(context, "has_partition_key", None)
+    if callable(has_partition) and not has_partition:
+        return None
+    try:
+        partition_key = context.partition_key
+    except Exception:
+        return None
+    return getattr(partition_key, "keys_by_dimension", None)
