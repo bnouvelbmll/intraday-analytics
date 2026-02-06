@@ -615,7 +615,7 @@ def build_s3_input_sync_job(
     Intended for fast initial sync without relying on the sensor.
     """
     try:
-        from dagster import AssetObservation, MultiPartitionKey, job, op
+        from dagster import AssetMaterialization, AssetObservation, MultiPartitionKey, job, op
     except Exception as exc:
         raise ImportError("Dagster is required to build sync jobs.") from exc
 
@@ -669,6 +669,16 @@ def build_s3_input_sync_job(
                     pk = MultiPartitionKey({date_dim: part_date, mic_dim: part_mic})
                 meta = objects.get(path, {})
                 yield AssetObservation(
+                    asset_key=asset.key,
+                    partition=str(pk),
+                    metadata={
+                        "s3_path": path,
+                        "size_bytes": meta.get("size_bytes"),
+                        "last_modified": meta.get("last_modified"),
+                        "source": "s3_sync_job",
+                    },
+                )
+                yield AssetMaterialization(
                     asset_key=asset.key,
                     partition=str(pk),
                     metadata={
