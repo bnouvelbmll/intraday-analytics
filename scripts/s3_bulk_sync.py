@@ -6,7 +6,7 @@ from typing import Iterable
 import fire
 from tqdm import tqdm
 
-from dagster import DagsterInstance, AssetMaterialization, AssetObservation
+from dagster import DagsterInstance, AssetKey, AssetMaterialization, AssetObservation
 
 from intraday_analytics.tables import ALL_TABLES
 from intraday_analytics.dagster_compat import (
@@ -79,7 +79,9 @@ def sync(
     if not start_date or not end_date:
         start_date, end_date = _date_range_default()
 
-    os.environ.setdefault("DAGSTER_HOME", os.getenv("DAGSTER_HOME", "/tmp/dagster_test"))
+    dagster_home = os.getenv("DAGSTER_HOME", "/tmp/dagster_test")
+    os.environ.setdefault("DAGSTER_HOME", dagster_home)
+    os.makedirs(dagster_home, exist_ok=True)
     instance = DagsterInstance.get()
 
     table_list = _parse_tables(tables)
@@ -103,7 +105,7 @@ def sync(
             if _date_in_range(date_key, start_date, end_date):
                 filtered.append((path, meta, mic, date_key))
 
-        asset_key = f"BMLL/{table_name}"
+        asset_key = AssetKey(["BMLL", table_name])
         for path, meta, mic, date_key in tqdm(
             filtered,
             desc=f"sync {table_name}",
