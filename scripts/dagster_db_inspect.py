@@ -48,6 +48,7 @@ def inspect_db(
     dagster_home: str | None = None,
     show_materializations: bool = True,
     show_asset_key_counts: bool = True,
+    show_asset_key_partition_counts: bool = True,
 ):
     """
     Inspect event log and asset index tables for a given run_id (default: RUNLESS).
@@ -89,7 +90,7 @@ def inspect_db(
                 print(f"  {event_type}: {count}")
 
         if show_asset_key_counts:
-            rows = conn.execute(
+            q = (
                 select(
                     SqlEventLogStorageTable.c.asset_key,
                     func.count(),
@@ -97,10 +98,34 @@ def inspect_db(
                 .where(SqlEventLogStorageTable.c.asset_key != None)  # noqa: E711
                 .group_by(SqlEventLogStorageTable.c.asset_key)
                 .order_by(func.count().desc())
-            ).fetchall()
+            )
+            if asset_key:
+                q = q.where(SqlEventLogStorageTable.c.asset_key == asset_key)
+            rows = conn.execute(q).fetchall()
             print(f"event_log_asset_key_counts: {len(rows)}")
             for asset_key_value, count in rows:
                 print(f"  {asset_key_value}: {count}")
+
+        if show_asset_key_partition_counts:
+            q = (
+                select(
+                    SqlEventLogStorageTable.c.asset_key,
+                    SqlEventLogStorageTable.c.dagster_event_type,
+                    func.count(func.distinct(SqlEventLogStorageTable.c.partition)),
+                )
+                .where(SqlEventLogStorageTable.c.asset_key != None)  # noqa: E711
+                .group_by(
+                    SqlEventLogStorageTable.c.asset_key,
+                    SqlEventLogStorageTable.c.dagster_event_type,
+                )
+                .order_by(func.count(func.distinct(SqlEventLogStorageTable.c.partition)).desc())
+            )
+            if asset_key:
+                q = q.where(SqlEventLogStorageTable.c.asset_key == asset_key)
+            rows = conn.execute(q).fetchall()
+            print(f"event_log_asset_key_partition_counts: {len(rows)}")
+            for asset_key_value, event_type, count in rows:
+                print(f"  {asset_key_value} {event_type}: {count}")
 
         if show_materializations:
             q = select(
