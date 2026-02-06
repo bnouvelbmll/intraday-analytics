@@ -101,16 +101,19 @@ def build_demo_assets(
     for module in demos:
         name = module.__name__.split(".")[-1]
         asset_base = f"demo{name}" if name[0].isdigit() else name
+        package_root = module.__name__.split(".")[0]
         base_config = module.USER_CONFIG
         passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
         last_pass_key = None
 
-        def _make_demo_asset(module, asset_name, asset_group, config_override, deps):
+        def _make_demo_asset(
+            module, asset_name, asset_group, config_override, deps, key_prefix
+        ):
             @asset(
                 name=asset_name,
                 partitions_def=partitions_def,
                 group_name=asset_group,
-                key_prefix=[asset_group],
+                key_prefix=key_prefix,
                 deps=deps,
             )
             def _demo_asset(context=None):
@@ -160,14 +163,26 @@ def build_demo_assets(
                     deps.append(last_pass_key)
                 assets.append(
                     _make_demo_asset(
-                        module, asset_name, asset_base, per_pass_config, deps
+                        module,
+                        asset_name,
+                        asset_base,
+                        per_pass_config,
+                        deps,
+                        [package_root, asset_base],
                     )
                 )
                 last_pass_key = assets[-1].key
         else:
             deps = list(input_asset_keys or [])
             assets.append(
-                _make_demo_asset(module, asset_base, asset_base, base_config, deps)
+                _make_demo_asset(
+                    module,
+                    asset_base,
+                    asset_base,
+                    base_config,
+                    deps,
+                    [package_root],
+                )
             )
 
     return assets
@@ -253,10 +268,14 @@ def build_demo_materialization_checks(
         if split_passes and passes:
             for pass_config in passes:
                 pass_name = _sanitize_name(pass_config.get("name", "pass"))
-                asset_key = AssetKey([asset_base, pass_name])
+                asset_key = AssetKey([package_root, asset_base, pass_name])
                 checks.append(_make_materialized_check(base_config, asset_key, pass_name))
         else:
-            checks.append(_make_materialized_check(base_config, AssetKey(asset_base), None))
+            checks.append(
+                _make_materialized_check(
+                    base_config, AssetKey([package_root, asset_base]), None
+                )
+            )
 
     return checks
 
@@ -765,7 +784,7 @@ def _table_from_asset_key(asset_key) -> str | None:
         return None
     if not path:
         return None
-    if len(path) >= 2 and path[0] == "input":
+    if len(path) >= 2 and path[0] in {"input", "bmll"}:
         return path[1]
     if len(path) == 1:
         return path[0]
