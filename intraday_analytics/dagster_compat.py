@@ -100,18 +100,27 @@ def build_demo_assets(
         name = module.__name__.split(".")[-1]
         asset_name = f"demo{name}" if name[0].isdigit() else name
 
-        @asset(name=asset_name, partitions_def=partitions_def)
-        def _demo_asset(context=None, module=module):
-            base_config = module.USER_CONFIG
-            default_get_universe = module.get_universe
-            get_pipeline = getattr(module, "get_pipeline", None)
-            if context and getattr(context, "partition_key", None):
-                keys = getattr(context.partition_key, "keys_by_dimension", None)
-                if keys and universe_dim in keys and date_dim in keys:
-                    partition = PartitionRun(
-                        universe=parse_universe_spec(keys[universe_dim]),
-                        dates=parse_date_key(keys[date_dim]),
-                    )
+        def _make_demo_asset(module):
+            @asset(name=asset_name, partitions_def=partitions_def)
+            def _demo_asset(context=None):
+                base_config = module.USER_CONFIG
+                default_get_universe = module.get_universe
+                get_pipeline = getattr(module, "get_pipeline", None)
+                if context and getattr(context, "partition_key", None):
+                    keys = getattr(context.partition_key, "keys_by_dimension", None)
+                    if keys and universe_dim in keys and date_dim in keys:
+                        partition = PartitionRun(
+                            universe=parse_universe_spec(keys[universe_dim]),
+                            dates=parse_date_key(keys[date_dim]),
+                        )
+                    else:
+                        partition = PartitionRun(
+                            universe=UniversePartition(name="default", value=None),
+                            dates=DatePartition(
+                                start_date=base_config["START_DATE"],
+                                end_date=base_config["END_DATE"],
+                            ),
+                        )
                 else:
                     partition = PartitionRun(
                         universe=UniversePartition(name="default", value=None),
@@ -120,23 +129,17 @@ def build_demo_assets(
                             end_date=base_config["END_DATE"],
                         ),
                     )
-            else:
-                partition = PartitionRun(
-                    universe=UniversePartition(name="default", value=None),
-                    dates=DatePartition(
-                        start_date=base_config["START_DATE"],
-                        end_date=base_config["END_DATE"],
-                    ),
+
+                run_partition(
+                    base_config=base_config,
+                    default_get_universe=default_get_universe,
+                    partition=partition,
+                    get_pipeline=get_pipeline,
                 )
 
-            run_partition(
-                base_config=base_config,
-                default_get_universe=default_get_universe,
-                partition=partition,
-                get_pipeline=get_pipeline,
-            )
+            return _demo_asset
 
-        assets.append(_demo_asset)
+        assets.append(_make_demo_asset(module))
 
     return assets
 
@@ -166,15 +169,24 @@ def build_demo_materialization_checks(
         asset_name = f"demo{name}" if name[0].isdigit() else name
         base_config = module.USER_CONFIG
 
-        @asset_check(asset=AssetKey(asset_name), name="s3_materialized")
-        def _materialized_check(context, base_config=base_config):
-            if context and getattr(context, "partition_key", None):
-                keys = getattr(context.partition_key, "keys_by_dimension", None)
-                if keys and universe_dim in keys and date_dim in keys:
-                    partition = PartitionRun(
-                        universe=parse_universe_spec(keys[universe_dim]),
-                        dates=parse_date_key(keys[date_dim]),
-                    )
+        def _make_materialized_check(base_config):
+            @asset_check(asset=AssetKey(asset_name), name="s3_materialized")
+            def _materialized_check(context):
+                if context and getattr(context, "partition_key", None):
+                    keys = getattr(context.partition_key, "keys_by_dimension", None)
+                    if keys and universe_dim in keys and date_dim in keys:
+                        partition = PartitionRun(
+                            universe=parse_universe_spec(keys[universe_dim]),
+                            dates=parse_date_key(keys[date_dim]),
+                        )
+                    else:
+                        partition = PartitionRun(
+                            universe=UniversePartition(name="default", value=None),
+                            dates=DatePartition(
+                                start_date=base_config["START_DATE"],
+                                end_date=base_config["END_DATE"],
+                            ),
+                        )
                 else:
                     partition = PartitionRun(
                         universe=UniversePartition(name="default", value=None),
@@ -183,43 +195,37 @@ def build_demo_materialization_checks(
                             end_date=base_config["END_DATE"],
                         ),
                     )
-            else:
-                partition = PartitionRun(
-                    universe=UniversePartition(name="default", value=None),
-                    dates=DatePartition(
-                        start_date=base_config["START_DATE"],
-                        end_date=base_config["END_DATE"],
-                    ),
+
+                config = AnalyticsConfig(
+                    **{
+                        **base_config,
+                        "START_DATE": partition.dates.start_date,
+                        "END_DATE": partition.dates.end_date,
+                    }
                 )
 
-            config = AnalyticsConfig(
-                **{
-                    **base_config,
-                    "START_DATE": partition.dates.start_date,
-                    "END_DATE": partition.dates.end_date,
-                }
-            )
+                missing = []
+                for pass_config in config.PASSES:
+                    output_path = get_final_s3_path(
+                        partition.dates.start_date,
+                        partition.dates.end_date,
+                        config,
+                        pass_config.name,
+                    )
+                    if not _s3_path_exists(output_path, check_mode=check_mode):
+                        missing.append(output_path)
 
-            missing = []
-            for pass_config in config.PASSES:
-                output_path = get_final_s3_path(
-                    partition.dates.start_date,
-                    partition.dates.end_date,
-                    config,
-                    pass_config.name,
+                return AssetCheckResult(
+                    passed=not missing,
+                    metadata={
+                        "missing": ", ".join(missing) if missing else "",
+                        "check_mode": check_mode,
+                    },
                 )
-                if not _s3_path_exists(output_path, check_mode=check_mode):
-                    missing.append(output_path)
 
-            return AssetCheckResult(
-                passed=not missing,
-                metadata={
-                    "missing": ", ".join(missing) if missing else "",
-                    "check_mode": check_mode,
-                },
-            )
+            return _materialized_check
 
-        checks.append(_materialized_check)
+        checks.append(_make_materialized_check(base_config))
 
     return checks
 
@@ -315,52 +321,57 @@ def build_s3_input_asset_checks(
         if not table:
             continue
 
-        @asset_check(asset=asset, name="s3_exists")
-        def _input_check(context, table=table):
-            if not context or not getattr(context, "partition_key", None):
-                return AssetCheckResult(
-                    passed=False,
-                    metadata={"reason": "partitioned asset check requires a partition key"},
-                )
-
-            keys = getattr(context.partition_key, "keys_by_dimension", None)
-            if not keys:
-                return AssetCheckResult(
-                    passed=False,
-                    metadata={"reason": "missing partition dimensions"},
-                )
-
-            date_key = keys.get(date_dim)
-            if not date_key or "_" in date_key:
-                return AssetCheckResult(
-                    passed=False,
-                    metadata={"reason": "input assets must use single-day partitions"},
-                )
-
-            y, m, d = (int(part) for part in date_key.split("-"))
-
-            if cbbo_dim in keys:
-                cbbo_value = keys[cbbo_dim]
-                s3_paths = table.get_s3_paths([cbbo_value], y, m, d)
-            else:
-                mic = keys.get(mic_dim)
-                if not mic:
+        def _make_input_check(table):
+            @asset_check(asset=asset, name="s3_exists")
+            def _input_check(context):
+                if not context or not getattr(context, "partition_key", None):
                     return AssetCheckResult(
                         passed=False,
-                        metadata={"reason": "missing mic partition"},
+                        metadata={
+                            "reason": "partitioned asset check requires a partition key"
+                        },
                     )
-                s3_paths = table.get_s3_paths([mic], y, m, d)
 
-            exists = all(_s3_path_exists(p, check_mode=check_mode) for p in s3_paths)
-            return AssetCheckResult(
-                passed=exists,
-                metadata={
-                    "paths": ", ".join(s3_paths),
-                    "check_mode": check_mode,
-                },
-            )
+                keys = getattr(context.partition_key, "keys_by_dimension", None)
+                if not keys:
+                    return AssetCheckResult(
+                        passed=False,
+                        metadata={"reason": "missing partition dimensions"},
+                    )
 
-        checks.append(_input_check)
+                date_key = keys.get(date_dim)
+                if not date_key or "_" in date_key:
+                    return AssetCheckResult(
+                        passed=False,
+                        metadata={"reason": "input assets must use single-day partitions"},
+                    )
+
+                y, m, d = (int(part) for part in date_key.split("-"))
+
+                if cbbo_dim in keys:
+                    cbbo_value = keys[cbbo_dim]
+                    s3_paths = table.get_s3_paths([cbbo_value], y, m, d)
+                else:
+                    mic = keys.get(mic_dim)
+                    if not mic:
+                        return AssetCheckResult(
+                            passed=False,
+                            metadata={"reason": "missing mic partition"},
+                        )
+                    s3_paths = table.get_s3_paths([mic], y, m, d)
+
+                exists = all(_s3_path_exists(p, check_mode=check_mode) for p in s3_paths)
+                return AssetCheckResult(
+                    passed=exists,
+                    metadata={
+                        "paths": ", ".join(s3_paths),
+                        "check_mode": check_mode,
+                    },
+                )
+
+            return _input_check
+
+        checks.append(_make_input_check(table))
 
     return checks
 
