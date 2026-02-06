@@ -42,6 +42,32 @@ def parse_date_key(key: str) -> DatePartition:
     if "_" in key:
         start, end = key.split("_", 1)
         return DatePartition(start_date=start, end_date=end)
+
+    # Support TimeWindowPartitionsDefinition keys (start date only).
+    freq = os.getenv("BATCH_FREQ")
+    if freq and freq != "D":
+        start_date = dt.date.fromisoformat(key)
+        if freq == "W":
+            end_date = start_date + dt.timedelta(days=6)
+        elif freq == "2W":
+            end_date = start_date + dt.timedelta(days=13)
+        elif freq == "M":
+            import calendar
+
+            end_date = dt.date(
+                start_date.year,
+                start_date.month,
+                calendar.monthrange(start_date.year, start_date.month)[1],
+            )
+        elif freq == "A":
+            end_date = dt.date(start_date.year, 12, 31)
+        else:
+            end_date = start_date
+        return DatePartition(
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+        )
+
     return DatePartition(start_date=key, end_date=key)
 
 

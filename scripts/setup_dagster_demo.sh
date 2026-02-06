@@ -19,7 +19,9 @@ import os
 
 from dagster import (
     Definitions,
+    DailyPartitionsDefinition,
     StaticPartitionsDefinition,
+    TimeWindowPartitionsDefinition,
     MultiPartitionsDefinition,
 )
 from intraday_analytics.dagster_compat import (
@@ -48,28 +50,31 @@ def _build_date_partitions():
     start_date = "2015-01-01"
     end_date = (dt.date.today() - dt.timedelta(days=1)).isoformat()
     batch_freq = os.getenv("BATCH_FREQ")
-    batches = create_date_batches(start_date, end_date, batch_freq)
-    date_keys = [
-        b[0].date().isoformat()
-        if b[0].date() == b[1].date()
-        else f"{b[0].date().isoformat()}_{b[1].date().isoformat()}"
-        for b in batches
-    ]
-    date_partitions = StaticPartitionsDefinition(date_keys)
+    if batch_freq == "D":
+        date_partitions = DailyPartitionsDefinition(start_date=start_date, end_date=end_date)
+    else:
+        cron = "0 0 * * *"
+        if batch_freq == "W":
+            cron = "0 0 * * 1"
+        elif batch_freq == "2W":
+            cron = "0 0 */14 * *"
+        elif batch_freq == "M":
+            cron = "0 0 1 * *"
+        elif batch_freq == "A":
+            cron = "0 0 1 1 *"
+        date_partitions = TimeWindowPartitionsDefinition(
+            start=start_date,
+            end=end_date,
+            fmt="%Y-%m-%d",
+            cron_schedule=cron,
+        )
     universe_partitions = StaticPartitionsDefinition([f"mic={mic}" for mic in _available_mics()])
     return MultiPartitionsDefinition({"universe": universe_partitions, "date": date_partitions})
 
 def _build_daily_partitions():
     start_date = "2015-01-01"
     end_date = (dt.date.today() - dt.timedelta(days=1)).isoformat()
-    start = dt.date.fromisoformat(start_date)
-    end = dt.date.fromisoformat(end_date)
-    date_keys = []
-    current = start
-    while current <= end:
-        date_keys.append(current.isoformat())
-        current += dt.timedelta(days=1)
-    return StaticPartitionsDefinition(date_keys)
+    return DailyPartitionsDefinition(start_date=start_date, end_date=end_date)
 
 def _cbbo_partitions():
     cbbo = os.getenv("CBBO_PARTITIONS", "cbbo")
