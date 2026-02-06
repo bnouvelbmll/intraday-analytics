@@ -108,7 +108,7 @@ def sync(
             filtered,
             desc=f"sync {table_name}",
         ):
-            partition = f\"{date_key}|{mic}\"
+            partition = f"{date_key}|{mic}"
             metadata = {
                 "s3_path": path,
                 "size_bytes": meta.get("size_bytes"),
