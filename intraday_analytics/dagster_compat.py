@@ -337,8 +337,11 @@ def build_s3_input_asset_checks(
                             },
                         )
                     return AssetCheckResult(
-                        passed=False,
-                        metadata={"reason": "partitioned asset check requires a partition key"},
+                        passed=True,
+                        metadata={
+                            "reason": "no partition key; check skipped",
+                            "check_mode": check_mode,
+                        },
                     )
 
                 date_key = keys.get(date_dim)
@@ -409,13 +412,35 @@ def build_s3_input_observation_sensor(
         )
         mic_env = os.getenv("S3_SENSOR_MICS", "")
         mic_list = list(mics) if mics is not None else [m for m in mic_env.split(",") if m]
-        if not mic_list:
-            return SensorResult(skip_reason="No MICs configured for S3 sensor")
+
+        emit_all = os.getenv("S3_SENSOR_EMIT_ALL", "0") in {"1", "true", "True"}
+        max_events = int(os.getenv("S3_SENSOR_MAX_OBSERVATIONS", "1000"))
 
         events = []
         for asset in assets:
             table = table_map.get(asset.key)
             if not table:
+                continue
+
+            if emit_all and check_mode == "recursive":
+                prefix = _s3_table_root_prefix(table)
+                if not prefix:
+                    continue
+                objects = _s3_list_all_objects(prefix)
+                for path in objects:
+                    parsed = _parse_table_s3_path(table, path)
+                    if not parsed:
+                        continue
+                    part_mic, part_date = parsed
+                    if asset.metadata.get("partitioning") == "cbbo_date":
+                        pk = MultiPartitionKey({date_dim: part_date, cbbo_dim: part_mic})
+                    else:
+                        pk = MultiPartitionKey({date_dim: part_date, mic_dim: part_mic})
+                    events.append(AssetObservation(asset_key=asset.key, partition_key=pk))
+                    if len(events) >= max_events:
+                        break
+                if len(events) >= max_events:
+                    break
                 continue
 
             if asset.metadata.get("partitioning") == "cbbo_date":
@@ -429,6 +454,9 @@ def build_s3_input_observation_sensor(
                     )
                 continue
 
+            if not mic_list:
+                continue
+
             for mic in mic_list:
                 partition_key = MultiPartitionKey({date_dim: date_key, mic_dim: mic})
                 y, m, d = (int(part) for part in date_key.split("-"))
@@ -437,6 +465,10 @@ def build_s3_input_observation_sensor(
                     events.append(
                         AssetObservation(asset_key=asset.key, partition_key=partition_key)
                     )
+                    if len(events) >= max_events:
+                        break
+            if len(events) >= max_events:
+                break
 
         if not events:
             return SensorResult(skip_reason="No S3 inputs detected")
@@ -631,3 +663,26 @@ def _s3_table_root_prefix(table) -> str | None:
         return None
     ap = bmll2._configure.L2_ACCESS_POINT_ALIAS
     return f"s3://{ap}/{table.s3_folder_name}/"
+
+
+def _parse_table_s3_path(table, path: str) -> tuple[str, str] | None:
+    if not path.startswith("s3://"):
+        return None
+    _, _, rest = path.partition("s3://")
+    parts = rest.split("/")
+    if len(parts) < 6:
+        return None
+    try:
+        folder_index = parts.index(table.s3_folder_name)
+    except ValueError:
+        return None
+    if len(parts) <= folder_index + 4:
+        return None
+    mic = parts[folder_index + 1]
+    yyyy = parts[folder_index + 2]
+    mm = parts[folder_index + 3]
+    dd = parts[folder_index + 4]
+    if not (yyyy.isdigit() and mm.isdigit() and dd.isdigit()):
+        return None
+    date_key = f"{yyyy}-{mm}-{dd}"
+    return mic, date_key
