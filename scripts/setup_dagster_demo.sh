@@ -96,26 +96,26 @@ demo_assets = build_demo_assets(
     input_asset_keys=[asset.key for asset in input_assets],
 )
 demo_checks = build_demo_materialization_checks(
-    check_mode=os.getenv("S3_CHECK_MODE", "head"),
+    check_mode=os.getenv("S3_CHECK_MODE", "recursive"),
     split_passes=True,
 )
 input_checks = build_s3_input_asset_checks(
     assets=input_assets,
     table_map=input_table_map,
-    check_mode=os.getenv("S3_CHECK_MODE", "head"),
+    check_mode=os.getenv("S3_CHECK_MODE", "recursive"),
 )
 input_sensor = build_s3_input_observation_sensor(
     name="s3_input_observation",
     assets=input_assets,
     table_map=input_table_map,
-    check_mode=os.getenv("S3_CHECK_MODE", "head"),
+    check_mode=os.getenv("S3_CHECK_MODE", "recursive"),
     mics=_available_mics()[:5],
 )
 input_sync_job = build_s3_input_sync_job(
     name="s3_input_sync",
     assets=input_assets,
     table_map=input_table_map,
-    check_mode=os.getenv("S3_CHECK_MODE", "head"),
+    check_mode=os.getenv("S3_CHECK_MODE", "recursive"),
 )
 
 defs = Definitions(
