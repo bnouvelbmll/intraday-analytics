@@ -47,6 +47,7 @@ def inspect_db(
     run_id: str = RUNLESS_RUN_ID,
     dagster_home: str | None = None,
     show_materializations: bool = True,
+    show_asset_key_counts: bool = True,
 ):
     """
     Inspect event log and asset index tables for a given run_id (default: RUNLESS).
@@ -86,6 +87,20 @@ def inspect_db(
             print("event_log_by_type:")
             for event_type, count in by_type:
                 print(f"  {event_type}: {count}")
+
+        if show_asset_key_counts:
+            rows = conn.execute(
+                select(
+                    SqlEventLogStorageTable.c.asset_key,
+                    func.count(),
+                )
+                .where(SqlEventLogStorageTable.c.asset_key != None)  # noqa: E711
+                .group_by(SqlEventLogStorageTable.c.asset_key)
+                .order_by(func.count().desc())
+            ).fetchall()
+            print(f"event_log_asset_key_counts: {len(rows)}")
+            for asset_key_value, count in rows:
+                print(f"  {asset_key_value}: {count}")
 
         if show_materializations:
             q = select(
