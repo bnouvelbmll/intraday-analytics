@@ -29,6 +29,13 @@ def parse_universe_spec(spec: str) -> UniversePartition:
     return UniversePartition(name=spec, value=None)
 
 
+def parse_date_key(key: str) -> DatePartition:
+    if "_" in key:
+        start, end = key.split("_", 1)
+        return DatePartition(start_date=start, end_date=end)
+    return DatePartition(start_date=key, end_date=key)
+
+
 @dataclass(frozen=True)
 class DatePartition:
     """
@@ -101,10 +108,7 @@ def build_demo_assets(
                 if keys and universe_dim in keys and date_dim in keys:
                     partition = PartitionRun(
                         universe=parse_universe_spec(keys[universe_dim]),
-                        dates=DatePartition(
-                            start_date=keys[date_dim],
-                            end_date=keys[date_dim],
-                        ),
+                        dates=parse_date_key(keys[date_dim]),
                     )
                 else:
                     partition = PartitionRun(

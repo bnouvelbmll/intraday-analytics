@@ -20,13 +20,12 @@ import os
 from dagster import (
     Definitions,
     StaticPartitionsDefinition,
-    DailyPartitionsDefinition,
     MultiPartitionsDefinition,
-    TimeWindowPartitionsDefinition,
 )
 from intraday_analytics.dagster_compat import (
     build_demo_assets,
 )
+from intraday_analytics.utils import create_date_batches
 
 def _available_mics():
     import bmll.reference
@@ -41,16 +40,15 @@ def _available_mics():
 def _build_partitions():
     start_date = "2015-01-01"
     end_date = (dt.date.today() - dt.timedelta(days=1)).isoformat()
-    part_days = 1
-    part_days = int(os.getenv("PART_DAYS", part_days))
-    if part_days == 1:
-        date_partitions = DailyPartitionsDefinition(start_date=start_date, end_date=end_date)
-    else:
-        date_partitions = TimeWindowPartitionsDefinition(
-            start=start_date,
-            cron_schedule=f"0 0 */{part_days} * *",
-            fmt="%Y-%m-%d",
-        )
+    batch_freq = os.getenv("BATCH_FREQ")
+    batches = create_date_batches(start_date, end_date, batch_freq)
+    date_keys = [
+        b[0].date().isoformat()
+        if b[0].date() == b[1].date()
+        else f"{b[0].date().isoformat()}_{b[1].date().isoformat()}"
+        for b in batches
+    ]
+    date_partitions = StaticPartitionsDefinition(date_keys)
     universe_partitions = StaticPartitionsDefinition([f"mic={mic}" for mic in _available_mics()])
     return MultiPartitionsDefinition({"universe": universe_partitions, "date": date_partitions})
 

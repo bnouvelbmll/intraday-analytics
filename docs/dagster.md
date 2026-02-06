@@ -133,7 +133,6 @@ it to your asset/job. For example:
 ```python
 from dagster import (
     StaticPartitionsDefinition,
-    DailyPartitionsDefinition,
     MultiPartitionsDefinition,
     asset,
 )
@@ -145,7 +144,7 @@ from intraday_analytics.dagster_compat import (
 )
 
 universe_partitions = StaticPartitionsDefinition(["mic=XLON", "mic=XPAR"])
-date_partitions = DailyPartitionsDefinition(start_date="2025-01-02", end_date="2025-01-03")
+date_partitions = StaticPartitionsDefinition(["2025-01-02", "2025-01-03_2025-01-09"])
 partitions_def = MultiPartitionsDefinition({"universe": universe_partitions, "date": date_partitions})
 
 @asset(name="demo06_characteristics", partitions_def=partitions_def)
@@ -166,9 +165,9 @@ The helper script `scripts/setup_dagster_demo.sh`:
 - sets `DAGSTER_HOME=/home/bmll/user/my-dagster`
 - builds universe partitions from `bmll.reference.available_markets()` (Equity + IsAlive)
 - builds date partitions from `2015-01-01` to yesterday
-- honors `PART_DAYS` (environment variable) to group date partitions
+- honors `BATCH_FREQ` (environment variable) to align with CLI batching
 
 Example:
 ```bash
-PART_DAYS=7 ./scripts/setup_dagster_demo.sh
+BATCH_FREQ=W ./scripts/setup_dagster_demo.sh
 ```
