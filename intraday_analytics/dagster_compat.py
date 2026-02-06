@@ -83,6 +83,7 @@ def build_demo_assets(
     universe_dim: str = "universe",
     date_dim: str = "date",
     split_passes: bool = False,
+    input_asset_keys: Sequence | None = None,
 ):
     """
     Discover demo modules and return Dagster assets for each demo.
@@ -103,12 +104,13 @@ def build_demo_assets(
         base_config = module.USER_CONFIG
         passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
 
-        def _make_demo_asset(module, asset_name, asset_group, config_override):
+        def _make_demo_asset(module, asset_name, asset_group, config_override, deps):
             @asset(
                 name=asset_name,
                 partitions_def=partitions_def,
                 group_name=asset_group,
                 key_prefix=[asset_group],
+                deps=deps,
             )
             def _demo_asset(context=None):
                 base_config = config_override
@@ -152,11 +154,20 @@ def build_demo_assets(
                 pass_name = _sanitize_name(pass_config.get("name", "pass"))
                 asset_name = pass_name
                 per_pass_config = {**base_config, "PASSES": [pass_config]}
+                deps = list(input_asset_keys or [])
+                if assets:
+                    prev_key = assets[-1].key
+                    deps.append(prev_key)
                 assets.append(
-                    _make_demo_asset(module, asset_name, asset_base, per_pass_config)
+                    _make_demo_asset(
+                        module, asset_name, asset_base, per_pass_config, deps
+                    )
                 )
         else:
-            assets.append(_make_demo_asset(module, asset_base, asset_base, base_config))
+            deps = list(input_asset_keys or [])
+            assets.append(
+                _make_demo_asset(module, asset_base, asset_base, base_config, deps)
+            )
 
     return assets
 
@@ -259,6 +270,7 @@ def build_input_source_assets(
     mic_dim: str = "mic",
     cbbo_dim: str = "cbbo",
     asset_key_prefix: Sequence[str] | None = None,
+    group_name: str = "BMLL",
 ):
     """
     Build Dagster SourceAssets for raw input tables (l2, l3, trades, etc.).
@@ -302,6 +314,7 @@ def build_input_source_assets(
                 key=asset_key,
                 partitions_def=partitions_def,
                 description=f"External BMLL table: {table.name}",
+                group_name=group_name,
                 metadata={
                     "table": table.name,
                     "s3_folder": table.s3_folder_name,
