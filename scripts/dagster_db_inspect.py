@@ -49,6 +49,7 @@ def inspect_db(
     show_materializations: bool = True,
     show_asset_key_counts: bool = True,
     show_asset_key_partition_counts: bool = True,
+    show_partition_breakdown: bool = True,
 ):
     """
     Inspect event log and asset index tables for a given run_id (default: RUNLESS).
@@ -170,6 +171,34 @@ def inspect_db(
                 print(
                     f"  id={row.id} type={row.dagster_event_type} "
                     f"ts={row.timestamp} partition={row.partition}"
+                )
+
+            if show_partition_breakdown:
+                part_rows = conn.execute(
+                    select(SqlEventLogStorageTable.c.partition)
+                    .where(
+                        SqlEventLogStorageTable.c.asset_key == asset_key,
+                        SqlEventLogStorageTable.c.partition != None,  # noqa: E711
+                    )
+                ).fetchall()
+                partitions = [r[0] for r in part_rows if r and r[0]]
+                dates = set()
+                mics = set()
+                invalid = 0
+                for p in partitions:
+                    if "|" not in p:
+                        invalid += 1
+                        continue
+                    date_part, mic_part = p.split("|", 1)
+                    dates.add(date_part)
+                    mics.add(mic_part)
+                print(
+                    "partition_breakdown: total={} distinct_dates={} distinct_mics={} invalid={}".format(
+                        len(partitions),
+                        len(dates),
+                        len(mics),
+                        invalid,
+                    )
                 )
 
     with storage.index_connection() as conn:
