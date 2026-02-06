@@ -82,6 +82,7 @@ def build_demo_assets(
     partitions_def=None,
     universe_dim: str = "universe",
     date_dim: str = "date",
+    split_passes: bool = False,
 ):
     """
     Discover demo modules and return Dagster assets for each demo.
@@ -98,12 +99,19 @@ def build_demo_assets(
     assets = []
     for module in demos:
         name = module.__name__.split(".")[-1]
-        asset_name = f"demo{name}" if name[0].isdigit() else name
+        asset_base = f"demo{name}" if name[0].isdigit() else name
+        base_config = module.USER_CONFIG
+        passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
 
-        def _make_demo_asset(module):
-            @asset(name=asset_name, partitions_def=partitions_def)
+        def _make_demo_asset(module, asset_name, asset_group, config_override):
+            @asset(
+                name=asset_name,
+                partitions_def=partitions_def,
+                group_name=asset_group,
+                key_prefix=[asset_group],
+            )
             def _demo_asset(context=None):
-                base_config = module.USER_CONFIG
+                base_config = config_override
                 default_get_universe = module.get_universe
                 get_pipeline = getattr(module, "get_pipeline", None)
                 if context and getattr(context, "partition_key", None):
@@ -139,7 +147,16 @@ def build_demo_assets(
 
             return _demo_asset
 
-        assets.append(_make_demo_asset(module))
+        if split_passes and passes:
+            for pass_config in passes:
+                pass_name = _sanitize_name(pass_config.get("name", "pass"))
+                asset_name = pass_name
+                per_pass_config = {**base_config, "PASSES": [pass_config]}
+                assets.append(
+                    _make_demo_asset(module, asset_name, asset_base, per_pass_config)
+                )
+        else:
+            assets.append(_make_demo_asset(module, asset_base, asset_base, base_config))
 
     return assets
 
@@ -149,6 +166,7 @@ def build_demo_materialization_checks(
     universe_dim: str = "universe",
     date_dim: str = "date",
     check_mode: str = "recursive",
+    split_passes: bool = False,
 ):
     """
     Create Dagster asset checks that validate demo materializations by checking
@@ -166,11 +184,12 @@ def build_demo_materialization_checks(
 
     for module in demos:
         name = module.__name__.split(".")[-1]
-        asset_name = f"demo{name}" if name[0].isdigit() else name
+        asset_base = f"demo{name}" if name[0].isdigit() else name
         base_config = module.USER_CONFIG
+        passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
 
-        def _make_materialized_check(base_config):
-            @asset_check(asset=AssetKey(asset_name), name="s3_materialized")
+        def _make_materialized_check(base_config, asset_key, pass_name: str | None):
+            @asset_check(asset=asset_key, name="s3_materialized")
             def _materialized_check(context):
                 keys = _safe_partition_keys(context)
                 if keys and universe_dim in keys and date_dim in keys:
@@ -196,7 +215,10 @@ def build_demo_materialization_checks(
                 )
 
                 missing = []
-                for pass_config in config.PASSES:
+                pass_list = config.PASSES
+                if pass_name:
+                    pass_list = [p for p in pass_list if p.name == pass_name]
+                for pass_config in pass_list:
                     output_path = get_final_s3_path(
                         partition.dates.start_date,
                         partition.dates.end_date,
@@ -216,7 +238,13 @@ def build_demo_materialization_checks(
 
             return _materialized_check
 
-        checks.append(_make_materialized_check(base_config))
+        if split_passes and passes:
+            for pass_config in passes:
+                pass_name = _sanitize_name(pass_config.get("name", "pass"))
+                asset_key = AssetKey([asset_base, pass_name])
+                checks.append(_make_materialized_check(base_config, asset_key, pass_name))
+        else:
+            checks.append(_make_materialized_check(base_config, AssetKey(asset_base), None))
 
     return checks
 
@@ -686,3 +714,9 @@ def _parse_table_s3_path(table, path: str) -> tuple[str, str] | None:
         return None
     date_key = f"{yyyy}-{mm}-{dd}"
     return mic, date_key
+
+
+def _sanitize_name(name: str) -> str:
+    if not name:
+        return "pass"
+    return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)

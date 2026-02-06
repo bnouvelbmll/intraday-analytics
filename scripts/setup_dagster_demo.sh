@@ -78,8 +78,11 @@ daily_partitions = _build_daily_partitions()
 mic_partitions = StaticPartitionsDefinition(_available_mics())
 cbbo_partitions = _cbbo_partitions()
 
-demo_assets = build_demo_assets(partitions_def=partitions_def)
-demo_checks = build_demo_materialization_checks(check_mode=os.getenv("S3_CHECK_MODE", "head"))
+demo_assets = build_demo_assets(partitions_def=partitions_def, split_passes=True)
+demo_checks = build_demo_materialization_checks(
+    check_mode=os.getenv("S3_CHECK_MODE", "head"),
+    split_passes=True,
+)
 
 input_assets, input_table_map = build_input_source_assets(
     date_partitions_def=daily_partitions,
