@@ -28,6 +28,7 @@ from intraday_analytics.dagster_compat import (
     build_input_source_assets,
     build_s3_input_asset_checks,
     build_s3_input_observation_sensor,
+    build_s3_input_sync_job,
 )
 from intraday_analytics.utils import create_date_batches
 
@@ -110,11 +111,18 @@ input_sensor = build_s3_input_observation_sensor(
     check_mode=os.getenv("S3_CHECK_MODE", "head"),
     mics=_available_mics()[:5],
 )
+input_sync_job = build_s3_input_sync_job(
+    name="s3_input_sync",
+    assets=input_assets,
+    table_map=input_table_map,
+    check_mode=os.getenv("S3_CHECK_MODE", "head"),
+)
 
 defs = Definitions(
     assets=[*demo_assets, *input_assets],
     asset_checks=[*demo_checks, *input_checks],
     sensors=[input_sensor],
+    jobs=[input_sync_job],
 )
 PY
 

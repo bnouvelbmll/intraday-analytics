@@ -503,6 +503,7 @@ def build_s3_input_observation_sensor(
 
         emit_all = os.getenv("S3_SENSOR_EMIT_ALL", "0") in {"1", "true", "True"}
         max_events = int(os.getenv("S3_SENSOR_MAX_OBSERVATIONS", "1000"))
+        force_refresh = os.getenv("S3_SENSOR_FORCE_REFRESH", "0") in {"1", "true", "True"}
 
         events = []
         logging.info(
@@ -521,14 +522,14 @@ def build_s3_input_observation_sensor(
                 prefix = _s3_table_root_prefix(table)
                 if not prefix:
                     continue
-                objects = _s3_list_all_objects(prefix)
+                objects = _s3_list_all_objects(prefix, force_refresh=force_refresh)
                 logging.info(
                     "s3 sensor recursive prefix=%s objects=%d asset=%s",
                     prefix,
                     len(objects),
                     asset.key,
                 )
-                for path in objects:
+                for path, meta in objects.items():
                     parsed = _parse_table_s3_path(table, path)
                     if not parsed:
                         continue
@@ -538,7 +539,16 @@ def build_s3_input_observation_sensor(
                     else:
                         pk = MultiPartitionKey({date_dim: part_date, mic_dim: part_mic})
                     events.append(
-                        AssetObservation(asset_key=asset.key, partition=str(pk))
+                        AssetObservation(
+                            asset_key=asset.key,
+                            partition=str(pk),
+                            metadata={
+                                "s3_path": path,
+                                "size_bytes": meta.get("size_bytes"),
+                                "last_modified": meta.get("last_modified"),
+                                "source": "s3_listing",
+                            },
+                        )
                     )
                     if len(events) >= max_events:
                         break
@@ -554,7 +564,9 @@ def build_s3_input_observation_sensor(
                 if all(_s3_path_exists(p, check_mode=check_mode) for p in s3_paths):
                     events.append(
                         AssetObservation(
-                            asset_key=asset.key, partition=str(partition_key)
+                            asset_key=asset.key,
+                            partition=str(partition_key),
+                            metadata={"s3_paths": s3_paths, "source": "s3_check"},
                         )
                     )
                 continue
@@ -569,7 +581,9 @@ def build_s3_input_observation_sensor(
                 if all(_s3_path_exists(p, check_mode=check_mode) for p in s3_paths):
                     events.append(
                         AssetObservation(
-                            asset_key=asset.key, partition=str(partition_key)
+                            asset_key=asset.key,
+                            partition=str(partition_key),
+                            metadata={"s3_paths": s3_paths, "source": "s3_check"},
                         )
                     )
                     if len(events) >= max_events:
@@ -584,6 +598,102 @@ def build_s3_input_observation_sensor(
         return SensorResult(asset_events=events)
 
     return _sensor
+
+
+def build_s3_input_sync_job(
+    *,
+    name: str,
+    assets: Sequence,
+    table_map: dict,
+    date_dim: str = "date",
+    mic_dim: str = "mic",
+    cbbo_dim: str = "cbbo",
+    check_mode: str = "recursive",
+):
+    """
+    Build a manual job to bulk-emit AssetObservations from S3 listings.
+    Intended for fast initial sync without relying on the sensor.
+    """
+    try:
+        from dagster import AssetObservation, MultiPartitionKey, job, op
+    except Exception as exc:
+        raise ImportError("Dagster is required to build sync jobs.") from exc
+
+    @op(name="sync_s3_input_assets")
+    def _sync_op(context):
+        force_refresh = os.getenv("S3_SYNC_FORCE_REFRESH", "0") in {"1", "true", "True"}
+        reset = os.getenv("S3_SYNC_RESET", "0") in {"1", "true", "True"}
+        max_events = int(os.getenv("S3_SYNC_MAX_OBSERVATIONS", "100000"))
+
+        emitted = 0
+        for asset in assets:
+            table = table_map.get(asset.key)
+            if not table:
+                continue
+
+            if check_mode != "recursive":
+                context.log.warning(
+                    "sync job requires recursive mode; skipping asset=%s", asset.key
+                )
+                continue
+
+            prefix = _s3_table_root_prefix(table)
+            if not prefix:
+                context.log.warning("missing s3 prefix for asset=%s", asset.key)
+                continue
+
+            objects = _s3_list_all_objects(prefix, force_refresh=force_refresh)
+            paths = sorted(objects.keys())
+
+            cursor_path = _s3_sync_cursor_path(table)
+            cursor = 0
+            if not reset:
+                cursor = _s3_sync_cursor_load(cursor_path)
+
+            context.log.info(
+                "sync asset=%s objects=%d cursor=%d",
+                asset.key,
+                len(paths),
+                cursor,
+            )
+
+            for path in paths[cursor:]:
+                parsed = _parse_table_s3_path(table, path)
+                if not parsed:
+                    cursor += 1
+                    continue
+                part_mic, part_date = parsed
+                if asset.metadata.get("partitioning") == "cbbo_date":
+                    pk = MultiPartitionKey({date_dim: part_date, cbbo_dim: part_mic})
+                else:
+                    pk = MultiPartitionKey({date_dim: part_date, mic_dim: part_mic})
+                meta = objects.get(path, {})
+                yield AssetObservation(
+                    asset_key=asset.key,
+                    partition=str(pk),
+                    metadata={
+                        "s3_path": path,
+                        "size_bytes": meta.get("size_bytes"),
+                        "last_modified": meta.get("last_modified"),
+                        "source": "s3_sync_job",
+                    },
+                )
+                emitted += 1
+                cursor += 1
+                if emitted >= max_events:
+                    break
+
+            _s3_sync_cursor_store(cursor_path, cursor)
+            if emitted >= max_events:
+                break
+
+        context.log.info("sync emitted=%d", emitted)
+
+    @job(name=name)
+    def _sync_job():
+        _sync_op()
+
+    return _sync_job
 
 
 def run_partition(
@@ -632,7 +742,7 @@ def _discover_demo_modules(demo_pkg: str):
     return demos
 
 
-_S3_LIST_CACHE: dict[str, set[str]] = {}
+_S3_LIST_CACHE: dict[str, dict[str, dict]] = {}
 _S3_CACHE_TTL_SECONDS = 15 * 60
 _S3_CACHE_DIR = os.getenv("S3_LIST_CACHE_DIR", "/tmp/dagster_s3_cache")
 
@@ -678,16 +788,16 @@ def _s3_path_in_recursive_listing(path: str) -> bool:
     return path in _S3_LIST_CACHE[prefix]
 
 
-def _s3_list_all_objects(prefix: str) -> set[str]:
+def _s3_list_all_objects(prefix: str, *, force_refresh: bool = False) -> dict[str, dict]:
     try:
         import boto3
     except Exception:
-        return set()
+        return {}
 
     if not prefix.startswith("s3://"):
-        return set()
+        return {}
 
-    cached = _s3_cache_load(prefix)
+    cached = _s3_cache_load(prefix) if not force_refresh else None
     if cached is not None:
         logging.info(
             "s3 list cache hit prefix=%s objects=%d",
@@ -700,17 +810,23 @@ def _s3_list_all_objects(prefix: str) -> set[str]:
     bucket, _, key_prefix = rest.partition("/")
     client = boto3.client("s3")
     paginator = client.get_paginator("list_objects_v2")
-    keys: set[str] = set()
+    objects: dict[str, dict] = {}
     for page in paginator.paginate(Bucket=bucket, Prefix=key_prefix):
         for item in page.get("Contents", []):
-            keys.add(f"s3://{bucket}/{item['Key']}")
-    _s3_cache_store(prefix, keys)
+            path = f"s3://{bucket}/{item['Key']}"
+            objects[path] = {
+                "size_bytes": item.get("Size"),
+                "last_modified": item.get("LastModified").isoformat()
+                if item.get("LastModified")
+                else None,
+            }
+    _s3_cache_store(prefix, objects)
     logging.info(
         "s3 list refresh prefix=%s objects=%d",
         prefix,
-        len(keys),
+        len(objects),
     )
-    return keys
+    return objects
 
 
 def _s3_cache_path(prefix: str) -> str:
@@ -729,15 +845,17 @@ def _s3_cache_load(prefix: str) -> set[str] | None:
         ts = payload.get("timestamp", 0)
         if time.time() - ts > _S3_CACHE_TTL_SECONDS:
             return None
+        if "objects" in payload:
+            return payload.get("objects", {})
         keys = payload.get("keys", [])
-        return set(keys)
+        return {key: {} for key in keys}
     except Exception:
         return None
 
 
-def _s3_cache_store(prefix: str, keys: set[str]) -> None:
+def _s3_cache_store(prefix: str, objects: dict[str, dict]) -> None:
     path = _s3_cache_path(prefix)
-    payload = {"timestamp": time.time(), "keys": sorted(keys)}
+    payload = {"timestamp": time.time(), "objects": objects}
     try:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle)
@@ -811,6 +929,32 @@ def _sanitize_name(name: str) -> str:
     if not name:
         return "pass"
     return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
+
+
+def _s3_sync_cursor_path(table) -> str:
+    os.makedirs(_S3_CACHE_DIR, exist_ok=True)
+    digest = sha1(f"sync:{table.name}".encode("utf-8")).hexdigest()
+    return os.path.join(_S3_CACHE_DIR, f"{digest}.cursor.json")
+
+
+def _s3_sync_cursor_load(path: str) -> int:
+    try:
+        if not os.path.exists(path):
+            return 0
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return int(payload.get("cursor", 0))
+    except Exception:
+        return 0
+
+
+def _s3_sync_cursor_store(path: str, cursor: int) -> None:
+    payload = {"timestamp": time.time(), "cursor": cursor}
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+    except Exception:
+        return
 
 
 def _filter_input_deps(input_asset_keys, pass_config) -> list:
