@@ -21,6 +21,7 @@ from dagster._core.events import (
     StepMaterializationData,
     AssetObservationData,
 )
+from dagster._serdes import deserialize_value
 from dagster._core.events.log import EventLogEntry
 from dagster._core.instance.utils import RUNLESS_JOB_NAME, RUNLESS_RUN_ID
 from dagster._core.storage.event_log.schema import (
@@ -60,7 +61,16 @@ def _parse_tables(tables: str | None) -> list[str]:
     return [t.strip() for t in tables.split(",") if t.strip()]
 
 
-def _build_event(asset_event, ts: float) -> EventLogEntry:
+def _asset_step_key(asset_event) -> str | None:
+    if getattr(asset_event, "asset_key", None):
+        step_key = f"asset:{asset_event.asset_key.to_user_string()}"
+        if getattr(asset_event, "partition", None):
+            step_key = f"{step_key}:{asset_event.partition}"
+        return step_key
+    return None
+
+
+def _build_dagster_event(asset_event, job_name: str, step_key: str | None) -> DagsterEvent:
     if isinstance(asset_event, AssetMaterialization):
         event_type = DagsterEventType.ASSET_MATERIALIZATION.value
         data_payload = StepMaterializationData(asset_event)
@@ -70,23 +80,31 @@ def _build_event(asset_event, ts: float) -> EventLogEntry:
     else:
         raise ValueError(f"Unsupported event type {type(asset_event)}")
 
-    step_key = None
-    if getattr(asset_event, "asset_key", None):
-        step_key = f"asset:{asset_event.asset_key.to_user_string()}"
-        if getattr(asset_event, "partition", None):
-            step_key = f"{step_key}:{asset_event.partition}"
-
-    dagster_event = DagsterEvent(
+    return DagsterEvent(
         event_type_value=event_type,
         event_specific_data=data_payload,
-        job_name=RUNLESS_JOB_NAME,
+        job_name=job_name,
         step_key=step_key,
     )
+
+
+def _build_event(asset_event, ts: float, run_id: str, job_name: str) -> EventLogEntry:
+    if isinstance(asset_event, AssetMaterialization):
+        event_type = DagsterEventType.ASSET_MATERIALIZATION.value
+        data_payload = StepMaterializationData(asset_event)
+    elif isinstance(asset_event, AssetObservation):
+        event_type = DagsterEventType.ASSET_OBSERVATION.value
+        data_payload = AssetObservationData(asset_event)
+    else:
+        raise ValueError(f"Unsupported event type {type(asset_event)}")
+
+    step_key = _asset_step_key(asset_event)
+    dagster_event = _build_dagster_event(asset_event, job_name, step_key)
     return EventLogEntry(
         user_message="",
         level=logging.INFO,
-        job_name=RUNLESS_JOB_NAME,
-        run_id=RUNLESS_RUN_ID,
+        job_name=job_name,
+        run_id=run_id,
         error_info=None,
         timestamp=ts,
         step_key=dagster_event.step_key,
@@ -94,14 +112,103 @@ def _build_event(asset_event, ts: float) -> EventLogEntry:
     )
 
 
+def _build_event_from_seed(
+    seed: EventLogEntry,
+    asset_event,
+    ts: float,
+    run_id: str,
+    job_name: str,
+) -> EventLogEntry:
+    step_key = _asset_step_key(asset_event)
+    dagster_event = seed.dagster_event._replace(
+        event_type_value=seed.dagster_event.event_type_value,
+        event_specific_data=seed.dagster_event.event_specific_data,
+        job_name=job_name,
+        step_key=step_key,
+    )
+    if isinstance(asset_event, AssetMaterialization):
+        dagster_event = dagster_event._replace(
+            event_type_value=DagsterEventType.ASSET_MATERIALIZATION.value,
+            event_specific_data=StepMaterializationData(asset_event),
+        )
+    elif isinstance(asset_event, AssetObservation):
+        dagster_event = dagster_event._replace(
+            event_type_value=DagsterEventType.ASSET_OBSERVATION.value,
+            event_specific_data=AssetObservationData(asset_event),
+        )
+    else:
+        raise ValueError(f"Unsupported event type {type(asset_event)}")
+
+    return seed._replace(
+        run_id=run_id,
+        job_name=job_name,
+        timestamp=ts,
+        step_key=step_key,
+        dagster_event=dagster_event,
+    )
+
+
+def _fetch_latest_event_entry(
+    storage: SqlEventLogStorage,
+    *,
+    run_id: str,
+    asset_key_str: str,
+    event_type: str,
+) -> EventLogEntry | None:
+    with storage.run_connection(run_id) as conn:
+        row = conn.execute(
+            SqlEventLogStorageTable.select()
+            .where(
+                SqlEventLogStorageTable.c.asset_key == asset_key_str,
+                SqlEventLogStorageTable.c.dagster_event_type == event_type,
+            )
+            .order_by(SqlEventLogStorageTable.c.id.desc())
+            .limit(1)
+        ).fetchone()
+    if not row:
+        return None
+    return deserialize_value(row.event)
+
+
+def _seed_with_api(
+    instance: DagsterInstance,
+    storage: SqlEventLogStorage,
+    asset_event,
+    run_id: str,
+    job_name: str,
+    ts: float,
+) -> EventLogEntry | None:
+    if run_id == RUNLESS_RUN_ID:
+        instance.report_runless_asset_event(asset_event)
+    else:
+        dagster_event = _build_dagster_event(
+            asset_event, job_name, _asset_step_key(asset_event)
+        )
+        instance.report_dagster_event(
+            dagster_event=dagster_event,
+            run_id=run_id,
+            timestamp=ts,
+        )
+    return _fetch_latest_event_entry(
+        storage,
+        run_id=run_id,
+        asset_key_str=asset_event.asset_key.to_string(),
+        event_type=(
+            DagsterEventType.ASSET_MATERIALIZATION.value
+            if isinstance(asset_event, AssetMaterialization)
+            else DagsterEventType.ASSET_OBSERVATION.value
+        ),
+    )
+
+
 def _insert_events(
     storage: SqlEventLogStorage,
     events: list[EventLogEntry],
+    run_id: str,
 ):
     if not events:
         return []
 
-    run_id = RUNLESS_RUN_ID
     rows = [storage._event_to_row(evt) for evt in events]
 
     with storage.run_connection(run_id) as conn:
@@ -177,6 +284,9 @@ def sync(
     emit_materializations: bool = True,
     force_refresh: bool = False,
     batch_size: int = 500,
+    run_id: str | None = None,
+    job_name: str | None = None,
+    seed_with_api: bool = False,
 ):
     """
     Bulk sync S3 objects into Dagster event log via direct DB writes.
@@ -189,6 +299,9 @@ def sync(
         emit_materializations: emit AssetMaterialization events.
         force_refresh: bypass cache for S3 listings.
         batch_size: number of event log entries per insert batch.
+        run_id: optional Dagster run id to associate events with.
+        job_name: optional job name for inserted events.
+        seed_with_api: use Dagster API once per event type to seed templates.
     """
     if not start_date or not end_date:
         start_date, end_date = _date_range_default()
@@ -203,6 +316,12 @@ def sync(
 
     table_list = _parse_tables(tables)
     total_emitted = 0
+    target_run_id = run_id if run_id is not None else RUNLESS_RUN_ID
+    target_job_name = job_name if job_name is not None else RUNLESS_JOB_NAME
+
+    if target_run_id != RUNLESS_RUN_ID:
+        if instance.get_run_by_id(target_run_id) is None:
+            print(f"warning: run_id {target_run_id} not found in run storage")
 
     for table_name in table_list:
         table = ALL_TABLES.get(table_name)
@@ -225,6 +344,7 @@ def sync(
         asset_key = AssetKey(["BMLL", table_name])
 
         batch: list[EventLogEntry] = []
+        seed_templates: dict[str, EventLogEntry] = {}
         for path, meta, mic, date_key in tqdm(
             filtered,
             desc=f"sync {table_name}",
@@ -241,21 +361,66 @@ def sync(
                 obs = AssetObservation(
                     asset_key=asset_key, partition=partition, metadata=metadata
                 )
-                batch.append(_build_event(obs, ts))
+                if seed_with_api and DagsterEventType.ASSET_OBSERVATION.value not in seed_templates:
+                    seed = _seed_with_api(
+                        instance, storage, obs, target_run_id, target_job_name, ts
+                    )
+                    if seed:
+                        seed_templates[DagsterEventType.ASSET_OBSERVATION.value] = seed
+                        total_emitted += 1
+                        obs = None
+                if obs is not None:
+                    if DagsterEventType.ASSET_OBSERVATION.value in seed_templates:
+                        batch.append(
+                            _build_event_from_seed(
+                                seed_templates[DagsterEventType.ASSET_OBSERVATION.value],
+                                obs,
+                                ts,
+                                target_run_id,
+                                target_job_name,
+                            )
+                        )
+                    else:
+                        batch.append(_build_event(obs, ts, target_run_id, target_job_name))
             if emit_materializations:
                 mat = AssetMaterialization(
                     asset_key=asset_key, partition=partition, metadata=metadata
                 )
-                batch.append(_build_event(mat, ts))
+                if (
+                    seed_with_api
+                    and DagsterEventType.ASSET_MATERIALIZATION.value not in seed_templates
+                ):
+                    seed = _seed_with_api(
+                        instance, storage, mat, target_run_id, target_job_name, ts
+                    )
+                    if seed:
+                        seed_templates[DagsterEventType.ASSET_MATERIALIZATION.value] = seed
+                        total_emitted += 1
+                        mat = None
+                if mat is not None:
+                    if DagsterEventType.ASSET_MATERIALIZATION.value in seed_templates:
+                        batch.append(
+                            _build_event_from_seed(
+                                seed_templates[
+                                    DagsterEventType.ASSET_MATERIALIZATION.value
+                                ],
+                                mat,
+                                ts,
+                                target_run_id,
+                                target_job_name,
+                            )
+                        )
+                    else:
+                        batch.append(_build_event(mat, ts, target_run_id, target_job_name))
 
             if len(batch) >= batch_size:
-                event_ids = _insert_events(storage, batch)
+                event_ids = _insert_events(storage, batch, target_run_id)
                 _update_asset_indexes(storage, batch, event_ids)
                 total_emitted += len(batch)
                 batch = []
 
         if batch:
-            event_ids = _insert_events(storage, batch)
+            event_ids = _insert_events(storage, batch, target_run_id)
             _update_asset_indexes(storage, batch, event_ids)
             total_emitted += len(batch)
 
