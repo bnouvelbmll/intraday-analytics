@@ -103,6 +103,7 @@ def build_demo_assets(
         asset_base = f"demo{name}" if name[0].isdigit() else name
         base_config = module.USER_CONFIG
         passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
+        last_pass_key = None
 
         def _make_demo_asset(module, asset_name, asset_group, config_override, deps):
             @asset(
@@ -154,15 +155,15 @@ def build_demo_assets(
                 pass_name = _sanitize_name(pass_config.get("name", "pass"))
                 asset_name = pass_name
                 per_pass_config = {**base_config, "PASSES": [pass_config]}
-                deps = list(input_asset_keys or [])
-                if assets:
-                    prev_key = assets[-1].key
-                    deps.append(prev_key)
+                deps = _filter_input_deps(input_asset_keys, pass_config)
+                if last_pass_key is not None:
+                    deps.append(last_pass_key)
                 assets.append(
                     _make_demo_asset(
                         module, asset_name, asset_base, per_pass_config, deps
                     )
                 )
+                last_pass_key = assets[-1].key
         else:
             deps = list(input_asset_keys or [])
             assets.append(
@@ -733,3 +734,70 @@ def _sanitize_name(name: str) -> str:
     if not name:
         return "pass"
     return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
+
+
+def _filter_input_deps(input_asset_keys, pass_config) -> list:
+    if not input_asset_keys or not isinstance(pass_config, dict):
+        return list(input_asset_keys or [])
+
+    required_tables = _required_tables_for_pass(pass_config)
+    if not required_tables:
+        return list(input_asset_keys or [])
+
+    deps = []
+    for key in input_asset_keys:
+        table = _table_from_asset_key(key)
+        if not table or table in required_tables:
+            deps.append(key)
+    return deps
+
+
+def _table_from_asset_key(asset_key) -> str | None:
+    try:
+        path = asset_key.path
+    except Exception:
+        return None
+    if not path:
+        return None
+    if len(path) >= 2 and path[0] == "input":
+        return path[1]
+    if len(path) == 1:
+        return path[0]
+    return path[-1]
+
+
+def _required_tables_for_pass(pass_config: dict) -> set[str]:
+    modules = pass_config.get("modules", []) if isinstance(pass_config, dict) else []
+    module_requires = _module_requires_map()
+    required = set()
+    for module in modules:
+        for table in module_requires.get(module, []):
+            required.add(table)
+    return required
+
+
+def _module_requires_map() -> dict[str, list[str]]:
+    from .dense_analytics import DenseAnalytics
+    from .analytics.trade import TradeAnalytics
+    from .analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
+    from .analytics.l3 import L3Analytics
+    from .analytics.execution import ExecutionAnalytics
+    from .analytics.generic import GenericAnalytics
+    from .analytics.l3_characteristics import L3CharacteristicsAnalytics
+    from .analytics.trade_characteristics import TradeCharacteristicsAnalytics
+    from .analytics.cbbo import CBBOAnalytics
+    from .analytics.iceberg import IcebergAnalytics
+
+    return {
+        "dense": DenseAnalytics.REQUIRES,
+        "trade": TradeAnalytics.REQUIRES,
+        "l2": L2AnalyticsLast.REQUIRES,
+        "l2tw": L2AnalyticsTW.REQUIRES,
+        "l3": L3Analytics.REQUIRES,
+        "execution": ExecutionAnalytics.REQUIRES,
+        "generic": GenericAnalytics.REQUIRES,
+        "l3_characteristics": L3CharacteristicsAnalytics.REQUIRES,
+        "trade_characteristics": TradeCharacteristicsAnalytics.REQUIRES,
+        "cbbo": CBBOAnalytics.REQUIRES,
+        "iceberg": IcebergAnalytics.REQUIRES,
+    }
