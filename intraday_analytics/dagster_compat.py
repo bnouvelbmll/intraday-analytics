@@ -219,7 +219,7 @@ def build_demo_materialization_checks(
     demo_pkg: str = "demo",
     universe_dim: str = "universe",
     date_dim: str = "date",
-    check_mode: str = "recursive",
+    check_mode: str = "head",
     split_passes: bool = False,
 ):
     """
@@ -388,7 +388,8 @@ def build_s3_input_asset_checks(
     date_dim: str = "date",
     mic_dim: str = "mic",
     cbbo_dim: str = "cbbo",
-    check_mode: str = "recursive",
+    check_mode: str = "head",
+    include_stats: bool = False,
 ):
     """
     Create asset checks for external input assets by checking S3 for the
@@ -398,7 +399,16 @@ def build_s3_input_asset_checks(
         from dagster import AssetCheckResult, asset_check
     except Exception as exc:
         raise ImportError("Dagster is required to build asset checks.") from exc
+    try:
+        from dagster import MetadataValue
+    except Exception:
+        MetadataValue = None
 
+    include_stats = include_stats or os.getenv("S3_CHECK_INCLUDE_STATS", "0") not in {
+        "0",
+        "false",
+        "False",
+    }
     checks = []
 
     for asset in assets:
@@ -416,30 +426,6 @@ def build_s3_input_asset_checks(
                 )
                 keys = _safe_partition_keys(context)
                 if not keys:
-                    if check_mode == "recursive" and _full_check_on_unpartitioned():
-                        prefix = _s3_table_root_prefix(table)
-                        if not prefix:
-                            return AssetCheckResult(
-                                passed=False,
-                                metadata={
-                                    "reason": "partitioned asset check requires a partition key"
-                                },
-                            )
-                        objects = _s3_list_all_objects(prefix)
-                        logging.info(
-                            "s3_exists unpartitioned recursive prefix=%s objects=%d",
-                            prefix,
-                            len(objects),
-                        )
-                        return AssetCheckResult(
-                            passed=bool(objects),
-                            metadata={
-                                "reason": "checked table root recursively",
-                                "prefix": prefix,
-                                "object_count": len(objects),
-                                "check_mode": check_mode,
-                            },
-                        )
                     logging.info(
                         "s3_exists skipped (no partition key) asset=%s",
                         asset.key,
@@ -480,12 +466,22 @@ def build_s3_input_asset_checks(
                     exists,
                     s3_paths,
                 )
+                metadata = {
+                    "paths": ", ".join(s3_paths),
+                    "check_mode": check_mode,
+                }
+                if include_stats:
+                    metadata.update(
+                        _build_s3_date_stats_metadata(
+                            table=table,
+                            date_key=date_key,
+                            max_rows=int(os.getenv("S3_CHECK_STATS_LIMIT", "20")),
+                            metadata_value_cls=MetadataValue,
+                        )
+                    )
                 return AssetCheckResult(
                     passed=exists,
-                    metadata={
-                        "paths": ", ".join(s3_paths),
-                        "check_mode": check_mode,
-                    },
+                    metadata=metadata,
                 )
 
             return _input_check
@@ -970,6 +966,84 @@ def _s3_list_all_objects(prefix: str, *, force_refresh: bool = False) -> dict[st
         len(objects),
     )
     return objects
+
+
+def _format_size_bytes(value: int | None) -> str:
+    if value is None:
+        return "n/a"
+    size = float(value)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{int(value)} B"
+
+
+def _build_s3_date_stats_metadata(
+    *,
+    table,
+    date_key: str,
+    max_rows: int = 20,
+    metadata_value_cls=None,
+) -> dict:
+    prefix = _s3_table_root_prefix(table)
+    if not prefix:
+        return {"stats_reason": "missing_s3_prefix", "stats_date": date_key}
+
+    objects = _s3_list_all_objects(prefix)
+    if not objects:
+        return {"stats_reason": "no_objects", "stats_date": date_key}
+
+    size_by_mic: dict[str, int] = {}
+    files_by_mic: dict[str, int] = {}
+    total_files = 0
+    total_size = 0
+
+    for path, meta in objects.items():
+        parsed = _parse_table_s3_path(table, path)
+        if not parsed:
+            continue
+        mic, obj_date = parsed
+        if obj_date != date_key:
+            continue
+        total_files += 1
+        size = meta.get("size_bytes") or 0
+        total_size += size
+        size_by_mic[mic] = size_by_mic.get(mic, 0) + size
+        files_by_mic[mic] = files_by_mic.get(mic, 0) + 1
+
+    if total_files == 0:
+        return {"stats_reason": "no_objects_for_date", "stats_date": date_key}
+
+    rows = sorted(size_by_mic.items(), key=lambda item: item[1], reverse=True)
+    if max_rows > 0:
+        rows = rows[:max_rows]
+
+    header = "| mic | files | size_bytes | size |"
+    sep = "| --- | --- | --- | --- |"
+    lines = [header, sep]
+    for mic, size in rows:
+        lines.append(
+            f"| {mic} | {files_by_mic.get(mic, 0)} | {size} | {_format_size_bytes(size)} |"
+        )
+    table_md = "\n".join(lines)
+
+    metadata: dict = {
+        "stats_date": date_key,
+        "stats_mic_count": len(size_by_mic),
+        "stats_total_files": total_files,
+        "stats_total_size_bytes": total_size,
+    }
+
+    if metadata_value_cls:
+        metadata["stats_mic_table"] = metadata_value_cls.md(table_md)
+    else:
+        metadata["stats_mic_table"] = table_md
+
+    return metadata
 
 
 def _iter_objects_newest_first(objects: dict[str, dict]):
