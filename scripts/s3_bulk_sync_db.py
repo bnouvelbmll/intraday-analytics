@@ -81,7 +81,9 @@ def _build_partition_key(
     return str(MultiPartitionKey({date_dim: date_key, mic_dim: mic_or_cbbo}))
 
 
-def _asset_step_key(asset_event) -> str | None:
+def _asset_step_key(asset_event, run_id: str) -> str | None:
+    if run_id == RUNLESS_RUN_ID:
+        return None
     if getattr(asset_event, "asset_key", None):
         step_key = f"asset:{asset_event.asset_key.to_user_string()}"
         if getattr(asset_event, "partition", None):
@@ -90,7 +92,9 @@ def _asset_step_key(asset_event) -> str | None:
     return None
 
 
-def _build_dagster_event(asset_event, job_name: str, step_key: str | None) -> DagsterEvent:
+def _build_dagster_event(
+    asset_event, job_name: str, step_key: str | None
+) -> DagsterEvent:
     if isinstance(asset_event, AssetMaterialization):
         event_type = DagsterEventType.ASSET_MATERIALIZATION.value
         data_payload = StepMaterializationData(asset_event)
@@ -118,7 +122,7 @@ def _build_event(asset_event, ts: float, run_id: str, job_name: str) -> EventLog
     else:
         raise ValueError(f"Unsupported event type {type(asset_event)}")
 
-    step_key = _asset_step_key(asset_event)
+    step_key = _asset_step_key(asset_event, run_id)
     dagster_event = _build_dagster_event(asset_event, job_name, step_key)
     return EventLogEntry(
         user_message="",
@@ -139,7 +143,7 @@ def _build_event_from_seed(
     run_id: str,
     job_name: str,
 ) -> EventLogEntry:
-    step_key = _asset_step_key(asset_event)
+    step_key = _asset_step_key(asset_event, run_id)
     dagster_event = seed.dagster_event._replace(
         event_type_value=seed.dagster_event.event_type_value,
         event_specific_data=seed.dagster_event.event_specific_data,
@@ -202,7 +206,7 @@ def _seed_with_api(
         instance.report_runless_asset_event(asset_event)
     else:
         dagster_event = _build_dagster_event(
-            asset_event, job_name, _asset_step_key(asset_event)
+            asset_event, job_name, _asset_step_key(asset_event, run_id)
         )
         instance.report_dagster_event(
             dagster_event=dagster_event,
@@ -230,22 +234,33 @@ def _insert_events(
         return []
 
     rows = [storage._event_to_row(evt) for evt in events]
+    is_run_sharded = getattr(storage, "is_run_sharded", False)
 
-    with storage.run_connection(run_id) as conn:
-        dialect = conn.engine.dialect.name
-        if dialect == "postgresql":
-            insert_stmt = SqlEventLogStorageTable.insert().returning(
-                SqlEventLogStorageTable.c.id
-            )
-            result = conn.execute(insert_stmt, rows)
-            event_ids = [row[0] for row in result.fetchall()]
-        else:
-            # SQLite: insert one-by-one to retrieve ids, but in a single transaction
+    if not is_run_sharded:
+        # Non-sharded storages: insert once and return ids.
+        with storage.run_connection(run_id) as conn:
+            dialect = conn.engine.dialect.name
+            if dialect == "postgresql":
+                insert_stmt = SqlEventLogStorageTable.insert().returning(
+                    SqlEventLogStorageTable.c.id
+                )
+                result = conn.execute(insert_stmt, rows)
+                return [row[0] for row in result.fetchall()]
             event_ids = []
             for row in rows:
                 result = conn.execute(SqlEventLogStorageTable.insert().values(**row))
                 event_ids.append(result.inserted_primary_key[0])
+            return event_ids
 
+    # Run-sharded storages (sqlite): write to run shard, mirror to index shard.
+    with storage.run_connection(run_id) as conn:
+        conn.execute(SqlEventLogStorageTable.insert(), rows)
+
+    with storage.index_connection() as conn:
+        event_ids = []
+        for row in rows:
+            result = conn.execute(SqlEventLogStorageTable.insert().values(**row))
+            event_ids.append(result.inserted_primary_key[0])
     return event_ids
 
 
