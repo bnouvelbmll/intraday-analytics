@@ -345,6 +345,7 @@ def sync(
     date_dim: str = "date",
     mic_dim: str = "mic",
     cbbo_dim: str = "cbbo",
+    refresh_status_cache: bool = True,
 ):
     """
     Bulk sync S3 objects into Dagster event log via direct DB writes.
@@ -364,6 +365,7 @@ def sync(
         date_dim: date dimension key for multipartitions.
         mic_dim: mic dimension key for multipartitions.
         cbbo_dim: cbbo dimension key for multipartitions.
+        refresh_status_cache: clear cached partition status so UI recomputes it.
     """
     if not start_date or not end_date:
         start_date, end_date = _date_range_default()
@@ -493,6 +495,10 @@ def sync(
             event_ids = _insert_events(storage, batch, target_run_id)
             _update_asset_indexes(storage, batch, event_ids)
             total_emitted += len(batch)
+
+        if refresh_status_cache:
+            # Clear cached status so UI recomputes with current definitions.
+            instance.wipe_asset_cached_status(asset_key)
 
     print(f"emitted events: {total_emitted}")
 
