@@ -14,7 +14,13 @@ from typing import Iterable
 import fire
 from tqdm import tqdm
 
-from dagster import DagsterInstance, AssetKey, AssetMaterialization, AssetObservation
+from dagster import (
+    DagsterInstance,
+    AssetKey,
+    AssetMaterialization,
+    AssetObservation,
+    MultiPartitionKey,
+)
 from dagster._core.events import (
     DagsterEvent,
     DagsterEventType,
@@ -59,6 +65,20 @@ def _parse_tables(tables: str | None) -> list[str]:
     if not tables or tables.lower() == "all":
         return list(ALL_TABLES.keys())
     return [t.strip() for t in tables.split(",") if t.strip()]
+
+
+def _build_partition_key(
+    *,
+    date_key: str,
+    mic_or_cbbo: str,
+    is_cbbo: bool,
+    date_dim: str,
+    mic_dim: str,
+    cbbo_dim: str,
+) -> str:
+    if is_cbbo:
+        return str(MultiPartitionKey({date_dim: date_key, cbbo_dim: mic_or_cbbo}))
+    return str(MultiPartitionKey({date_dim: date_key, mic_dim: mic_or_cbbo}))
 
 
 def _asset_step_key(asset_event) -> str | None:
@@ -306,6 +326,10 @@ def sync(
     run_id: str | None = None,
     job_name: str | None = None,
     seed_with_api: bool = False,
+    asset_key_prefix: str | None = "BMLL",
+    date_dim: str = "date",
+    mic_dim: str = "mic",
+    cbbo_dim: str = "cbbo",
 ):
     """
     Bulk sync S3 objects into Dagster event log via direct DB writes.
@@ -321,6 +345,10 @@ def sync(
         run_id: optional Dagster run id to associate events with.
         job_name: optional job name for inserted events.
         seed_with_api: use Dagster API once per event type to seed templates.
+        asset_key_prefix: comma-separated asset key prefix, e.g. "BMLL" or "input,BMLL".
+        date_dim: date dimension key for multipartitions.
+        mic_dim: mic dimension key for multipartitions.
+        cbbo_dim: cbbo dimension key for multipartitions.
     """
     if not start_date or not end_date:
         start_date, end_date = _date_range_default()
@@ -337,6 +365,7 @@ def sync(
     total_emitted = 0
     target_run_id = run_id if run_id is not None else RUNLESS_RUN_ID
     target_job_name = job_name if job_name is not None else RUNLESS_JOB_NAME
+    key_prefix = [p for p in (asset_key_prefix or "").split(",") if p.strip()]
 
     if target_run_id != RUNLESS_RUN_ID:
         if instance.get_run_by_id(target_run_id) is None:
@@ -360,7 +389,7 @@ def sync(
             if _date_in_range(date_key, start_date, end_date):
                 filtered.append((path, meta, mic, date_key))
 
-        asset_key = AssetKey(["BMLL", table_name])
+        asset_key = AssetKey([*key_prefix, table_name] if key_prefix else [table_name])
 
         batch: list[EventLogEntry] = []
         seed_templates: dict[str, EventLogEntry] = {}
@@ -368,7 +397,14 @@ def sync(
             filtered,
             desc=f"sync {table_name}",
         ):
-            partition = f"{date_key}|{mic}"
+            partition = _build_partition_key(
+                date_key=date_key,
+                mic_or_cbbo=mic,
+                is_cbbo=table_name == "cbbo",
+                date_dim=date_dim,
+                mic_dim=mic_dim,
+                cbbo_dim=cbbo_dim,
+            )
             metadata = {
                 "s3_path": path,
                 "size_bytes": meta.get("size_bytes"),
