@@ -498,7 +498,7 @@ def sync(
 
         if refresh_status_cache:
             # Clear cached status so UI recomputes with current definitions.
-            instance.wipe_asset_cached_status(asset_key)
+            instance.wipe_asset_cached_status([asset_key])
 
     print(f"emitted events: {total_emitted}")
 
