@@ -239,6 +239,8 @@ def _update_asset_indexes(
     has_index_cols = storage.has_asset_key_index_cols()
     tag_rows = []
 
+    from sqlalchemy import or_
+
     with storage.index_connection() as conn:
         for event, event_id in zip(events, event_ids):
             if not (event.is_dagster_event and event.dagster_event.asset_key):
@@ -248,13 +250,30 @@ def _update_asset_indexes(
                 insert_stmt = AssetKeyTable.insert().values(
                     asset_key=event.dagster_event.asset_key.to_string(), **values
                 )
+                
+                # Only update if the new event is more recent than what's in the DB
+                update_condition = (
+                    AssetKeyTable.c.asset_key == event.dagster_event.asset_key.to_string()
+                )
+                
+                if "last_materialization_timestamp" in values:
+                    new_ts = values["last_materialization_timestamp"]
+                    update_condition = update_condition & or_(
+                        AssetKeyTable.c.last_materialization_timestamp.is_(None),
+                        AssetKeyTable.c.last_materialization_timestamp < new_ts
+                    )
+                
+                if "last_observation_timestamp" in values:
+                    new_ts = values["last_observation_timestamp"]
+                    update_condition = update_condition & or_(
+                        AssetKeyTable.c.last_observation_timestamp.is_(None),
+                        AssetKeyTable.c.last_observation_timestamp < new_ts
+                    )
+
                 update_stmt = (
                     AssetKeyTable.update()
                     .values(**values)
-                    .where(
-                        AssetKeyTable.c.asset_key
-                        == event.dagster_event.asset_key.to_string()
-                    )
+                    .where(update_condition)
                 )
                 try:
                     conn.execute(insert_stmt)
