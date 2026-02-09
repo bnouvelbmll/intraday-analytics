@@ -107,12 +107,15 @@ class ModelEditor(Screen):
         self.on_save = on_save
         self.widgets: dict[str, Any] = {}
         self.status = Static("")
+        self._skip_fields = {"PASSES"} if model_cls is AnalyticsConfig else set()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Label(self.title)
         with VerticalScroll():
             for name, field in self.model_cls.model_fields.items():  # type: ignore[attr-defined]
+                if name in self._skip_fields:
+                    continue
                 annotation = _unwrap_optional(field.annotation)
                 value = self.data.get(name, field.default)
                 yield from self._render_field(name, annotation, value)

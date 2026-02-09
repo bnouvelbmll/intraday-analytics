@@ -119,6 +119,24 @@ Notes:
 
 ---
 
+## Materialization Plots
+
+Use `intraday_analytics.plotting` to visualize Dagster materializations.
+
+```python
+from dagster import DagsterInstance, AssetKey
+from intraday_analytics.plotting import materialization_dashboard
+
+instance = DagsterInstance.get()
+asset_keys = [AssetKey(["BMLL", "l2"])]
+materialization_dashboard(instance, asset_keys, metric_key="size_bytes")
+```
+
+This shows:
+- a calendar heatmap of universe count per day
+- a calendar heatmap of total size per day
+- a universe/date heatmap of `size_bytes`
+
 ## execution
 
 Purpose: execution-level metrics derived from trades and L3.
