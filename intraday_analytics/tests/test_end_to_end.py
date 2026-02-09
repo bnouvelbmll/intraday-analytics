@@ -152,7 +152,8 @@ class TestEndToEnd(unittest.TestCase):
         run_metrics_pipeline(config=self.config, get_universe=mock_get_universe)
 
         expected_out = os.path.join(
-            self.temp_dir, "final_sample2d_pass1_2025-01-01_2025-01-01.parquet"
+            self.temp_dir,
+            "final_sample2d_pass1_2025-01-01_2025-01-01.parquet",
         )
         self.assertTrue(os.path.exists(expected_out))
 

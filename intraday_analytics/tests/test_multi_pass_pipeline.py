@@ -149,13 +149,15 @@ class TestMultiPassPipeline(unittest.TestCase):
 
         # Verify output of the first pass
         expected_out_pass1 = os.path.join(
-            self.temp_dir, "final_sample2d_pass1_2024-12-30_2025-01-01.parquet"
+            self.temp_dir,
+            "final_sample2d_pass1_2024-12-30_2025-01-01.parquet",
         )
         self.assertTrue(os.path.exists(expected_out_pass1))
 
         # Verify that the output of the second pass does not exist
         expected_out_pass2 = os.path.join(
-            self.temp_dir, "final_sample2d_pass2_2024-12-30_2025-01-01.parquet"
+            self.temp_dir,
+            "final_sample2d_pass2_2024-12-30_2025-01-01.parquet",
         )
         self.assertFalse(os.path.exists(expected_out_pass2))
 

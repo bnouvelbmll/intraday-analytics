@@ -15,6 +15,12 @@ except ImportError:
 
 
 class TalibIndicatorConfig(BaseModel):
+    """
+    Configuration for a single TA-Lib indicator.
+
+    Each entry defines the indicator name, input column, and optional parameters
+    used by the generic analytics postprocessing stage.
+    """
     name: str = Field(
         ...,
         description="TA-Lib indicator name (e.g., SMA, RSI).",

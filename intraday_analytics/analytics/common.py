@@ -118,6 +118,9 @@ MarketState = Literal[
 class CombinatorialMetricConfig(BaseModel, ABC):
     """
     Base class for metric configurations that support combinatorial expansion.
+
+    Fields defined here can be lists or scalars; `expand()` produces the
+    Cartesian product of all list-valued fields to build concrete metrics.
     """
 
     aggregations: List[AggregationMethod] = Field(
@@ -145,6 +148,7 @@ class CombinatorialMetricConfig(BaseModel, ABC):
             "Available vars: {field_names}."
         ),
         json_schema_extra={
+            "section": "Advanced",
             "long_doc": "If provided, overrides module naming for the generated metric columns.\n"
             "Variables in braces map to metric fields from the config.\n"
             "Example: '{measures}_{sides}_{aggregations}' or '{measure}{side}{agg}'.\n"

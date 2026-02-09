@@ -40,6 +40,7 @@ def get_final_output_path(start_date, end_date, config, pass_name, output_target
         bucket=output_bucket,
         prefix=output_prefix,
         datasetname=final_dataset_name,
+        **{"pass": pass_name},
         universe=universe,
         start_date=_coerce_date(start_date),
         end_date=_coerce_date(end_date),
@@ -100,10 +101,6 @@ def aggregate_and_write_final_output(
         raise RuntimeError("No output target configured.")
     if not isinstance(output_target, OutputTarget):
         output_target = OutputTarget.model_validate(output_target)
-    final_s3_path = get_final_output_path(
-        start_date, end_date, config, pass_config.name, output_target
-    )
-
     def _output_type():
         t = output_target.type
         try:
@@ -112,6 +109,14 @@ def aggregate_and_write_final_output(
             return str(t)
 
     output_type = _output_type()
+    if output_target and getattr(output_target, "path_template", None):
+        final_s3_path = get_final_output_path(
+            start_date, end_date, config, pass_config.name, output_target
+        )
+    else:
+        final_s3_path = get_final_s3_path(
+            start_date, end_date, config, pass_config.name
+        )
     logging.info(
         f"Writing aggregated analytics for Pass {pass_config.name} to {final_s3_path}"
     )
@@ -122,37 +127,157 @@ def aggregate_and_write_final_output(
         getattr(output_target, "sql_table", None),
         getattr(output_target, "sql_connection", None),
     )
+    def _partition_key_value() -> str:
+        universe = config.UNIVERSE or "all"
+        try:
+            date_part = start_date.date().isoformat()
+        except Exception:
+            try:
+                date_part = str(start_date)
+            except Exception:
+                date_part = "unknown"
+        if "=" in universe:
+            universe_value = universe.split("=", 1)[1]
+        else:
+            universe_value = universe
+        return f"{date_part}|{universe_value}"
+
+    def _sql_quote(value: object) -> str:
+        text = str(value)
+        return text.replace("'", "''")
+
+    def _resolve_partition_columns(schema_keys: list[str]) -> list[str]:
+        if output_target.partition_columns:
+            return list(output_target.partition_columns)
+        if "MIC" in schema_keys and "Date" in schema_keys:
+            return ["MIC", "Date"]
+        return ["$dagsterpartitionkey"]
+
     def _write_output():
+        schema_keys = final_df.collect_schema().names()
+        partition_cols = _resolve_partition_columns(schema_keys)
+        final_with_pk = final_df
+        if "$dagsterpartitionkey" in partition_cols and "$dagsterpartitionkey" not in schema_keys:
+            final_with_pk = final_with_pk.with_columns(
+                pl.lit(_partition_key_value()).alias("$dagsterpartitionkey")
+            )
+            schema_keys = final_with_pk.collect_schema().names()
+        missing = [col for col in partition_cols if col not in schema_keys and col != "$dagsterpartitionkey"]
+        if missing:
+            raise RuntimeError(
+                f"Partition columns missing from output: {missing}. "
+                "Set OutputTarget.partition_columns to existing columns."
+            )
+        df_to_write = final_with_pk
         if output_type == "parquet":
-            return final_df.sink_parquet(final_s3_path, compression="snappy")
+            return df_to_write.sink_parquet(final_s3_path, compression="snappy")
         if output_type == "delta":
             try:
                 from deltalake.writer import write_deltalake
+                from deltalake import DeltaTable
             except Exception as exc:
                 raise RuntimeError("deltalake is required for delta outputs") from exc
+            if output_target.dedupe_on_partition and partition_cols:
+                try:
+                    dt = DeltaTable(final_s3_path)
+                    partition_values = (
+                        df_to_write.select(partition_cols).unique().to_dicts()
+                    )
+                    for vals in partition_values:
+                        predicate = " AND ".join(
+                            [f"{k} = '{_sql_quote(vals[k])}'" for k in partition_cols]
+                        )
+                        dt.delete(predicate)
+                except Exception:
+                    # If table doesn't exist yet or delete fails, proceed with append.
+                    pass
             return write_deltalake(
                 final_s3_path,
-                final_df.collect(),
+                df_to_write.collect(),
                 mode=output_target.delta_mode,
                 storage_options=config.S3_STORAGE_OPTIONS,
+                partition_by=partition_cols or None,
             )
         if output_type == "sql":
             try:
-                from sqlalchemy import create_engine
+                from sqlalchemy import (
+                    create_engine,
+                    MetaData,
+                    Table,
+                    Column,
+                    Integer,
+                    Float,
+                    Boolean,
+                    Date,
+                    DateTime,
+                    Text,
+                    text as sql_text,
+                )
             except Exception as exc:
                 raise RuntimeError("sqlalchemy is required for sql outputs") from exc
             if not output_target.sql_connection or not output_target.sql_table:
                 raise RuntimeError("sql_connection and sql_table are required for sql outputs")
             engine = create_engine(output_target.sql_connection)
             try:
-                with engine.begin() as conn:
-                    result = final_df.collect().to_pandas().to_sql(
-                        output_target.sql_table,
-                        conn,
-                        if_exists=output_target.sql_if_exists,
-                        index=False,
+                df = df_to_write.collect(streaming=True)
+                if output_target.dedupe_on_partition and partition_cols and output_target.sql_if_exists != "replace":
+                    partition_values = (
+                        df_to_write.select(partition_cols).unique().to_dicts()
                     )
-                return result
+                    if partition_values:
+                        try:
+                            with engine.begin() as conn:
+                                for vals in partition_values:
+                                    where = " AND ".join([f"{k} = :{k}" for k in partition_cols])
+                                    conn.execute(
+                                        sql_text(
+                                            f"DELETE FROM {output_target.sql_table} WHERE {where}"
+                                        ),
+                                        vals,
+                                    )
+                        except Exception:
+                            pass
+                if output_target.sql_use_pandas:
+                    batch = output_target.sql_batch_size or len(df)
+                    with engine.begin() as conn:
+                        for offset in range(0, len(df), batch):
+                            chunk = df.slice(offset, batch)
+                            chunk.to_pandas().to_sql(
+                                output_target.sql_table,
+                                conn,
+                                if_exists=output_target.sql_if_exists if offset == 0 else "append",
+                                index=False,
+                                method="multi",
+                            )
+                    return None
+                # SQLAlchemy core insert path (no pandas)
+                metadata = MetaData()
+                if output_target.sql_if_exists == "replace":
+                    with engine.begin() as conn:
+                        conn.execute(sql_text(f"DROP TABLE IF EXISTS {output_target.sql_table}"))
+                # Define table schema (basic mapping)
+                cols = []
+                for name, dtype in zip(df.columns, df.dtypes):
+                    if dtype in (pl.Int8, pl.Int16, pl.Int32, pl.Int64, pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64):
+                        coltype = Integer
+                    elif dtype in (pl.Float32, pl.Float64):
+                        coltype = Float
+                    elif dtype == pl.Boolean:
+                        coltype = Boolean
+                    elif dtype in (pl.Date,):
+                        coltype = Date
+                    elif dtype in (pl.Datetime,):
+                        coltype = DateTime
+                    else:
+                        coltype = Text
+                    cols.append(Column(name, coltype))
+                table = Table(output_target.sql_table, metadata, *cols)
+                metadata.create_all(engine)
+                batch = output_target.sql_batch_size or len(df)
+                with engine.begin() as conn:
+                    for chunk in df.iter_slices(batch):
+                        conn.execute(table.insert(), chunk.to_dicts())
+                return None
             finally:
                 engine.dispose()
         raise RuntimeError(f"Unsupported output type: {output_target.type}")

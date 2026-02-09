@@ -43,23 +43,57 @@ class OutputTarget(BaseModel):
     io_manager_key: Optional[str] = Field(
         None,
         description="Dagster IO manager key to use when running in Dagster.",
+        json_schema_extra={"depends_on": {"type": ["parquet", "delta"]}},
     )
     delta_mode: Literal["append", "overwrite"] = Field(
-        "append", description="Write mode for delta outputs."
+        "append",
+        description="Write mode for delta outputs.",
+        json_schema_extra={"depends_on": {"type": "delta"}},
     )
     sql_connection: Optional[str] = Field(
-        None, description="SQLAlchemy connection string for SQL outputs."
+        None,
+        description="SQLAlchemy connection string for SQL outputs.",
+        json_schema_extra={"depends_on": {"type": "sql"}},
     )
     sql_table: Optional[str] = Field(
-        None, description="SQL table name for SQL outputs."
+        None,
+        description="SQL table name for SQL outputs.",
+        json_schema_extra={"depends_on": {"type": "sql"}},
     )
     sql_if_exists: Literal["fail", "replace", "append"] = Field(
-        "append", description="Behavior when SQL table exists."
+        "append",
+        description="Behavior when SQL table exists.",
+        json_schema_extra={"depends_on": {"type": "sql"}},
+    )
+    sql_use_pandas: bool = Field(
+        True,
+        description="Use pandas to_sql for SQL outputs (set False to use SQLAlchemy core inserts).",
+        json_schema_extra={"section": "Advanced", "depends_on": {"type": "sql"}},
+    )
+    sql_batch_size: Optional[int] = Field(
+        50000,
+        description="Chunk size for SQL writes (applies to pandas/core inserts).",
+        json_schema_extra={"section": "Advanced", "depends_on": {"type": "sql"}},
+    )
+    partition_columns: Optional[List[str]] = Field(
+        None,
+        description="Optional partition/primary key columns for delta/sql writes.",
+        json_schema_extra={"section": "Advanced", "depends_on": {"type": ["delta", "sql"]}},
+    )
+    dedupe_on_partition: bool = Field(
+        True,
+        description="Remove duplicate rows based on partition columns before append.",
+        json_schema_extra={"section": "Advanced", "depends_on": {"type": ["delta", "sql"]}},
     )
 
 
 class PassConfig(BaseModel):
-    """Configuration for a single analytics pass."""
+    """
+    Configuration for a single analytics pass.
+
+    A pass bundles a time bucket definition, selected modules, and per-module
+    sub-configs. Passes are executed in order and can feed subsequent passes.
+    """
 
     name: str
     time_bucket_seconds: float = Field(60, gt=0)
@@ -73,8 +107,9 @@ class PassConfig(BaseModel):
     output: Optional[OutputTarget] = Field(
         None,
         description="Optional per-pass output target override.",
-        json_schema_extra={"section": "Advanced"},
     )
+
+    ## Module specific config
     dense_analytics: DenseAnalyticsConfig = Field(default_factory=DenseAnalyticsConfig)
     l2_analytics: L2AnalyticsConfig = Field(default_factory=L2AnalyticsConfig)
     l3_analytics: L3AnalyticsConfig = Field(default_factory=L3AnalyticsConfig)
@@ -98,21 +133,6 @@ class PassConfig(BaseModel):
         default_factory=GenericAnalyticsConfig
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_retail_imbalance(cls, values):
-        if not isinstance(values, dict):
-            return values
-        legacy = values.pop("retail_imbalance_analytics", None)
-        if legacy is None:
-            return values
-        trade_cfg = values.get("trade_analytics")
-        if not isinstance(trade_cfg, dict):
-            trade_cfg = {}
-        if "retail_imbalance" not in trade_cfg:
-            trade_cfg["retail_imbalance"] = legacy
-        values["trade_analytics"] = trade_cfg
-        return values
 
     @model_validator(mode="after")
     def propagate_pass_settings(self) -> "PassConfig":
@@ -143,6 +163,11 @@ class SchedulePartitionSelector(BaseModel):
 
 
 class ScheduleConfig(BaseModel):
+    """
+    Configuration for a Dagster schedule.
+
+    Defines cron, timezone, and optional partition selectors to trigger runs.
+    """
     name: str = Field("schedule", description="Schedule name.")
     enabled: bool = Field(False, description="Enable schedule.")
     cron: str = Field("0 2 * * *", description="Cron expression.")
@@ -154,6 +179,11 @@ class ScheduleConfig(BaseModel):
 
 
 class AnalyticsConfig(BaseModel):
+    """
+    Top-level configuration for the analytics pipeline.
+
+    Defines date range, passes, batching, I/O targets, and automation settings.
+    """
     # --- Date & Scope ---
     START_DATE: Optional[str] = Field(
         None,
@@ -242,12 +272,12 @@ class AnalyticsConfig(BaseModel):
     TEMP_DIR: Optional[str] = Field(
         None,
         description="Local temp directory used during processing (auto-generated if empty).",
-        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+        json_schema_extra={"section": "Advanced"},
     )
     AREA: str = Field(
         "user",
-        description="Logical area / workspace label.",
-        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+        description="Bucket to use to store the data on S3.",
+        json_schema_extra={"section": "Outputs"},
     )
 
     # --- Execution ---
@@ -259,12 +289,12 @@ class AnalyticsConfig(BaseModel):
     DEFAULT_FFILL: bool = Field(
         False,
         description="Forward-fill missing values when needed.",
-        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+        json_schema_extra={"section": "Core"},
     )
     DENSE_OUTPUT: bool = Field(
         True,
         description="Emit dense output tables.",
-        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+        json_schema_extra={"section": "Core"},
     )
     MEMORY_PER_WORKER: int = Field(
         20,
@@ -275,12 +305,12 @@ class AnalyticsConfig(BaseModel):
     RUN_ONE_SYMBOL_AT_A_TIME: bool = Field(
         False,
         description="Serializes execution per symbol.",
-        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+        json_schema_extra={"section": "Advanced"},
     )
     EAGER_EXECUTION: bool = Field(
         False,
         description="Eagerly evaluate lazy frames.",
-        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+        json_schema_extra={"section": "Advanced"},
     )
     BATCH_FREQ: Optional[str] = Field(
         "W",
@@ -290,29 +320,29 @@ class AnalyticsConfig(BaseModel):
     LOGGING_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         "INFO",
         description="Logging verbosity.",
-        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+        json_schema_extra={"section": "Advanced"},
     )
     TABLES_TO_LOAD: Optional[List[str]] = Field(
         None,
         description="Restrict which tables are loaded.",
-        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+        json_schema_extra={"section": "Advanced"},
     )
 
     # --- Profiling ---
     ENABLE_PERFORMANCE_LOGS: bool = Field(
         True,
         description="Emit performance logs per stage.",
-        json_schema_extra={"section": "Advanced"},
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
     )
     ENABLE_POLARS_PROFILING: bool = Field(
         False,
         description="Enable Polars profiling.",
-        json_schema_extra={"section": "Advanced"},
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
     )
 
     # --- Output ---
     FINAL_OUTPUT_PATH_TEMPLATE: str = Field(
-        "s3://{bucket}/{prefix}/data/{datasetname}/{universe}/{start_date}_{end_date}.parquet",
+        "s3://{bucket}/{prefix}/data/{datasetname}/{pass}/{universe}/{start_date}_{end_date}.parquet",
         description="Template for output file paths.",
         json_schema_extra={"section": "Outputs"},
     )
@@ -324,27 +354,27 @@ class AnalyticsConfig(BaseModel):
     S3_STORAGE_OPTIONS: Dict[str, str] = Field(
         default_factory=dict,
         description="Extra options for S3 storage.",
-        json_schema_extra={"section": "Outputs"},
+        json_schema_extra={"section": "Advanced"},
     )
     DEFAULT_S3_REGION: str = Field(
         "us-east-1",
         description="Default S3 region for IO.",
-        json_schema_extra={"section": "Outputs"},
+        json_schema_extra={"section": "Advanced"},
     )
     CLEAN_UP_BATCH_FILES: bool = Field(
         True,
         description="Delete batch files after use.",
-        json_schema_extra={"section": "Outputs"},
+        json_schema_extra={"section": "Advanced"},
     )
     CLEAN_UP_TEMP_DIR: bool = Field(
         True,
         description="Delete temp dir after run.",
-        json_schema_extra={"section": "Outputs"},
+        json_schema_extra={"section": "Advanced"},
     )
     OVERWRITE_TEMP_DIR: bool = Field(
         False,
         description="Overwrite temp dir if it exists.",
-        json_schema_extra={"section": "Outputs"},
+        json_schema_extra={"section": "Advanced"},
     )
     SKIP_EXISTING_OUTPUT: bool = Field(
         False,

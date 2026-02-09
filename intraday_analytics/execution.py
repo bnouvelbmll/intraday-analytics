@@ -26,7 +26,7 @@ from .utils import (
 )
 from .tables import ALL_TABLES
 from .api_stats import init_api_stats, summarize_api_stats
-from .process import aggregate_and_write_final_output, BatchWriter, get_final_s3_path
+from .process import aggregate_and_write_final_output, BatchWriter, get_final_s3_path, get_final_output_path
 from .configuration import OutputTarget
 
 
@@ -210,6 +210,8 @@ class ProcessInterval(Process):
         Updates the pipeline context with the result of the current pass and persists it to disk.
         """
         try:
+            if not isinstance(final_path, str) or not final_path:
+                return
             # Store the result as a LazyFrame in the context
             # This allows subsequent passes to use it as input
             def _scan_output():
@@ -545,9 +547,15 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
                         raise RuntimeError("No output target configured.")
                     if not isinstance(output_target, OutputTarget):
                         output_target = OutputTarget.model_validate(output_target)
-                    final_s3_path = get_final_s3_path(
-                        sd, ed, config, pass_config.name, output_target
-                    )
+                    pass_label = pass_config.name
+                    if output_target and getattr(output_target, "path_template", None):
+                        final_s3_path = get_final_output_path(
+                            sd, ed, config, pass_label, output_target
+                        )
+                    else:
+                        final_s3_path = get_final_s3_path(
+                            sd, ed, config, pass_label
+                        )
                     if output_target.type.value == "parquet" and check_s3_url_exists(final_s3_path):
                         logging.info(
                             f"✅ Output already exists for {sd.date()} -> {ed.date()} (Pass {pass_config.name}). Skipping."

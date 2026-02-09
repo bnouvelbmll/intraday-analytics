@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 class DenseAnalyticsConfig(BaseModel):
+    """
+    Configuration for the dense time-grid pass.
+
+    Controls how a uniform or adaptive time grid is generated for each symbol.
+    This pass does not compute analytics itself; it provides time buckets that
+    downstream analytics can align to. Use this to control bucket size, anchor,
+    and optional symbol column overrides.
+    """
     ENABLED: bool = True
     metric_prefix: Optional[str] = None
     mode: Literal["adaptative", "uniform"] = "adaptative"
