@@ -33,6 +33,13 @@ from intraday_analytics.dagster_compat import (
     build_s3_input_sync_job,
     build_s3_input_sync_asset,
     list_cbbo_partitions_from_s3,
+    MICUniverse,
+    IndexUniverse,
+    OPOLUniverse,
+    CustomUniverse,
+    CartProdUniverse,
+    build_universe_partitions,
+    default_universes,
 )
 from intraday_analytics.utils import create_date_batches
 
@@ -68,7 +75,8 @@ def _build_date_partitions():
             fmt="%Y-%m-%d",
             cron_schedule=cron,
         )
-    universe_partitions = StaticPartitionsDefinition([f"mic={mic}" for mic in _available_mics()])
+    universes = default_universes()
+    universe_partitions = StaticPartitionsDefinition(build_universe_partitions(universes))
     return MultiPartitionsDefinition({"universe": universe_partitions, "date": date_partitions})
 
 def _build_daily_partitions():

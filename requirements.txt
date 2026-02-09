@@ -5,3 +5,5 @@ viztracer
 joblib
 pydantic==2.7.1
 TA-lib
+textual
+textual-web

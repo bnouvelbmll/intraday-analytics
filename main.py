@@ -39,6 +39,7 @@ from intraday_analytics.analytics.execution import ExecutionAnalytics
 from intraday_analytics.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
 
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig
+from intraday_analytics.dagster_compat import MICUniverse
 
 # At 1min : 3 minutes per day.
 # At 10 sec: 15 minutes per day ! 250gb matchine (20 GB memory)
@@ -83,6 +84,9 @@ USER_CONFIG = {
 }
 
 CONFIG = AnalyticsConfig(**USER_CONFIG)
+
+# --- Configuration ---
+CONFIG_YAML_PRECEDENCE = "yaml_overrides"
 
 
 whitelist = [
@@ -134,6 +138,9 @@ whitelist = [
     # "XDUS",
     # "XBER",
 ]
+
+# Explicit universes config for Dagster definitions.
+UNIVERSES = [MICUniverse(whitelist=whitelist)]
 
 
 @cache_universe(CONFIG.TEMP_DIR)
@@ -266,7 +273,13 @@ if __name__ == "__main__":
 
     ret_code = 0
     try:
-        run_cli(USER_CONFIG, get_universe, get_pipeline=get_pipeline)
+        run_cli(
+            USER_CONFIG,
+            get_universe,
+            get_pipeline=get_pipeline,
+            config_file=__file__,
+            config_precedence=CONFIG_YAML_PRECEDENCE,
+        )
     except Exception as e:
         logging.error(f"Pipeline failed: {e}", exc_info=True)
         ret_code = 1

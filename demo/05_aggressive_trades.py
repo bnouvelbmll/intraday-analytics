@@ -15,6 +15,7 @@ from intraday_analytics.dense_analytics import DenseAnalytics
 from intraday_analytics.analytics.trade import TradeAnalytics
 from intraday_analytics.dataset_transforms.aggressive_trades import AggressiveTradesTransform
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig
+from intraday_analytics.dagster_compat import CustomUniverse
 
 
 USER_CONFIG = {
@@ -46,6 +47,10 @@ def get_universe(date):
         Index="bezacp", object_type="Instrument", start_date=date
     ).query("IsAlive")
     return pl.DataFrame(universe_query)
+
+
+# Explicit universes config for Dagster definitions.
+UNIVERSES = [CustomUniverse(get_universe, name="demo_aggressive_trades")]
 
 
 class AggressiveTradesPipeline(AnalyticsPipeline):
@@ -100,4 +105,12 @@ def get_pipeline(
 
 
 if __name__ == "__main__":
-    run_cli(USER_CONFIG, get_universe, get_pipeline=get_pipeline)
+    run_cli(
+        USER_CONFIG,
+        get_universe,
+        get_pipeline=get_pipeline,
+        config_file=__file__,
+        config_precedence=CONFIG_YAML_PRECEDENCE,
+    )
+# --- Configuration ---
+CONFIG_YAML_PRECEDENCE = "yaml_overrides"

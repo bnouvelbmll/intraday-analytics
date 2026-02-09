@@ -1,6 +1,8 @@
 """
 Example 6: L3 and trade characteristics (notebook-style demo)
 
+# --- Configuration ---
+CONFIG_YAML_PRECEDENCE = "yaml_overrides"
 This demo runs the l3_characteristics and trade_characteristics modules on
 a single MIC/date pair using 1-hour time buckets.
 """
@@ -9,6 +11,7 @@ import bmll.reference
 import polars as pl
 
 from intraday_analytics.cli import run_cli
+from intraday_analytics.dagster_compat import CustomUniverse
 
 
 USER_CONFIG = {
@@ -37,5 +40,14 @@ def get_universe(date):
     return pl.DataFrame(universe_query)
 
 
+# Explicit universes config for Dagster definitions.
+UNIVERSES = [CustomUniverse(get_universe, name="demo_characteristics")]
+
+
 if __name__ == "__main__":
-    run_cli(USER_CONFIG, get_universe)
+    run_cli(
+        USER_CONFIG,
+        get_universe,
+        config_file=__file__,
+        config_precedence=CONFIG_YAML_PRECEDENCE,
+    )

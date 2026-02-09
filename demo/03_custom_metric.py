@@ -18,8 +18,10 @@ from intraday_analytics.cli import run_cli
 from intraday_analytics.dense_analytics import DenseAnalytics
 from intraday_analytics.analytics.trade import TradeAnalytics
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig
+from intraday_analytics.dagster_compat import CustomUniverse
 
 # --- Configuration ---
+CONFIG_YAML_PRECEDENCE = "yaml_overrides"
 
 USER_CONFIG = {
     "START_DATE": "2025-11-01",
@@ -47,6 +49,9 @@ def get_universe(date):
     ).query("IsAlive")
 
     return pl.DataFrame(universe_query)
+
+# Explicit universes config for Dagster definitions.
+UNIVERSES = [CustomUniverse(get_universe, name="demo_custom_metric")]
 
 
 # --- Custom Analytics Module ---
@@ -112,4 +117,10 @@ def get_pipeline(
 # --- Main Execution ---
 
 if __name__ == "__main__":
-    run_cli(USER_CONFIG, get_universe, get_pipeline=get_pipeline)
+    run_cli(
+        USER_CONFIG,
+        get_universe,
+        get_pipeline=get_pipeline,
+        config_file=__file__,
+        config_precedence=CONFIG_YAML_PRECEDENCE,
+    )

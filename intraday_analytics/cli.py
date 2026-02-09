@@ -1,9 +1,11 @@
 import importlib
 import logging
+from pathlib import Path
 from functools import partial
 from typing import Callable, Optional
 
 import fire
+import yaml
 
 from intraday_analytics.configuration import AnalyticsConfig
 from intraday_analytics.execution import run_multiday_pipeline
@@ -29,6 +31,38 @@ def _load_universe_override(spec: str) -> Callable:
     return partial(_get_universe_from_spec, spec=spec)
 
 
+def _load_yaml_config(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+            return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+
+
+def _extract_user_config(data: dict) -> dict:
+    if "USER_CONFIG" in data and isinstance(data["USER_CONFIG"], dict):
+        return data["USER_CONFIG"]
+    return data
+
+
+def resolve_user_config(
+    user_config: dict,
+    module_file: Optional[str],
+    precedence: str = "yaml_overrides",
+) -> dict:
+    if not module_file:
+        return user_config
+    yaml_path = str(Path(module_file).with_suffix(".yaml"))
+    yaml_data = _load_yaml_config(yaml_path)
+    if not yaml_data:
+        return user_config
+    yaml_config = _extract_user_config(yaml_data)
+    if precedence == "python_overrides":
+        return {**yaml_config, **user_config}
+    return {**user_config, **yaml_config}
+
+
 def run_cli(
     user_config: dict,
     default_get_universe: Callable,
@@ -43,10 +77,13 @@ def run_cli(
     num_workers: Optional[int] = None,
     eager_execution: bool = False,
     universe: Optional[str] = None,
+    config_file: Optional[str] = None,
+    config_precedence: str = "yaml_overrides",
 ) -> None:
     """
     Run a standard CLI flow using a base USER_CONFIG and a default universe.
     """
+    user_config = resolve_user_config(user_config, config_file, config_precedence)
     config_overrides = {}
     if date:
         config_overrides["START_DATE"] = date

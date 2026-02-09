@@ -18,6 +18,15 @@ The framework exposes:
 - `build_partition_runs(universes, dates)`
 - `run_partition(...)`
 
+New universe helpers:
+- `MICUniverse(whitelist=..., blacklist=...)`
+- `IndexUniverse(values=[...])`
+- `OPOLUniverse(values=[...])`
+- `CustomUniverse(get_universe, name=..., value=...)`
+- `CartProdUniverse(left, right)`
+- `build_universe_partitions(universes)`
+- `default_universes()`
+
 ## Example: Single MIC, Single Day
 
 ```python
@@ -105,6 +114,65 @@ Each module must expose:
 def get_universe(date, value):
     ...
 ```
+
+## Structured Universes (Preferred)
+
+Instead of hand-assembling `UniversePartition` lists, you can use structured
+universe classes:
+
+```python
+from dagster import StaticPartitionsDefinition, MultiPartitionsDefinition
+from intraday_analytics.dagster_compat import (
+    MICUniverse, IndexUniverse, CustomUniverse, CartProdUniverse,
+    build_universe_partitions,
+)
+
+def my_custom_universe(date):
+    ...
+
+universes = [
+    MICUniverse(blacklist=["BATE"]),
+    IndexUniverse(["STOXX600"]),
+    CartProdUniverse(CustomUniverse(my_custom_universe), MICUniverse()),
+]
+universe_partitions = StaticPartitionsDefinition(build_universe_partitions(universes))
+partitions_def = MultiPartitionsDefinition({"universe": universe_partitions, "date": date_partitions})
+```
+
+`CartProdUniverse` produces partitions like `mic=XLON+custom` and intersects the
+universe frames at runtime.
+
+## YAML Config Support
+
+Every `demo/*.py` and `main.py` can now read an optional YAML file with the same
+base name. The merge precedence is controlled inside the Python module using:
+
+```python
+CONFIG_YAML_PRECEDENCE = "yaml_overrides"  # or "python_overrides"
+```
+
+YAML can be either:
+- A flat dict of config keys
+- Or wrapped as `USER_CONFIG: {...}`
+
+## Config UI (Terminal/Web)
+
+Launch a text UI editor for YAML configs:
+
+```bash
+python -m intraday_analytics.config_ui demo/01_ohlcv_bars.py
+python -m intraday_analytics.config_ui --web demo/01_ohlcv_bars.py
+```
+
+This creates or edits `demo/01_ohlcv_bars.yaml`.
+
+## DB Sync and UI Cache
+
+The DB bulk sync path now clears cached asset status after each table sync so
+the UI recomputes partition counts and materialization badges. If you bulk
+insert events outside the API, you must either:
+- Call `wipe_asset_cached_status(...)`
+- Or rebuild the cached status via `get_and_update_asset_status_cache_value(...)`
 
 ## Artifact Handling
 

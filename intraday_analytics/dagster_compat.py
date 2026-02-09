@@ -14,7 +14,7 @@ from intraday_analytics.utils import filter_existing_s3_files
 
 from intraday_analytics.configuration import AnalyticsConfig
 from intraday_analytics.execution import run_multiday_pipeline
-from intraday_analytics.cli import _load_universe_override
+from intraday_analytics.cli import _load_universe_override, resolve_user_config
 
 
 @dataclass(frozen=True)
@@ -32,10 +32,197 @@ class UniversePartition:
 
 
 def parse_universe_spec(spec: str) -> UniversePartition:
+    if "+" in spec:
+        return UniversePartition(name=spec, value=None)
     if "=" in spec:
         name, value = spec.split("=", 1)
         return UniversePartition(name=name, value=value)
     return UniversePartition(name=spec, value=None)
+
+
+_UNIVERSE_REGISTRY: dict[str, Callable] = {}
+
+
+class MICUniverse:
+    ALL = object()
+
+    def __init__(
+        self,
+        whitelist: Sequence[str] | object = ALL,
+        blacklist: Sequence[str] | None = None,
+        name: str = "mic",
+    ) -> None:
+        self.whitelist = whitelist
+        self.blacklist = set(blacklist or [])
+        self.name = name
+
+    def _available_mics(self) -> list[str]:
+        try:
+            import bmll.reference
+        except Exception:
+            return []
+        return (
+            bmll.reference.available_markets()
+            .query("Schema=='Equity'")
+            .query("IsAlive")
+            ["MIC"]
+            .tolist()
+        )
+
+    def iter_partitions(self) -> list[UniversePartition]:
+        mics = self._available_mics()
+        if self.whitelist is not MICUniverse.ALL:
+            allowed = set(self.whitelist or [])
+            mics = [m for m in mics if m in allowed]
+        if self.blacklist:
+            mics = [m for m in mics if m not in self.blacklist]
+        return [UniversePartition(name=self.name, value=mic) for mic in mics]
+
+    def get_universe_for(self, _partition: UniversePartition) -> Optional[Callable]:
+        return None
+
+
+class IndexUniverse:
+    def __init__(self, values: Sequence[str], name: str = "index") -> None:
+        self.values = list(values)
+        self.name = name
+
+    def iter_partitions(self) -> list[UniversePartition]:
+        return [UniversePartition(name=self.name, value=v) for v in self.values]
+
+    def get_universe_for(self, _partition: UniversePartition) -> Optional[Callable]:
+        return None
+
+
+class OPOLUniverse:
+    def __init__(self, values: Sequence[str], name: str = "opol") -> None:
+        self.values = list(values)
+        self.name = name
+
+    def iter_partitions(self) -> list[UniversePartition]:
+        return [UniversePartition(name=self.name, value=v) for v in self.values]
+
+    def get_universe_for(self, _partition: UniversePartition) -> Optional[Callable]:
+        return None
+
+
+class CustomUniverse:
+    def __init__(
+        self,
+        get_universe: Callable,
+        name: str = "custom",
+        value: str | None = None,
+    ) -> None:
+        self.get_universe = get_universe
+        self.name = name
+        self.value = value
+
+    def iter_partitions(self) -> list[UniversePartition]:
+        return [UniversePartition(name=self.name, value=self.value)]
+
+    def get_universe_for(self, _partition: UniversePartition) -> Optional[Callable]:
+        return self.get_universe
+
+
+class CartProdUniverse:
+    def __init__(self, left, right, separator: str = "+") -> None:
+        self.left = left
+        self.right = right
+        self.separator = separator
+
+    def iter_partitions(self) -> list[UniversePartition]:
+        parts = []
+        for left_part in self.left.iter_partitions():
+            for right_part in self.right.iter_partitions():
+                spec = f"{left_part.spec}{self.separator}{right_part.spec}"
+                parts.append(UniversePartition(name=spec, value=None))
+        return parts
+
+    def get_universe_for(self, _partition: UniversePartition) -> Optional[Callable]:
+        return None
+
+
+def _ensure_polars_frame(frame):
+    try:
+        import polars as pl
+    except Exception:
+        pl = None
+    try:
+        import pandas as pd
+    except Exception:
+        pd = None
+
+    if pl and isinstance(frame, pl.DataFrame):
+        return frame
+    if pd and isinstance(frame, pd.DataFrame) and pl:
+        return pl.from_pandas(frame)
+    return frame
+
+
+def _intersect_universe_frames(frames: Sequence) -> object:
+    frames = [_ensure_polars_frame(f) for f in frames if f is not None]
+    if not frames:
+        return None
+    try:
+        import polars as pl
+    except Exception:
+        return frames[0]
+
+    result = frames[0]
+    for frame in frames[1:]:
+        if not isinstance(result, pl.DataFrame) or not isinstance(frame, pl.DataFrame):
+            continue
+        keys = [c for c in ("ListingId", "MIC") if c in result.columns and c in frame.columns]
+        if not keys:
+            keys = [c for c in result.columns if c in frame.columns]
+        if not keys:
+            return result
+        result = result.join(frame, on=keys, how="inner")
+    return result
+
+
+def _resolve_universe_callable(spec: str) -> Callable:
+    if spec in _UNIVERSE_REGISTRY:
+        return _UNIVERSE_REGISTRY[spec]
+    return _load_universe_override(spec)
+
+
+def build_universe_partitions(
+    universes: Sequence,
+) -> list[str]:
+    _UNIVERSE_REGISTRY.clear()
+    specs: list[str] = []
+
+    def _register_custom(universe) -> None:
+        if isinstance(universe, CustomUniverse):
+            for part in universe.iter_partitions():
+                _UNIVERSE_REGISTRY[part.spec] = universe.get_universe
+        elif isinstance(universe, CartProdUniverse):
+            _register_custom(universe.left)
+            _register_custom(universe.right)
+
+    for universe in universes:
+        _register_custom(universe)
+
+    for universe in universes:
+        for part in universe.iter_partitions():
+            specs.append(part.spec)
+            fn = universe.get_universe_for(part)
+            if fn:
+                _UNIVERSE_REGISTRY[part.spec] = fn
+
+    return specs
+
+
+def default_universes() -> list:
+    try:
+        import main as main_script  # type: ignore
+
+        if hasattr(main_script, "whitelist"):
+            return [MICUniverse(whitelist=getattr(main_script, "whitelist"))]
+    except Exception:
+        pass
+    return [MICUniverse()]
 
 
 def parse_date_key(key: str) -> DatePartition:
@@ -129,7 +316,10 @@ def build_demo_assets(
         name = module.__name__.split(".")[-1]
         asset_base = f"demo{name}" if name[0].isdigit() else name
         package_root = module.__name__.split(".")[0]
-        base_config = module.USER_CONFIG
+        precedence = getattr(module, "CONFIG_YAML_PRECEDENCE", "yaml_overrides")
+        base_config = resolve_user_config(
+            module.USER_CONFIG, getattr(module, "__file__", None), precedence
+        )
         passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
         last_pass_key = None
 
@@ -855,7 +1045,18 @@ def run_partition(
 
     get_universe = default_get_universe
     if partition.universe:
-        get_universe = _load_universe_override(partition.universe.spec)
+        spec = partition.universe.spec
+        if "+" in spec:
+            parts = [s for s in spec.split("+") if s]
+            resolvers = [_resolve_universe_callable(p) for p in parts]
+
+            def _combined(date, _resolvers=resolvers):
+                frames = [resolver(date) for resolver in _resolvers]
+                return _intersect_universe_frames(frames)
+
+            get_universe = _combined
+        else:
+            get_universe = _resolve_universe_callable(spec)
 
     run_multiday_pipeline(
         config=config,
