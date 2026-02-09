@@ -7,6 +7,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import ipywidgets as widgets
+from IPython.display import display, clear_output
 
 from dagster import AssetKey, DagsterInstance, DagsterEventType, EventRecordsFilter
 from dagster._core.storage.event_log.sql_event_log import SqlEventLogStorage
@@ -321,44 +322,240 @@ def materialization_dashboard(
 
     out = widgets.Output()
 
-    def _render():
+    def _render(
+        *,
+        selected_plot: str,
+        metric_key_value: str,
+        metric_unit_value: str,
+        exclude_unpopulated_value: bool,
+        after_ts: Optional[float],
+        before_ts: Optional[float],
+        use_db: bool,
+    ):
         df = load_materialization_frame(
             instance,
             asset_keys,
-            metric_key=metric_key,
+            metric_key=metric_key_value,
             date_dim=date_dim,
             universe_dim=universe_dim,
             limit=limit,
-            after_timestamp=after_timestamp,
-            before_timestamp=before_timestamp,
-            use_db_direct=use_db_direct,
+            after_timestamp=after_ts,
+            before_timestamp=before_ts,
+            use_db_direct=use_db,
         )
-        if metric_key == "size_bytes":
-            if metric_unit == "GB":
+        if metric_key_value == "size_bytes":
+            if metric_unit_value == "GB":
                 df["metric"] = df["metric"] / (1024**3)
                 metric_label_local = "size_gb"
-            elif metric_unit == "MB":
+            elif metric_unit_value == "MB":
                 df["metric"] = df["metric"] / (1024**2)
                 metric_label_local = "size_mb"
-            elif metric_unit == "TB":
+            elif metric_unit_value == "TB":
                 df["metric"] = df["metric"] / (1024**4)
                 metric_label_local = "size_tb"
             else:
                 metric_label_local = metric_label
         else:
             metric_label_local = metric_label
+
         figs = build_plots(
             df,
-            metric_label=metric_label_local or metric_key,
-            exclude_unpopulated=exclude_unpopulated,
-            metric_unit=metric_unit,
+            metric_label=metric_label_local or metric_key_value,
+            exclude_unpopulated=exclude_unpopulated_value,
+            metric_unit=metric_unit_value,
         )
         with out:
             out.clear_output(wait=True)
-            for fig in figs.values():
-                fig.show()
+            fig = figs.get(selected_plot)
+            if fig is None:
+                fig = list(figs.values())[0]
+            fig.show()
 
-    refresh = widgets.Button(description="Refresh")
-    refresh.on_click(lambda _btn: _render())
+    metric_dropdown = widgets.Dropdown(
+        options=[
+            ("size_bytes", "size_bytes"),
+            ("age_in_days", "age_in_days"),
+        ],
+        value=metric_key,
+        description="Metric",
+    )
+    unit_dropdown = widgets.Dropdown(
+        options=[("GB", "GB"), ("MB", "MB"), ("TB", "TB"), ("days", "days")],
+        value=metric_unit or "GB",
+        description="Unit",
+    )
+    plot_dropdown = widgets.Dropdown(
+        options=[
+            ("Universe count (calendar)", "calendar_count"),
+            ("Total size (calendar)", "calendar_size"),
+            ("Universe/date heatmap", "heatmap"),
+        ],
+        value="calendar_count",
+        description="Plot",
+    )
+    exclude_checkbox = widgets.Checkbox(
+        value=exclude_unpopulated, description="Exclude unpopulated"
+    )
+    use_db_checkbox = widgets.Checkbox(
+        value=use_db_direct, description="DB direct"
+    )
+    after_days = widgets.IntText(value=90, description="Lookback days")
+    apply_btn = widgets.Button(description="Apply")
+
+    def _apply(_):
+        now = dt.datetime.utcnow().timestamp()
+        after_ts = now - after_days.value * 86400 if after_days.value else None
+        before_ts = None
+        _render(
+            selected_plot=plot_dropdown.value,
+            metric_key_value=metric_dropdown.value,
+            metric_unit_value=unit_dropdown.value,
+            exclude_unpopulated_value=exclude_checkbox.value,
+            after_ts=after_ts,
+            before_ts=before_ts,
+            use_db=use_db_checkbox.value,
+        )
+
+    apply_btn.on_click(_apply)
+    _apply(None)
+
+    controls = widgets.VBox(
+        [
+            widgets.HBox([metric_dropdown, unit_dropdown, plot_dropdown]),
+            widgets.HBox([after_days, exclude_checkbox, use_db_checkbox, apply_btn]),
+        ]
+    )
+    return widgets.VBox([controls, out])
+
+
+def materialization_dashboard_interactive(
+    instance: DagsterInstance,
+    dataset_map: dict[str, Iterable[AssetKey]],
+    *,
+    metric_key: str = "size_bytes",
+    metric_unit: str = "GB",
+    date_dim: str = "date",
+    universe_dim: str = "universe",
+    exclude_unpopulated: bool = True,
+    use_db_direct: bool = False,
+):
+    out = widgets.Output()
+    cache: dict[tuple, pd.DataFrame] = {}
+
+    dataset_dropdown = widgets.Dropdown(
+        options=[(k, k) for k in dataset_map.keys()],
+        description="Dataset",
+    )
+    metric_dropdown = widgets.Dropdown(
+        options=[
+            ("size_bytes", "size_bytes"),
+            ("age_in_days", "age_in_days"),
+        ],
+        value=metric_key,
+        description="Metric",
+    )
+    unit_dropdown = widgets.Dropdown(
+        options=[("GB", "GB"), ("MB", "MB"), ("TB", "TB"), ("days", "days")],
+        value=metric_unit,
+        description="Unit",
+    )
+    plot_dropdown = widgets.Dropdown(
+        options=[
+            ("Universe count (calendar)", "calendar_count"),
+            ("Total size (calendar)", "calendar_size"),
+            ("Universe/date heatmap", "heatmap"),
+        ],
+        value="calendar_count",
+        description="Plot",
+    )
+    exclude_checkbox = widgets.Checkbox(
+        value=exclude_unpopulated, description="Exclude unpopulated"
+    )
+    use_db_checkbox = widgets.Checkbox(
+        value=use_db_direct, description="DB direct"
+    )
+    start_picker = widgets.DatePicker(description="Start")
+    end_picker = widgets.DatePicker(description="End")
+    lookback_days = widgets.IntText(value=90, description="Lookback days")
+    apply_btn = widgets.Button(description="Apply")
+
+    def _range_to_ts():
+        if start_picker.value or end_picker.value:
+            after_ts = (
+                dt.datetime.combine(start_picker.value, dt.time.min).timestamp()
+                if start_picker.value
+                else None
+            )
+            before_ts = (
+                dt.datetime.combine(end_picker.value, dt.time.max).timestamp()
+                if end_picker.value
+                else None
+            )
+            return after_ts, before_ts
+        if lookback_days.value:
+            now = dt.datetime.utcnow().timestamp()
+            return now - lookback_days.value * 86400, None
+        return None, None
+
+    def _get_df(dataset, metric_key_value, after_ts, before_ts, use_db):
+        cache_key = (dataset, metric_key_value, after_ts, before_ts, use_db)
+        if cache_key in cache:
+            return cache[cache_key]
+        df = load_materialization_frame(
+            instance,
+            dataset_map[dataset],
+            metric_key=metric_key_value,
+            date_dim=date_dim,
+            universe_dim=universe_dim,
+            after_timestamp=after_ts,
+            before_timestamp=before_ts,
+            use_db_direct=use_db,
+        )
+        cache[cache_key] = df
+        return df
+
+    def _render(_=None):
+        dataset = dataset_dropdown.value
+        metric_key_value = metric_dropdown.value
+        after_ts, before_ts = _range_to_ts()
+        df = _get_df(
+            dataset, metric_key_value, after_ts, before_ts, use_db_checkbox.value
+        ).copy()
+
+        metric_label_local = metric_key_value
+        if metric_key_value == "size_bytes":
+            if unit_dropdown.value == "GB":
+                df["metric"] = df["metric"] / (1024**3)
+                metric_label_local = "size_gb"
+            elif unit_dropdown.value == "MB":
+                df["metric"] = df["metric"] / (1024**2)
+                metric_label_local = "size_mb"
+            elif unit_dropdown.value == "TB":
+                df["metric"] = df["metric"] / (1024**4)
+                metric_label_local = "size_tb"
+
+        figs = build_plots(
+            df,
+            metric_label=metric_label_local,
+            exclude_unpopulated=exclude_checkbox.value,
+            metric_unit=unit_dropdown.value,
+        )
+        with out:
+            out.clear_output(wait=True)
+            fig = figs.get(plot_dropdown.value)
+            if fig is None:
+                fig = list(figs.values())[0]
+            fig.show()
+
+    apply_btn.on_click(_render)
+    plot_dropdown.observe(_render, "value")
     _render()
-    return widgets.VBox([refresh, out])
+
+    controls = widgets.VBox(
+        [
+            widgets.HBox([dataset_dropdown, metric_dropdown, unit_dropdown, plot_dropdown]),
+            widgets.HBox([start_picker, end_picker, lookback_days]),
+            widgets.HBox([exclude_checkbox, use_db_checkbox, apply_btn]),
+        ]
+    )
+    return widgets.VBox([controls, out])

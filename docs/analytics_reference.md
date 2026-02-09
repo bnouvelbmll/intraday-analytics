@@ -137,6 +137,25 @@ This shows:
 - a calendar heatmap of total size per day
 - a universe/date heatmap of `size_bytes`
 
+### Interactive Dashboard (Datasets + Date Range)
+
+```python
+from dagster import DagsterInstance, AssetKey
+from intraday_analytics.plotting import materialization_dashboard_interactive
+
+instance = DagsterInstance.get()
+datasets = {
+    "l2": [AssetKey(["BMLL", "l2"])],
+    "l3": [AssetKey(["BMLL", "l3"])],
+    "demo_ohlcv": [AssetKey(["demo", "ohlcv"])],
+}
+
+materialization_dashboard_interactive(instance, datasets)
+```
+
+The UI lets you select dataset, metric, unit, plot, and date range without
+reloading code. It caches loaded data and only re-queries on Apply.
+
 ### Metrics and Units
 
 Supported `metric_key` values:
