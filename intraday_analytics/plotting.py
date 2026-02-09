@@ -308,7 +308,7 @@ def materialization_dashboard(
     *,
     metric_key: str = "size_bytes",
     metric_label: Optional[str] = None,
-    metric_unit: Optional[str] = "GB",
+    metric_unit: Optional[str] = None,
     date_dim: str = "date",
     universe_dim: str = "universe",
     exclude_unpopulated: bool = True,
@@ -343,14 +343,21 @@ def materialization_dashboard(
             before_timestamp=before_ts,
             use_db_direct=use_db,
         )
+        inferred_unit = metric_unit_value
+        if metric_unit_value == "auto":
+            if metric_key_value == "size_bytes":
+                inferred_unit = "GB"
+            elif metric_key_value in {"age_in_days", "age_days"}:
+                inferred_unit = "days"
+
         if metric_key_value == "size_bytes":
-            if metric_unit_value == "GB":
+            if inferred_unit == "GB":
                 df["metric"] = df["metric"] / (1024**3)
                 metric_label_local = "size_gb"
-            elif metric_unit_value == "MB":
+            elif inferred_unit == "MB":
                 df["metric"] = df["metric"] / (1024**2)
                 metric_label_local = "size_mb"
-            elif metric_unit_value == "TB":
+            elif inferred_unit == "TB":
                 df["metric"] = df["metric"] / (1024**4)
                 metric_label_local = "size_tb"
             else:
@@ -362,7 +369,7 @@ def materialization_dashboard(
             df,
             metric_label=metric_label_local or metric_key_value,
             exclude_unpopulated=exclude_unpopulated_value,
-            metric_unit=metric_unit_value,
+            metric_unit=inferred_unit,
         )
         with out:
             out.clear_output(wait=True)
@@ -380,8 +387,8 @@ def materialization_dashboard(
         description="Metric",
     )
     unit_dropdown = widgets.Dropdown(
-        options=[("GB", "GB"), ("MB", "MB"), ("TB", "TB"), ("days", "days")],
-        value=metric_unit or "GB",
+        options=[("auto", "auto"), ("GB", "GB"), ("MB", "MB"), ("TB", "TB"), ("days", "days")],
+        value=metric_unit or "auto",
         description="Unit",
     )
     plot_dropdown = widgets.Dropdown(
@@ -433,7 +440,7 @@ def materialization_dashboard_interactive(
     dataset_map: dict[str, Iterable[AssetKey]],
     *,
     metric_key: str = "size_bytes",
-    metric_unit: str = "GB",
+    metric_unit: Optional[str] = None,
     date_dim: str = "date",
     universe_dim: str = "universe",
     exclude_unpopulated: bool = True,
@@ -455,8 +462,8 @@ def materialization_dashboard_interactive(
         description="Metric",
     )
     unit_dropdown = widgets.Dropdown(
-        options=[("GB", "GB"), ("MB", "MB"), ("TB", "TB"), ("days", "days")],
-        value=metric_unit,
+        options=[("auto", "auto"), ("GB", "GB"), ("MB", "MB"), ("TB", "TB"), ("days", "days")],
+        value=metric_unit or "auto",
         description="Unit",
     )
     plot_dropdown = widgets.Dropdown(
@@ -522,15 +529,22 @@ def materialization_dashboard_interactive(
             dataset, metric_key_value, after_ts, before_ts, use_db_checkbox.value
         ).copy()
 
+        inferred_unit = unit_dropdown.value
+        if inferred_unit == "auto":
+            if metric_key_value == "size_bytes":
+                inferred_unit = "GB"
+            elif metric_key_value in {"age_in_days", "age_days"}:
+                inferred_unit = "days"
+
         metric_label_local = metric_key_value
         if metric_key_value == "size_bytes":
-            if unit_dropdown.value == "GB":
+            if inferred_unit == "GB":
                 df["metric"] = df["metric"] / (1024**3)
                 metric_label_local = "size_gb"
-            elif unit_dropdown.value == "MB":
+            elif inferred_unit == "MB":
                 df["metric"] = df["metric"] / (1024**2)
                 metric_label_local = "size_mb"
-            elif unit_dropdown.value == "TB":
+            elif inferred_unit == "TB":
                 df["metric"] = df["metric"] / (1024**4)
                 metric_label_local = "size_tb"
 
@@ -538,7 +552,7 @@ def materialization_dashboard_interactive(
             df,
             metric_label=metric_label_local,
             exclude_unpopulated=exclude_checkbox.value,
-            metric_unit=unit_dropdown.value,
+            metric_unit=inferred_unit,
         )
         with out:
             out.clear_output(wait=True)
