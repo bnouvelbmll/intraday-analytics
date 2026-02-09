@@ -34,7 +34,10 @@ class TestDagsterCompatInputAssets(unittest.TestCase):
         self.assertEqual(len(assets), 4)
         for asset in assets:
             self.assertEqual(asset.partitions_def.partition_dimension_names, ["date", "mic"])
-            self.assertEqual(asset.metadata.get("partitioning"), "mic_date")
+            partitioning = asset.metadata.get("partitioning")
+            if hasattr(partitioning, "value"):
+                partitioning = partitioning.value
+            self.assertEqual(partitioning, "mic_date")
 
     def test_input_asset_checks_for_mic_date(self):
         date_partitions, mic_partitions = self._build_partitions()

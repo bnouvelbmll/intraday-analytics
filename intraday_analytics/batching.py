@@ -654,9 +654,17 @@ class S3SymbolBatcher:
                          to the number of CPU cores.
         """
         # 1. Setup Directories
-        if self.temp_dir.exists():
-            shutil.rmtree(self.temp_dir)
-        self.temp_dir.mkdir(parents=True)
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        # Clean up only batch-related artifacts, not the entire temp dir.
+        for table_name in self.s3_file_lists.keys():
+            table_dir = self.temp_dir / table_name
+            if table_dir.exists():
+                shutil.rmtree(table_dir)
+        for batch_file in self.temp_dir.glob("batch-*.parquet"):
+            try:
+                batch_file.unlink()
+            except OSError:
+                logging.debug("Could not remove %s", batch_file, exc_info=True)
 
         if num_workers <= 0:
             # Calculate max workers based on memory

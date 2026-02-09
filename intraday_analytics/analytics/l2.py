@@ -41,16 +41,49 @@ class L2LiquidityConfig(CombinatorialMetricConfig):
     metric_type: Literal["L2_Liquidity"] = "L2_Liquidity"
 
     sides: Union[Side, List[Side]] = Field(
-        ..., description="Side of the book to analyze (Bid, Ask)."
+        ..., description="Side of the book to analyze (Bid, Ask).",
+        json_schema_extra={
+            "long_doc": "Selects book side(s) for liquidity metrics.\n"
+            "Options: Bid, Ask, or a list of both.\n"
+            "Each side expands into separate metric columns.\n"
+            "Used in `L2LiquidityAnalytic.expressions()`.\n"
+            "Combines with levels and measures for combinatorial expansion.\n"
+            "Example: sides=['Bid','Ask'] doubles the output columns.\n"
+            "If you only need top-of-book, choose a single side.\n"
+            "Side selection affects interpretation of imbalance.\n"
+            "Output names include side tokens.",
+        },
     )
 
     levels: Union[int, List[int]] = Field(
         ...,
         description="Book levels to query (1-based index). Can be a single int or a list of ints.",
+        json_schema_extra={
+            "long_doc": "Selects depth levels to include (1-based, 1 = best level).\n"
+            "Accepts a single int or a list of levels.\n"
+            "Each level expands into separate metric columns.\n"
+            "Used in `L2LiquidityAnalytic` for column selection.\n"
+            "Higher levels require more columns in the input schema.\n"
+            "Large lists increase output width and compute time.\n"
+            "Example: levels=[1,5,10] yields three depth levels.\n"
+            "Ensure your L2 data includes at least max(levels).\n"
+            "Output names include level numbers.",
+        },
     )
 
     measures: Union[L2LiquidityMeasure, List[L2LiquidityMeasure]] = Field(
-        ..., description="The specific measure to extract (e.g., 'Quantity', 'Price')."
+        ..., description="The specific measure to extract (e.g., 'Quantity', 'Price').",
+        json_schema_extra={
+            "long_doc": "Selects which liquidity measures to compute.\n"
+            "Examples: Quantity, Price, NumOrders, CumQuantity.\n"
+            "Each measure expands into separate columns per side/level.\n"
+            "Used in `L2LiquidityAnalytic` to build expressions.\n"
+            "Cum* measures aggregate across levels 1..N.\n"
+            "Some measures require additional columns (e.g., NumOrders).\n"
+            "Large measure lists increase output width.\n"
+            "Measures control units (shares, price, orders).\n"
+            "Output names include the measure token.",
+        },
     )
 
 
@@ -64,6 +97,17 @@ class L2SpreadConfig(CombinatorialMetricConfig):
     variant: Union[Literal["Abs", "BPS"], List[Literal["Abs", "BPS"]]] = Field(
         default=["BPS"],
         description="Spread variant: 'Abs' (Ask-Bid) or 'BPS' (Basis Points relative to Mid).",
+        json_schema_extra={
+            "long_doc": "Selects spread variant(s).\n"
+            "Abs computes Ask - Bid in price units.\n"
+            "BPS computes spread in basis points relative to Mid.\n"
+            "Each variant expands into separate output columns.\n"
+            "Used in `L2SpreadAnalytic`.\n"
+            "BPS requires Mid price to be available.\n"
+            "Use Abs for raw spreads, BPS for normalized metrics.\n"
+            "You can enable both for comparative analysis.\n"
+            "Output names include Abs/BPS token.",
+        },
     )
 
 
@@ -81,11 +125,33 @@ class L2ImbalanceConfig(CombinatorialMetricConfig):
     levels: Union[int, List[int]] = Field(
         ...,
         description="Book levels to consider. If >1, usually implies cumulative imbalance up to that level.",
+        json_schema_extra={
+            "long_doc": "Selects depth levels for imbalance computation.\n"
+            "If >1, imbalance may be computed on cumulative depth.\n"
+            "Accepts a single level or a list of levels.\n"
+            "Each level expands into separate output columns.\n"
+            "Used in `L2ImbalanceAnalytic`.\n"
+            "Higher levels smooth imbalance but require deeper book data.\n"
+            "Example: levels=[1,5] yields two imbalance metrics.\n"
+            "Ensure input has sufficient depth columns.\n"
+            "Output names include level numbers.",
+        },
     )
 
     measure: Union[L2ImbalanceMeasure, List[L2ImbalanceMeasure]] = Field(
         default="CumQuantity",
         description="The underlying measure to use for the imbalance calculation.",
+        json_schema_extra={
+            "long_doc": "Selects the underlying measure for imbalance.\n"
+            "Options include CumQuantity, CumOrders, CumNotional.\n"
+            "Each measure expands into separate columns.\n"
+            "Used in `L2ImbalanceAnalytic` expressions.\n"
+            "CumQuantity uses quantities, CumOrders uses order counts.\n"
+            "CumNotional uses price * quantity.\n"
+            "Choose based on your liquidity focus.\n"
+            "Requires corresponding L2 columns.\n"
+            "Output names include the measure token.",
+        },
     )
 
 
@@ -97,7 +163,21 @@ class L2VolatilityConfig(CombinatorialMetricConfig):
     metric_type: Literal["L2_Volatility"] = "L2_Volatility"
 
     source: Union[Literal["Mid", "Bid", "Ask", "Last", "WeightedMid"], List[str]] = (
-        Field(default="Mid", description="The price series to measure volatility on.")
+        Field(
+            default="Mid",
+            description="The price series to measure volatility on.",
+            json_schema_extra={
+                "long_doc": "Selects the price series for volatility calculations.\n"
+                "Options: Mid, Bid, Ask, Last, WeightedMid.\n"
+                "Each source expands into separate output columns.\n"
+                "Used in `L2VolatilityAnalytic`.\n"
+                "WeightedMid uses bid/ask quantities for weighting.\n"
+                "Ensure the chosen price series exists in the input.\n"
+                "Mid is usually the most stable choice.\n"
+                "Changing source affects interpretation of volatility.\n"
+                "Output names include source token.",
+            },
+        )
     )
 
     aggregations: List[AggregationMethod] = ["Std"]
@@ -111,28 +191,148 @@ class L2OHLCConfig(CombinatorialMetricConfig):
     metric_type: Literal["L2_OHLC"] = "L2_OHLC"
 
     source: Union[Literal["Mid", "Bid", "Ask", "WeightedMid"], List[str]] = Field(
-        default="Mid", description="The price series to compute OHLC on."
+        default="Mid",
+        description="The price series to compute OHLC on.",
+        json_schema_extra={
+            "long_doc": "Selects the price series for OHLC.\n"
+            "Options: Mid, Bid, Ask, WeightedMid.\n"
+            "Each source expands into separate OHLC columns.\n"
+            "Used in `L2OHLCAnalytic`.\n"
+            "Ensure chosen price series exists in input.\n"
+            "Mid is the common default for market-level OHLC.\n"
+            "WeightedMid is sensitive to order book depth.\n"
+            "Output names include source token.\n"
+            "Changing source changes interpretation of OHLC.",
+        },
     )
 
     open_mode: Literal["event", "prev_close"] = Field(
         default="event",
         description="How to compute Open for empty buckets: 'event' uses first event; "
         "'prev_close' uses previous Close and fills empty buckets.",
+        json_schema_extra={
+            "long_doc": "Controls how Open is defined when a bucket has no events.\n"
+            "event: use the first event in the bucket as Open.\n"
+            "prev_close: use previous Close to fill empty buckets.\n"
+            "Used in `L2OHLCAnalytic` when constructing OHLC series.\n"
+            "prev_close is useful for chart continuity.\n"
+            "event is more faithful to actual activity.\n"
+            "Choose based on downstream visualization needs.\n"
+            "Empty buckets are common in illiquid symbols.\n"
+            "Changing this affects Open and derived metrics.",
+        },
     )
 
 
 class L2AnalyticsConfig(BaseModel):
+    """
+    L2 analytics configuration.
+
+    Controls order book metrics such as liquidity, spreads, imbalances,
+    volatility, and OHLC. Each list expands into multiple metric columns.
+    The L2 analytics pipeline selects the relevant book columns, computes
+    per-event expressions (e.g., spreads, depth), and aggregates them into
+    TimeBuckets using the specified aggregation methods. Configuration should
+    reflect the depth available in the input order book and the desired
+    granularity of output columns.
+    """
     ENABLED: bool = True
-    metric_prefix: Optional[str] = None
+    metric_prefix: Optional[str] = Field(
+        None,
+        description="Prefix for L2 metric columns.",
+        json_schema_extra={
+            "long_doc": "Prepended to all L2 output column names.\n"
+            "Useful to namespace outputs when combining multiple passes.\n"
+            "Example: metric_prefix='L2_' yields L2_SpreadAbsTWA.\n"
+            "Applies to all L2 series generated by this pass.\n"
+            "Implementation uses `BaseAnalytics.metric_prefix`.\n"
+            "See `intraday_analytics/analytics_base.py` for naming rules.\n"
+            "Changing the prefix alters column names and downstream joins.\n"
+            "Keep stable prefixes in production pipelines.\n"
+            "Leave empty to keep default module naming.\n"
+        },
+    )
     time_bucket_seconds: Optional[float] = None
     time_bucket_anchor: Literal["end", "start"] = "end"
     time_bucket_closed: Literal["right", "left"] = "right"
 
-    liquidity: List[L2LiquidityConfig] = Field(default_factory=list)
-    spreads: List[L2SpreadConfig] = Field(default_factory=list)
-    imbalances: List[L2ImbalanceConfig] = Field(default_factory=list)
-    volatility: List[L2VolatilityConfig] = Field(default_factory=list)
-    ohlc: List[L2OHLCConfig] = Field(default_factory=list)
+    liquidity: List[L2LiquidityConfig] = Field(
+        default_factory=list,
+        description="Liquidity metrics configuration.",
+        json_schema_extra={
+            "long_doc": "List of L2 liquidity metrics (depth, quantities, orders) to compute.\n"
+            "Each entry expands by side, level, and measure.\n"
+            "Example: sides=['Bid','Ask'], levels=[1,5], measures=['Quantity'].\n"
+            "Generates BidQuantity1, AskQuantity1, BidQuantity5, AskQuantity5.\n"
+            "Aggregation is controlled by the base `aggregations` field.\n"
+            "Used in `L2LiquidityAnalytic` in `intraday_analytics/analytics/l2.py`.\n"
+            "High levels and many measures can create many columns.\n"
+            "Reduce levels or measures if output is too wide.\n"
+            "Best for depth and queue metrics.\n"
+            "Requires L2 book columns (BidPrice, BidQuantity, etc.).",
+        },
+    )
+    spreads: List[L2SpreadConfig] = Field(
+        default_factory=list,
+        description="Spread metrics configuration.",
+        json_schema_extra={
+            "long_doc": "List of L2 spread metrics (absolute, bps) to compute.\n"
+            "Variant controls Abs or BPS, and sides are implicit (best bid/ask).\n"
+            "Example: variant=['Abs','BPS'] yields SpreadAbs and SpreadBPS.\n"
+            "Aggregations apply over TimeBucket for each variant.\n"
+            "Computed in `L2SpreadAnalytic` in `intraday_analytics/analytics/l2.py`.\n"
+            "Requires best bid/ask columns in the L2 frame.\n"
+            "BPS uses mid price to normalize spread.\n"
+            "Consider fewer aggregations if you only need last or mean.\n"
+            "Spread metrics are common for liquidity comparisons.\n"
+        },
+    )
+    imbalances: List[L2ImbalanceConfig] = Field(
+        default_factory=list,
+        description="Imbalance metrics configuration.",
+        json_schema_extra={
+            "long_doc": "List of L2 imbalance metrics to compute (cum quantities, orders, notional).\n"
+            "Each entry expands by measure and level.\n"
+            "Example: levels=[1,5], measure='CumQuantity' yields ImbalanceCumQuantity1/5.\n"
+            "Imbalance is typically (bid - ask) / (bid + ask).\n"
+            "Computed in `L2ImbalanceAnalytic`.\n"
+            "Requires L2 depth columns for both sides.\n"
+            "Higher levels smooth imbalance but increase compute.\n"
+            "Aggregations apply per TimeBucket.\n"
+            "Use with caution for illiquid symbols with sparse books.\n"
+            "Output names include level and measure to avoid ambiguity.",
+        },
+    )
+    volatility: List[L2VolatilityConfig] = Field(
+        default_factory=list,
+        description="Volatility metrics configuration.",
+        json_schema_extra={
+            "long_doc": "List of L2 volatility metrics to compute.\n"
+            "Selects price series (Mid, Bid, Ask, WeightedMid) and aggregation.\n"
+            "Example: source='Mid' computes volatility over mid prices.\n"
+            "Computed in `L2VolatilityAnalytic`.\n"
+            "Aggregation defines whether you compute std/mean/etc across TimeBucket.\n"
+            "Requires price series columns present in the L2 frame.\n"
+            "Volatility is sensitive to bucket size (time_bucket_seconds).\n"
+            "Consider longer buckets for stable estimates.\n"
+            "Output names encode source and aggregation.",
+        },
+    )
+    ohlc: List[L2OHLCConfig] = Field(
+        default_factory=list,
+        description="OHLC metrics configuration.",
+        json_schema_extra={
+            "long_doc": "List of L2 OHLC metrics to compute.\n"
+            "Selects price series and open mode (event vs prev_close).\n"
+            "Example: source='Mid' produces MidOpen/MidHigh/MidLow/MidClose.\n"
+            "Open mode controls how empty buckets are filled.\n"
+            "Computed in `L2OHLCAnalytic`.\n"
+            "Requires price series columns present in the L2 frame.\n"
+            "OHLC output is useful for charting and downstream indicators.\n"
+            "Large numbers of OHLC configs can increase output width.\n"
+            "Output names encode source and aggregation conventions.",
+        },
+    )
 
     levels: int = 10
 

@@ -12,7 +12,7 @@ from typing import Callable, Optional, Sequence
 from intraday_analytics.tables import ALL_TABLES
 from intraday_analytics.utils import filter_existing_s3_files
 
-from intraday_analytics.configuration import AnalyticsConfig
+from intraday_analytics.configuration import AnalyticsConfig, SchedulePartitionSelector
 from intraday_analytics.execution import run_multiday_pipeline
 from intraday_analytics.cli import _load_universe_override, resolve_user_config
 
@@ -320,8 +320,15 @@ def build_demo_assets(
         base_config = resolve_user_config(
             module.USER_CONFIG, getattr(module, "__file__", None), precedence
         )
+        config_model = AnalyticsConfig(**base_config) if isinstance(base_config, dict) else AnalyticsConfig()
+        auto_kwargs = _auto_materialize_kwargs(config_model)
+        output_target = config_model.OUTPUT_TARGET
+        io_manager_key = getattr(output_target, "io_manager_key", None)
         passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
         last_pass_key = None
+
+        universes = getattr(module, "UNIVERSES", None) or default_universes()
+        default_universe_spec = _first_universe_spec(universes) or "default"
 
         def _make_demo_asset(
             module, asset_name, asset_group, config_override, deps, key_prefix
@@ -332,6 +339,8 @@ def build_demo_assets(
                 group_name=asset_group,
                 key_prefix=key_prefix,
                 deps=deps,
+                io_manager_key=io_manager_key,
+                **auto_kwargs,
             )
             def _demo_asset(context=None):
                 base_config = config_override
@@ -346,7 +355,7 @@ def build_demo_assets(
                         )
                     else:
                         partition = PartitionRun(
-                            universe=UniversePartition(name="default", value=None),
+                            universe=parse_universe_spec(default_universe_spec),
                             dates=DatePartition(
                                 start_date=base_config["START_DATE"],
                                 end_date=base_config["END_DATE"],
@@ -354,7 +363,7 @@ def build_demo_assets(
                         )
                 else:
                     partition = PartitionRun(
-                        universe=UniversePartition(name="default", value=None),
+                        universe=parse_universe_spec(default_universe_spec),
                         dates=DatePartition(
                             start_date=base_config["START_DATE"],
                             end_date=base_config["END_DATE"],
@@ -367,6 +376,30 @@ def build_demo_assets(
                     partition=partition,
                     get_pipeline=get_pipeline,
                 )
+                if io_manager_key:
+                    try:
+                        from intraday_analytics.process import get_final_output_path
+                    except Exception:
+                        return None
+                    if split_passes and passes:
+                        pass_names = [p.get("name", "pass") for p in base_config.get("PASSES", [])]
+                        outputs = {}
+                        for name in pass_names:
+                            outputs[name] = get_final_output_path(
+                                dt.date.fromisoformat(partition.dates.start_date),
+                                dt.date.fromisoformat(partition.dates.end_date),
+                                AnalyticsConfig(**base_config),
+                                name,
+                                output_target,
+                            )
+                        return outputs
+                    return get_final_output_path(
+                        dt.date.fromisoformat(partition.dates.start_date),
+                        dt.date.fromisoformat(partition.dates.end_date),
+                        AnalyticsConfig(**base_config),
+                        base_config.get("PASSES", [{}])[-1].get("name", asset_name),
+                        output_target,
+                    )
 
             return _demo_asset
 
@@ -405,6 +438,169 @@ def build_demo_assets(
     return assets
 
 
+def _auto_materialize_kwargs(config: AnalyticsConfig) -> dict:
+    if not config.AUTO_MATERIALIZE_ENABLED:
+        return {}
+    try:
+        from dagster import AutomationCondition
+        from datetime import timedelta
+
+        condition = AutomationCondition.eager()
+        if config.AUTO_MATERIALIZE_LATEST_DAYS:
+            condition = condition.without(AutomationCondition.in_latest_time_window())
+            condition = condition & AutomationCondition.in_latest_time_window(
+                timedelta(days=int(config.AUTO_MATERIALIZE_LATEST_DAYS))
+            )
+        return {"automation_condition": condition}
+    except Exception:
+        try:
+            from dagster import AutoMaterializePolicy
+            if config.AUTO_MATERIALIZE_LATEST_DAYS:
+                return {
+                    "auto_materialize_policy": AutoMaterializePolicy.eager(
+                        max_materializations_per_minute=None
+                    )
+                }
+            return {"auto_materialize_policy": AutoMaterializePolicy.eager()}
+        except Exception:
+            return {}
+
+
+def _first_universe_spec(universes: Sequence) -> Optional[str]:
+    for universe in universes:
+        parts = universe.iter_partitions()
+        if parts:
+            return parts[0].spec
+    return None
+
+
+def _resolve_schedule_date(value: Optional[str], context, timezone: str) -> Optional[str]:
+    if value and value not in {"today", "yesterday"}:
+        return value
+
+    base = getattr(context, "scheduled_execution_time", None)
+    if timezone:
+        try:
+            from zoneinfo import ZoneInfo
+
+            tzinfo = ZoneInfo(timezone)
+        except Exception:
+            tzinfo = dt.timezone.utc
+    else:
+        tzinfo = dt.timezone.utc
+
+    if base is None:
+        base = dt.datetime.now(tzinfo)
+    else:
+        try:
+            base = base.astimezone(tzinfo)
+        except Exception:
+            pass
+
+    base_date = base.date()
+    if value == "today":
+        return base_date.isoformat()
+    return (base_date - dt.timedelta(days=1)).isoformat()
+
+
+def _schedule_partitions(
+    schedule_cfg,
+    *,
+    default_universe: Optional[str],
+    universe_dim: str,
+    date_dim: str,
+) -> list[dict[str, Optional[str]]]:
+    entries = schedule_cfg.partitions or [SchedulePartitionSelector()]
+    resolved = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            entry = SchedulePartitionSelector(**entry)
+        universe = entry.universe or default_universe
+        date_key = entry.date or "yesterday"
+        resolved.append({universe_dim: universe, date_dim: date_key})
+    return resolved
+
+
+def build_demo_schedules(
+    demo_pkg: str = "demo",
+    partitions_def=None,
+    universe_dim: str = "universe",
+    date_dim: str = "date",
+    split_passes: bool = False,
+):
+    """
+    Build Dagster schedules for demo assets based on AnalyticsConfig.SCHEDULES.
+    """
+    try:
+        from dagster import AssetSelection, MultiPartitionKey, RunRequest, define_asset_job, schedule
+    except Exception as exc:
+        raise ImportError("Dagster is required to build schedules.") from exc
+
+    demos = _discover_demo_modules(demo_pkg)
+    schedules = []
+
+    for module in demos:
+        name = module.__name__.split(".")[-1]
+        asset_base = f"demo{name}" if name[0].isdigit() else name
+        precedence = getattr(module, "CONFIG_YAML_PRECEDENCE", "yaml_overrides")
+        base_config = resolve_user_config(
+            module.USER_CONFIG, getattr(module, "__file__", None), precedence
+        )
+        config_model = AnalyticsConfig(**base_config) if isinstance(base_config, dict) else AnalyticsConfig()
+        if not config_model.SCHEDULES:
+            continue
+
+        universes = getattr(module, "UNIVERSES", None) or default_universes()
+        default_universe = _first_universe_spec(universes)
+
+        selection = AssetSelection.groups(asset_base)
+        job = define_asset_job(
+            name=f"{asset_base}__job",
+            selection=selection,
+            partitions_def=partitions_def,
+        )
+
+        for schedule_cfg in config_model.SCHEDULES:
+            if not schedule_cfg.enabled:
+                continue
+
+            schedule_name = f"{asset_base}__{schedule_cfg.name}"
+            partition_specs = _schedule_partitions(
+                schedule_cfg,
+                default_universe=default_universe,
+                universe_dim=universe_dim,
+                date_dim=date_dim,
+            )
+
+            @schedule(
+                name=schedule_name,
+                cron_schedule=schedule_cfg.cron,
+                job=job,
+                execution_timezone=schedule_cfg.timezone,
+            )
+            def _schedule_fn(
+                context,
+                _specs=partition_specs,
+                _timezone=schedule_cfg.timezone,
+                _name=schedule_name,
+            ):
+                for spec in _specs:
+                    date_value = _resolve_schedule_date(spec.get(date_dim), context, _timezone)
+                    universe_value = spec.get(universe_dim)
+                    if universe_value is None or date_value is None:
+                        continue
+                    key_map = {universe_dim: universe_value, date_dim: date_value}
+                    partition_key = MultiPartitionKey(key_map)
+                    yield RunRequest(
+                        partition_key=partition_key,
+                        run_key=f"{_name}:{partition_key}",
+                    )
+
+            schedules.append(_schedule_fn)
+
+    return schedules
+
+
 def build_demo_materialization_checks(
     demo_pkg: str = "demo",
     universe_dim: str = "universe",
@@ -432,6 +628,8 @@ def build_demo_materialization_checks(
         package_root = module.__name__.split(".")[0]
         base_config = module.USER_CONFIG
         passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
+        universes = getattr(module, "UNIVERSES", None) or default_universes()
+        default_universe_spec = _first_universe_spec(universes) or "default"
 
         def _make_materialized_check(base_config, asset_key, pass_name: str | None):
             @asset_check(asset=asset_key, name="s3_materialized")
@@ -449,7 +647,7 @@ def build_demo_materialization_checks(
                     )
                 else:
                     partition = PartitionRun(
-                        universe=UniversePartition(name="default", value=None),
+                        universe=parse_universe_spec(default_universe_spec),
                         dates=DatePartition(
                             start_date=base_config["START_DATE"],
                             end_date=base_config["END_DATE"],
@@ -523,6 +721,10 @@ def build_input_source_assets(
     """
     try:
         from dagster import AssetKey, MultiPartitionsDefinition, SourceAsset
+        try:
+            from dagster import AssetSpec
+        except Exception:
+            AssetSpec = None
     except Exception as exc:
         raise ImportError("Dagster is required to build source assets.") from exc
 
@@ -552,20 +754,32 @@ def build_input_source_assets(
         key_path = [*asset_key_prefix, table.name] if asset_key_prefix else [table.name]
         asset_key = AssetKey(key_path)
 
-        assets.append(
-            SourceAsset(
-                key=asset_key,
-                partitions_def=partitions_def,
-                description=f"External BMLL table: {table.name}",
-                group_name=group_name,
-                metadata={
-                    "table": table.name,
-                    "s3_folder": table.s3_folder_name,
-                    "s3_prefix": table.s3_file_prefix,
-                    "partitioning": partitioning,
-                },
+        metadata = {
+            "table": table.name,
+            "s3_folder": table.s3_folder_name,
+            "s3_prefix": table.s3_file_prefix,
+            "partitioning": partitioning,
+        }
+        if AssetSpec is not None:
+            assets.append(
+                AssetSpec(
+                    key=asset_key,
+                    partitions_def=partitions_def,
+                    description=f"External BMLL table: {table.name}",
+                    group_name=group_name,
+                    metadata=metadata,
+                )
             )
-        )
+        else:
+            assets.append(
+                SourceAsset(
+                    key=asset_key,
+                    partitions_def=partitions_def,
+                    description=f"External BMLL table: {table.name}",
+                    group_name=group_name,
+                    metadata=metadata,
+                )
+            )
         asset_meta[asset_key] = table
 
     return assets, asset_meta
@@ -605,20 +819,21 @@ def build_s3_input_asset_checks(
         table = table_map.get(asset.key)
         if not table:
             continue
+        asset_key = asset.key if hasattr(asset, "key") else asset
 
         def _make_input_check(table):
-            @asset_check(asset=asset, name="s3_exists")
+            @asset_check(asset=asset_key, name="s3_exists")
             def _input_check(context):
                 logging.info(
                     "s3_exists check start asset=%s mode=%s",
-                    asset.key,
+                    asset_key,
                     check_mode,
                 )
                 keys = _safe_partition_keys(context)
                 if not keys:
                     logging.info(
                         "s3_exists skipped (no partition key) asset=%s",
-                        asset.key,
+                        asset_key,
                     )
                     return AssetCheckResult(
                         passed=True,
@@ -939,6 +1154,9 @@ def build_s3_input_sync_asset(
     cbbo_dim: str = "cbbo",
     check_mode: str = "recursive",
     group_name: str = "BMLL",
+    use_db_bulk: bool = False,
+    repo_root: str | None = None,
+    asset_key_prefix: Sequence[str] | None = None,
 ):
     """
     Build a partitioned asset for per-date sync of S3 input observations/materializations.
@@ -955,6 +1173,47 @@ def build_s3_input_sync_asset(
         key_prefix=[group_name],
     )
     def _sync_asset(context):
+        if use_db_bulk:
+            import subprocess
+            import sys
+            import os
+
+            date_key = getattr(context, "partition_key", None)
+            if not date_key:
+                context.log.warning("sync asset requires a date partition")
+                return
+
+            root = repo_root or os.getenv("BMLL_REPO_ROOT")
+            if not root:
+                raise RuntimeError("Missing repo_root for db bulk sync (set BMLL_REPO_ROOT).")
+            script_path = os.path.join(root, "scripts", "s3_bulk_sync_db.py")
+            if not os.path.exists(script_path):
+                raise RuntimeError(f"Bulk sync script not found: {script_path}")
+
+            tables = ",".join([t.name for t in table_map.values()])
+            prefix = ",".join(asset_key_prefix) if asset_key_prefix else "BMLL"
+            cmd = [
+                sys.executable,
+                script_path,
+                "sync",
+                "--tables",
+                tables,
+                "--start_date",
+                date_key,
+                "--end_date",
+                date_key,
+                "--emit_materializations",
+                "True",
+                "--emit_observations",
+                "True",
+                "--asset_key_prefix",
+                prefix,
+                "--refresh_status_cache",
+                "True",
+            ]
+            subprocess.check_call(cmd, env=os.environ)
+            return
+
         if check_mode != "recursive":
             context.log.warning("sync asset requires recursive mode")
             return
@@ -1040,13 +1299,14 @@ def run_partition(
             **base_config,
             "START_DATE": partition.dates.start_date,
             "END_DATE": partition.dates.end_date,
+            "UNIVERSE": partition.universe.spec if partition.universe else None,
         }
     )
 
     get_universe = default_get_universe
     if partition.universe:
         spec = partition.universe.spec
-        if "+" in spec:
+        if spec and spec != "default" and "+" in spec:
             parts = [s for s in spec.split("+") if s]
             resolvers = [_resolve_universe_callable(p) for p in parts]
 
@@ -1055,7 +1315,7 @@ def run_partition(
                 return _intersect_universe_frames(frames)
 
             get_universe = _combined
-        else:
+        elif spec and spec != "default":
             get_universe = _resolve_universe_callable(spec)
 
     run_multiday_pipeline(

@@ -18,18 +18,64 @@ CBBOQuantityAgg = Literal["TWMean", "Min", "Max", "Median"]
 
 
 class CBBOAnalyticsConfig(BaseModel):
+    """
+    CBBO analytics configuration.
+
+    Controls metrics that compare venue quotes to the consolidated best bid/offer.
+    The CBBO pipeline aligns venue L2 snapshots with consolidated quotes,
+    computes time-at-best and quantity-at-best metrics, and aggregates these
+    within TimeBuckets using the specified aggregation methods.
+    """
     ENABLED: bool = True
-    metric_prefix: Optional[str] = None
+    metric_prefix: Optional[str] = Field(
+        None,
+        description="Prefix for CBBO metric columns.",
+        json_schema_extra={
+            "long_doc": "Prepended to all CBBO output columns.\n"
+            "Useful to namespace CBBO metrics in multi-module outputs.\n"
+            "Example: 'CB_' yields CB_TimeAtCBB.\n"
+            "Applies to all CBBO metrics in this pass.\n"
+            "Implementation uses `BaseAnalytics.metric_prefix`.\n"
+            "See `intraday_analytics/analytics_base.py` for naming.\n"
+            "Changing the prefix changes column names and downstream joins.\n"
+            "Keep stable across production runs.\n"
+            "Leave empty to use default names.\n"
+        },
+    )
     measures: List[CBBOMeasure] = Field(
         default_factory=lambda: [
             "TimeAtCBB",
             "TimeAtCBO",
             "QuantityAtCBB",
             "QuantityAtCBO",
-        ]
+        ],
+        description="CBBO measures to compute.",
+        json_schema_extra={
+            "long_doc": "Selects which CBBO measures are produced.\n"
+            "TimeAtCBB/CBO are ratios of time at best bid/offer.\n"
+            "QuantityAtCBB/CBO are quantities at the best quote.\n"
+            "Computed in `CBBOAnalytic.expressions()`.\n"
+            "Requires CBBO and venue L2 data for comparison.\n"
+            "If CBBO is missing, outputs may be null.\n"
+            "Quantities can also be aggregated (see quantity_aggregations).\n"
+            "Limit measures to reduce output width.\n"
+            "Output names include the measure name.",
+        },
     )
     quantity_aggregations: List[CBBOQuantityAgg] = Field(
-        default_factory=lambda: ["TWMean", "Min", "Max", "Median"]
+        default_factory=lambda: ["TWMean", "Min", "Max", "Median"],
+        description="Aggregations applied to quantity measures.",
+        json_schema_extra={
+            "long_doc": "Controls aggregation variants for QuantityAtCBB/CBO.\n"
+            "TWMean uses duration weighting across the bucket.\n"
+            "Min/Max/Median are computed over the bucket.\n"
+            "Used in `CBBOAnalytic._expression_quantity_at_*`.\n"
+            "Only applies when QuantityAtCBB/CBO is enabled.\n"
+            "More aggregations produce more output columns.\n"
+            "If you only need a single summary, use TWMean only.\n"
+            "Be aware of sparse data leading to null medians.\n"
+            "Output names include aggregation suffixes.",
+        },
     )
 
 

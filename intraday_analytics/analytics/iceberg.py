@@ -34,36 +34,354 @@ class IcebergMetricConfig(CombinatorialMetricConfig):
     metric_type: Literal["Iceberg"] = "Iceberg"
 
     measures: Union[IcebergMeasure, List[IcebergMeasure]] = Field(
-        ..., description="Iceberg measure to compute."
+        ..., description="Iceberg measure to compute.",
+        json_schema_extra={
+            "long_doc": "Selects iceberg measures to compute.\n"
+            "Examples: ExecutionVolume, ExecutionCount, AverageSize.\n"
+            "Each measure expands into separate output columns.\n"
+            "Used in `IcebergExecutionAnalytic` expressions.\n"
+            "Some measures require additional iceberg linking stages.\n"
+            "Combine with sides for expansion.\n"
+            "Large measure lists increase output width.\n"
+            "Ensure required fields exist in the input.\n"
+            "Output names include measure tokens.",
+        },
     )
     sides: Union[IcebergSide, List[IcebergSide]] = Field(
-        default="Total", description="Side filter (Bid, Ask, or Total)."
+        default="Total",
+        description="Side filter (Bid, Ask, or Total).",
+        json_schema_extra={
+            "long_doc": "Selects side(s) for iceberg measures.\n"
+            "Options: Bid, Ask, Total.\n"
+            "Each side expands into separate output columns.\n"
+            "Used in `IcebergExecutionAnalytic` filtering.\n"
+            "Total aggregates both sides.\n"
+            "Combine with measures for expansion.\n"
+            "Bid/Ask are useful for directional analysis.\n"
+            "Output names include side tokens.\n"
+            "Side selection affects interpretation of imbalance.",
+        },
     )
 
 
 class IcebergAnalyticsConfig(BaseModel):
-    ENABLED: bool = True
-    metric_prefix: Optional[str] = None
-    metrics: List[IcebergMetricConfig] = Field(default_factory=list)
+    """
+    Iceberg analytics configuration.
 
-    tag_trades: bool = True
-    trade_tag_context_key: str = "trades_iceberg"
-    match_tolerance_seconds: float = Field(5e-4, gt=0)
-    price_match: bool = True
-    min_revealed_qty: float = Field(0.0, ge=0.0)
-    avg_size_source: Literal["RevealedQty", "ExecutionSize", "OldSize"] = "RevealedQty"
-    imbalance_source: Literal["ExecutionSize", "RevealedQty"] = "ExecutionSize"
-    trade_match_enabled: bool = True
-    trade_match_tolerance_seconds: float = Field(5e-4, gt=0)
-    trade_match_price_match: bool = True
-    trade_match_exclude_exact: bool = True
-    trade_match_size_tolerance: float = Field(0.0, ge=0.0)
-    trade_match_trade_types: List[str] = Field(default_factory=lambda: ["LIT", "DARK"])
-    trade_match_classifications: List[str] = Field(default_factory=list)
-    trade_match_require_side: bool = True
-    enable_peak_linking: bool = True
-    peak_link_tolerance_seconds: float = Field(5e-4, gt=0)
-    peak_link_price_match: bool = True
+    Controls iceberg detection, matching, and metrics. Includes trade tagging
+    and peak linking options for reconstructing iceberg events. The iceberg
+    pipeline identifies candidate iceberg sequences from L3 data, optionally
+    links peaks, matches trades to iceberg events when enabled, and aggregates
+    resulting metrics within TimeBuckets. Configuration should be tuned to the
+    timing and size characteristics of the venue to avoid over- or under-matching.
+    """
+    ENABLED: bool = True
+    metric_prefix: Optional[str] = Field(
+        None,
+        description="Prefix for iceberg metric columns.",
+        json_schema_extra={
+            "long_doc": "Prepended to all iceberg output columns.\n"
+            "Useful to separate iceberg metrics from other modules.\n"
+            "Example: 'IC_' yields IC_IcebergExecutionVolume.\n"
+            "Applies to all iceberg metrics in this pass.\n"
+            "Implemented by `BaseAnalytics.metric_prefix`.\n"
+            "See `intraday_analytics/analytics_base.py` for naming rules.\n"
+            "Changing the prefix changes column names and downstream joins.\n"
+            "Keep stable for production outputs.\n"
+            "Leave empty to use default module naming.\n"
+        },
+    )
+    metrics: List[IcebergMetricConfig] = Field(
+        default_factory=list,
+        description="Iceberg execution metrics configuration.",
+        json_schema_extra={
+            "long_doc": "Defines which iceberg execution measures to compute.\n"
+            "Each entry expands by side and measure.\n"
+            "Example: measures=['ExecutionVolume'], sides=['Total'].\n"
+            "Computed in `IcebergExecutionAnalytic`.\n"
+            "Requires iceberg detection to identify relevant executions.\n"
+            "Aggregation is per TimeBucket.\n"
+            "Many measures will increase output width.\n"
+            "Use carefully for large universes.\n"
+            "Output names include iceberg measure tokens.",
+        },
+    )
+
+    tag_trades: bool = Field(
+        True,
+        description="Tag trades using detected iceberg events.",
+        json_schema_extra={
+            "long_doc": "If true, iceberg detection tags trades and stores them in the context.\n"
+            "Tagged trades are used by downstream modules (e.g., trade analytics).\n"
+            "This enables metrics on iceberg-identified trades.\n"
+            "Requires the trade match stage to be enabled.\n"
+            "If disabled, downstream modules cannot access tagged trades.\n"
+            "Implementation: `IcebergAnalytics` writes to context.\n"
+            "Works best when trade data is available and aligned.\n"
+            "Tagging may reduce sample size significantly.\n"
+            "Use with `tagged_trades_context_key`.",
+        },
+    )
+    trade_tag_context_key: str = Field(
+        "trades_iceberg",
+        description="Context key for tagged trades.",
+        json_schema_extra={
+            "long_doc": "Key used to store tagged trades in the pipeline context.\n"
+            "Downstream modules read from this key when `use_tagged_trades` is enabled.\n"
+            "Must match the value in trade analytics config.\n"
+            "Changing the key requires coordination across passes.\n"
+            "If the key is missing, tagged trades are not found.\n"
+            "Default matches the iceberg module name.\n"
+            "Useful when multiple taggers are present.\n"
+            "Keep keys descriptive and stable.\n"
+            "This is a config-level contract between passes.",
+        },
+    )
+    match_tolerance_seconds: float = Field(
+        5e-4,
+        gt=0,
+        description="Time tolerance for matching trades to iceberg events.",
+        json_schema_extra={
+            "long_doc": "Time window for matching trades to iceberg events.\n"
+            "Example: 5e-4 = 0.5ms tolerance.\n"
+            "Smaller tolerances reduce matches and false positives.\n"
+            "Larger tolerances increase matches but may add noise.\n"
+            "Used by the iceberg trade matching stage.\n"
+            "Requires precise timestamps in both trades and L3 data.\n"
+            "If clocks are skewed, matches may degrade.\n"
+            "Consider venue latency when choosing this value.\n"
+            "Affects tagged trade counts and downstream analytics.",
+        },
+    )
+    price_match: bool = Field(
+        True,
+        description="Require price match when linking iceberg trades.",
+        json_schema_extra={
+            "long_doc": "If true, requires price equality between trade and iceberg candidate.\n"
+            "If false, matches on timing alone (less strict).\n"
+            "Price matching reduces false positives.\n"
+            "However, it may miss cases with price rounding.\n"
+            "Used in trade matching logic within iceberg analytics.\n"
+            "Disable only if price quality is known to be noisy.\n"
+            "Consider combining with size tolerance adjustments.\n"
+            "Changing this affects tagged trade counts.\n"
+            "This does not affect iceberg metric definitions.",
+        },
+    )
+    min_revealed_qty: float = Field(
+        0.0,
+        ge=0.0,
+        description="Minimum revealed quantity to qualify as iceberg.",
+        json_schema_extra={
+            "long_doc": "Minimum revealed quantity to classify a candidate as iceberg.\n"
+            "Higher thresholds reduce noise and false positives.\n"
+            "Lower thresholds increase sensitivity to small icebergs.\n"
+            "Applied before generating iceberg metrics.\n"
+            "Useful for filtering micro trades and small events.\n"
+            "If set too high, you may miss legitimate events.\n"
+            "This affects both tagging and metrics.\n"
+            "Consider instrument liquidity when choosing values.\n"
+            "Units are in shares.",
+        },
+    )
+    avg_size_source: Literal["RevealedQty", "ExecutionSize", "OldSize"] = Field(
+        "RevealedQty",
+        description="Source used for average size calculations.",
+        json_schema_extra={
+            "long_doc": "Controls which field contributes to iceberg average size metrics.\n"
+            "RevealedQty uses displayed quantity; ExecutionSize uses trade sizes.\n"
+            "OldSize can be used for L3 update-based sizing.\n"
+            "Applied in iceberg metric expressions.\n"
+            "Choose based on your data quality and definitions.\n"
+            "Changing this affects AverageSize and related outputs.\n"
+            "Ensure the chosen field exists in the L3 schema.\n"
+            "If missing, results may be null.\n"
+            "Use ExecutionSize for execution-focused metrics.",
+        },
+    )
+    imbalance_source: Literal["ExecutionSize", "RevealedQty"] = Field(
+        "ExecutionSize",
+        description="Source used for iceberg imbalance metrics.",
+        json_schema_extra={
+            "long_doc": "Controls the source used for iceberg imbalance metrics.\n"
+            "ExecutionSize focuses on executed volume imbalance.\n"
+            "RevealedQty focuses on displayed quantity imbalance.\n"
+            "Applied in iceberg imbalance expressions.\n"
+            "Choose based on whether you care about trading vs display.\n"
+            "Ensure the chosen field exists in the input schema.\n"
+            "Changing this affects iceberg imbalance outputs.\n"
+            "RevealedQty can be noisier for hidden liquidity.\n"
+            "Outputs are normalized imbalance values.",
+        },
+    )
+    trade_match_enabled: bool = Field(
+        True,
+        description="Enable trade matching against iceberg candidates.",
+        json_schema_extra={
+            "long_doc": "If false, iceberg detection skips trade matching stage.\n"
+            "Disabling may speed up processing but removes tagged trades.\n"
+            "Iceberg metrics that rely on trade linking may be affected.\n"
+            "Use when you only need iceberg event counts.\n"
+            "If disabled, `tag_trades` has no effect.\n"
+            "Useful for quick scans or when trade data is missing.\n"
+            "Consider enabling for production analytics.\n"
+            "This affects downstream trade analytics and tagging.\n"
+            "Does not change the iceberg detection stage.",
+        },
+    )
+    trade_match_tolerance_seconds: float = Field(
+        5e-4,
+        gt=0,
+        description="Trade matching time tolerance.",
+        json_schema_extra={
+            "long_doc": "Used when aligning trades to iceberg events.\n"
+            "Defines acceptable time window for a trade to match an iceberg event.\n"
+            "Smaller values are stricter; larger values increase matches.\n"
+            "Requires accurate timestamps.\n"
+            "This is separate from `match_tolerance_seconds`.\n"
+            "Applied in the trade matching stage only.\n"
+            "Affects tagging and any trade-linked iceberg metrics.\n"
+            "Use venue latency as a guide for selection.\n"
+            "Large values may introduce false positives.",
+        },
+    )
+    trade_match_price_match: bool = Field(
+        True,
+        description="Require price match for trade linking.",
+        json_schema_extra={
+            "long_doc": "When false, allows mismatched prices if within time tolerance.\n"
+            "Price matching reduces false positives at the cost of fewer matches.\n"
+            "If your data has rounding differences, consider disabling.\n"
+            "Applied during trade matching stage.\n"
+            "Affects tagging and trade-linked metrics.\n"
+            "Does not affect iceberg detection itself.\n"
+            "Combine with size tolerance if disabling price match.\n"
+            "Set false only with evidence of price mismatch issues.\n"
+            "May increase noise in tagged trades.",
+        },
+    )
+    trade_match_exclude_exact: bool = Field(
+        True,
+        description="Exclude exact matches when linking iceberg trades.",
+        json_schema_extra={
+            "long_doc": "If true, avoids linking when trade exactly matches a candidate.\n"
+            "Useful when exact matches represent trivial or duplicated events.\n"
+            "Prevents over-counting in iceberg linkage.\n"
+            "Disable if you want strict exact matching.\n"
+            "Applied in trade matching stage.\n"
+            "Can reduce tagged trade counts.\n"
+            "Consider data quality before enabling.\n"
+            "No effect on iceberg detection stage.\n"
+            "Only affects trade linking.",
+        },
+    )
+    trade_match_size_tolerance: float = Field(
+        0.0,
+        ge=0.0,
+        description="Allowed size tolerance for trade matching.",
+        json_schema_extra={
+            "long_doc": "Higher tolerances allow looser size matching to iceberg candidates.\n"
+            "Use when size fields are noisy or rounded.\n"
+            "Set to 0 for exact size matching.\n"
+            "Applied during trade matching stage.\n"
+            "Larger tolerances increase match rate but may add noise.\n"
+            "Consider using with price matching enabled.\n"
+            "Units are in shares (same as size columns).\n"
+            "Impacts tagging and trade-linked metrics.\n"
+            "Does not affect iceberg detection.",
+        },
+    )
+    trade_match_trade_types: List[str] = Field(
+        default_factory=lambda: ["LIT", "DARK"],
+        description="Trade types eligible for iceberg matching.",
+        json_schema_extra={
+            "long_doc": "Trade types considered when linking iceberg events to trades.\n"
+            "Example: ['LIT'] to restrict to lit trades only.\n"
+            "Uses BMLL trade type classifications.\n"
+            "Applied as a filter before matching.\n"
+            "Restricting types can reduce noise.\n"
+            "Ensure trade type values match your dataset.\n"
+            "If types are missing, matches may be empty.\n"
+            "Affects tagging and trade-linked metrics.\n"
+            "Does not affect iceberg detection stage.",
+        },
+    )
+    trade_match_classifications: List[str] = Field(
+        default_factory=list,
+        description="Trade classifications eligible for iceberg matching.",
+        json_schema_extra={
+            "long_doc": "Filter on BMLL classification codes.\n"
+            "Allows restricting matches to specific classification labels.\n"
+            "If empty, all classifications are allowed.\n"
+            "Useful for excluding auctions or special trades.\n"
+            "Applied before matching stage.\n"
+            "Requires classification columns in trades data.\n"
+            "If missing, this filter is ignored.\n"
+            "Affects tagging and trade-linked metrics.\n"
+            "Does not affect iceberg detection.",
+        },
+    )
+    trade_match_require_side: bool = Field(
+        True,
+        description="Require aggressor side for trade matching.",
+        json_schema_extra={
+            "long_doc": "If true, mismatched or missing side will prevent linkage.\n"
+            "Ensures that trade side matches inferred iceberg side.\n"
+            "If aggressor side is missing, match may be dropped.\n"
+            "Useful for reducing false positives.\n"
+            "If your data lacks side, consider disabling.\n"
+            "Applied in the matching stage.\n"
+            "Affects tagged trade counts.\n"
+            "Does not affect iceberg detection.\n"
+            "Only affects trade linkage.",
+        },
+    )
+    enable_peak_linking: bool = Field(
+        True,
+        description="Enable peak linking for iceberg events.",
+        json_schema_extra={
+            "long_doc": "Links sequential peaks to improve iceberg event reconstruction.\n"
+            "Helps group related peaks into a single iceberg event.\n"
+            "Useful for long-running iceberg orders with multiple peaks.\n"
+            "If disabled, each peak is treated independently.\n"
+            "Applied after iceberg detection stage.\n"
+            "May increase compute cost for large datasets.\n"
+            "Affects iceberg metrics that depend on peak counts.\n"
+            "Disable for simpler event counts.\n"
+            "Requires stable timestamps for linking.",
+        },
+    )
+    peak_link_tolerance_seconds: float = Field(
+        5e-4,
+        gt=0,
+        description="Time tolerance for peak linking.",
+        json_schema_extra={
+            "long_doc": "Controls how close peaks must be to link.\n"
+            "Smaller tolerances produce fewer links.\n"
+            "Larger tolerances merge more peaks into a single iceberg.\n"
+            "Used only if `enable_peak_linking` is true.\n"
+            "Requires accurate timing in L3 data.\n"
+            "Affects peak-count related metrics.\n"
+            "Consider venue latency when choosing this value.\n"
+            "Large values may over-merge unrelated peaks.\n"
+            "Changing this affects iceberg counts.",
+        },
+    )
+    peak_link_price_match: bool = Field(
+        True,
+        description="Require price match for peak linking.",
+        json_schema_extra={
+            "long_doc": "If false, allows peak linking even with price differences.\n"
+            "Price matching reduces false linking across price levels.\n"
+            "Disable only if price changes within an iceberg are expected.\n"
+            "Used only when `enable_peak_linking` is true.\n"
+            "Affects reconstructed iceberg events and peak counts.\n"
+            "If price data is noisy, consider disabling.\n"
+            "Changing this affects iceberg metrics involving peaks.\n"
+            "Does not affect trade matching stage.\n"
+            "Only applies to peak linking.",
+        },
+    )
 
 
 def _duration_str(seconds: float) -> str:

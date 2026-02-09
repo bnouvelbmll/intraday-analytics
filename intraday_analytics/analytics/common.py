@@ -122,17 +122,55 @@ class CombinatorialMetricConfig(BaseModel, ABC):
 
     aggregations: List[AggregationMethod] = Field(
         default_factory=lambda: ["Last"],
-        description="List of aggregations to apply (e.g., 'TWA', 'Max').",
+        description="Aggregations to apply.",
+        json_schema_extra={
+            "long_doc": "List of aggregation operators applied to each generated series.\n"
+            "Each operator produces an output column per metric variant.\n"
+            "Examples: ['Last'] yields a single column; ['Sum','Mean'] yields two.\n"
+            "If you include TWA/VWA, the module must provide the weight column.\n"
+            "Aggregation names are consumed by module-specific expressions.\n"
+            "Implementation: `CombinatorialMetricConfig.expand()` and\n"
+            "`AnalyticSpec.expressions()` in `intraday_analytics/analytics_base.py`.\n"
+            "L2 TW metrics use DT duration for time-weighted averages.\n"
+            "Trade and L3 metrics treat Sum/Mean/Last in the usual group-by sense.\n"
+            "Choose fewer aggregations to reduce output size and compute time.",
+        },
     )
 
     output_name_pattern: Optional[str] = Field(
         None,
-        description="Optional pattern for naming the output column. Available vars: {field_names}.",
+        description=(
+            "Optional pattern for naming the output column. "
+            "If empty, module-specific default naming is used. "
+            "Available vars: {field_names}."
+        ),
+        json_schema_extra={
+            "long_doc": "If provided, overrides module naming for the generated metric columns.\n"
+            "Variables in braces map to metric fields from the config.\n"
+            "Example: '{measures}_{sides}_{aggregations}' or '{measure}{side}{agg}'.\n"
+            "If omitted, each module uses its default naming scheme.\n"
+            "The pattern is applied after combinatorial expansion.\n"
+            "Used by `AnalyticSpec` when generating column aliases.\n"
+            "Implementation is in `intraday_analytics/analytics_base.py`.\n"
+            "Be consistent across passes if you join outputs downstream.\n"
+            "Changing the pattern changes column names and downstream expectations.\n"
+        },
     )
 
     market_states: Optional[Union[MarketState, List[MarketState]]] = Field(
         None,
-        description="Filter by MarketState. If list, generates variants for each state.",
+        description="Filter by MarketState.",
+        json_schema_extra={
+            "long_doc": "If set, restricts metrics to the specified MarketState(s).\n"
+            "Example: 'CONTINUOUS_TRADING' filters to continuous trading only.\n"
+            "A list generates one metric variant per state via `expand()`.\n"
+            "This increases output columns linearly with the number of states.\n"
+            "Used in module-specific filters before aggregation.\n"
+            "Applies to trades and L2/L3 metrics when MarketState is present.\n"
+            "Implementation: filters in `Trade*Analytic` and related modules.\n"
+            "If MarketState is missing in the input, filtering is skipped.\n"
+            "Be careful mixing states across venues with different state taxonomies.\n"
+        },
     )
 
     def expand(self) -> List[Dict[str, Any]]:

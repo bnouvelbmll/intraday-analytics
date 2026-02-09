@@ -6,6 +6,7 @@ PROJECT_DIR="${PROJECT_NAME}"
 DEFINITIONS_FILE="${PROJECT_DIR}/definitions.py"
 
 export DAGSTER_HOME="$HOME/user/my-dagster"
+export BMLL_REPO_ROOT="$(pwd)"
 mkdir -p "${DAGSTER_HOME}"
 
 python3 -m pip install --upgrade pip
@@ -23,10 +24,12 @@ from dagster import (
     StaticPartitionsDefinition,
     TimeWindowPartitionsDefinition,
     MultiPartitionsDefinition,
+    schedule,
 )
 from intraday_analytics.dagster_compat import (
     build_demo_assets,
     build_demo_materialization_checks,
+    build_demo_schedules,
     build_input_source_assets,
     build_s3_input_asset_checks,
     build_s3_input_observation_sensor,
@@ -41,6 +44,7 @@ from intraday_analytics.dagster_compat import (
     build_universe_partitions,
     default_universes,
 )
+import yaml
 from intraday_analytics.utils import create_date_batches
 
 def _available_mics():
@@ -112,6 +116,10 @@ demo_assets = build_demo_assets(
     split_passes=True,
     input_asset_keys=[asset.key for asset in input_assets],
 )
+demo_schedules = build_demo_schedules(
+    partitions_def=partitions_def,
+    split_passes=True,
+)
 demo_checks = build_demo_materialization_checks(
     check_mode=os.getenv("S3_CHECK_MODE", "recursive"),
     split_passes=True,
@@ -141,15 +149,45 @@ input_sync_asset = build_s3_input_sync_asset(
     date_partitions_def=daily_partitions,
     check_mode=os.getenv("S3_CHECK_MODE", "recursive"),
     group_name="BMLL",
+    use_db_bulk=True,
+    repo_root=os.getenv("BMLL_REPO_ROOT"),
+    asset_key_prefix=["BMLL"],
 )
+
+def _load_demo_config():
+    cfg_path = os.path.join(os.path.dirname(__file__), "definitions.yaml")
+    if not os.path.exists(cfg_path):
+        return {}
+    with open(cfg_path, "r") as fh:
+        return yaml.safe_load(fh) or {}
+
+_cfg = _load_demo_config()
+_cron = _cfg.get("S3_SYNC_CRON")
+
+if _cron:
+    @schedule(cron_schedule=_cron, job=input_sync_job, execution_timezone="UTC")
+    def s3_sync_schedule():
+        return {}
+    sync_schedule = s3_sync_schedule
+else:
+    sync_schedule = None
 
 defs = Definitions(
     assets=[*demo_assets, *input_assets, input_sync_asset],
     asset_checks=[*demo_checks, *input_checks],
     sensors=[input_sensor],
     jobs=[input_sync_job],
+    schedules=[*demo_schedules, *([sync_schedule] if sync_schedule else [])],
 )
 PY
+
+if [ ! -f "${PROJECT_DIR}/definitions.yaml" ]; then
+cat > "${PROJECT_DIR}/definitions.yaml" <<'YAML'
+# Optional config for dagster demo definitions
+# Example:
+# S3_SYNC_CRON: "0 2 * * *"
+YAML
+fi
 
 echo "Starting Dagster UI..."
 dagster dev -f "${DEFINITIONS_FILE}"

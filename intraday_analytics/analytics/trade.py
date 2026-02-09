@@ -1,6 +1,6 @@
 import polars as pl
 from intraday_analytics.analytics_base import BaseAnalytics
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Union, Literal, Optional, Dict, Any
 
 from .common import (
@@ -28,6 +28,7 @@ from intraday_analytics.analytics_registry import register_analytics
 TradeGenericMeasure = Literal[
     "Volume",
     "Count",
+    "Notional",
     "NotionalEUR",
     "NotionalUSD",
     "RetailCount",
@@ -51,11 +52,34 @@ class TradeGenericConfig(CombinatorialMetricConfig):
     metric_type: Literal["Trade_Generic"] = "Trade_Generic"
 
     sides: Union[SideWithTotal, List[SideWithTotal]] = Field(
-        default="Total", description="Filter trades by aggressor side."
+        default="Total",
+        description="Filter trades by aggressor side.",
+        json_schema_extra={
+            "long_doc": "Selects aggressor side(s) for trade metrics.\n"
+            "Options: Bid, Ask, Total, Unknown.\n"
+            "Each side expands into separate output columns.\n"
+            "Used in `TradeGenericAnalytic` to filter AggressorSide.\n"
+            "Total aggregates across all sides.\n"
+            "Unknown includes trades without a clear aggressor.\n"
+            "Combines with measures and aggregations for expansion.\n"
+            "Example: sides=['Bid','Ask'] doubles output columns.\n"
+            "Output names include side tokens.",
+        },
     )
 
     measures: Union[TradeGenericMeasure, List[TradeGenericMeasure]] = Field(
-        ..., description="The trade attribute to aggregate."
+        ..., description="The trade attribute to aggregate.",
+        json_schema_extra={
+            "long_doc": "Selects which trade attributes to aggregate.\n"
+            "Examples: Volume, VWAP, Count, Notional, NotionalEUR.\n"
+            "Each measure expands into separate output columns.\n"
+            "Used in `TradeGenericAnalytic` expressions.\n"
+            "Some measures require specific input columns (NotionalEUR).\n"
+            "OHLC expands into multiple columns (Open/High/Low/Close).\n"
+            "Large measure lists increase output width.\n"
+            "Ensure input schema contains required columns.\n"
+            "Output names include measure tokens.",
+        },
     )
 
 
@@ -82,14 +106,48 @@ class TradeDiscrepancyConfig(CombinatorialMetricConfig):
     metric_type: Literal["Trade_Discrepancy"] = "Trade_Discrepancy"
 
     references: Union[DiscrepancyReference, List[DiscrepancyReference]] = Field(
-        ..., description="Reference price to compare against."
+        ..., description="Reference price to compare against.",
+        json_schema_extra={
+            "long_doc": "Selects reference prices for discrepancy metrics.\n"
+            "Examples: PreTradeMid, BestBid, BestAskAtPrimary.\n"
+            "Each reference expands into separate output columns.\n"
+            "Used in `TradeDiscrepancyAnalytic` to compute BPS differences.\n"
+            "Requires corresponding reference columns in input.\n"
+            "If missing, outputs may be null.\n"
+            "Combine with sides and aggregations for expansion.\n"
+            "Output names include reference tokens.\n"
+            "Discrepancies are in basis points.",
+        },
     )
     sides: Union[SideWithTotal, List[SideWithTotal]] = Field(
-        default="Total", description="Filter trades by aggressor side."
+        default="Total",
+        description="Filter trades by aggressor side.",
+        json_schema_extra={
+            "long_doc": "Selects aggressor side(s) for discrepancy metrics.\n"
+            "Options: Bid, Ask, Total, Unknown.\n"
+            "Each side expands into separate output columns.\n"
+            "Used in `TradeDiscrepancyAnalytic` filtering.\n"
+            "Total aggregates across all sides.\n"
+            "Combine with references for full expansion.\n"
+            "Example: sides=['Bid','Ask'] yields bid and ask discrepancies.\n"
+            "Output names include side tokens.\n"
+            "Side selection affects sign interpretation.",
+        },
     )
     aggregations: List[AggregationMethod] = Field(
         default_factory=lambda: ["Mean"],
         description="Aggregations to apply to discrepancy series.",
+        json_schema_extra={
+            "long_doc": "Selects aggregation operators for discrepancy series.\n"
+            "Default Mean provides average BPS deviation.\n"
+            "You can add Min/Max to capture extremes.\n"
+            "Each aggregation adds output columns.\n"
+            "Used in `TradeDiscrepancyAnalytic`.\n"
+            "Be cautious with too many aggregations (wide output).\n"
+            "Aggregation names append to output columns.\n"
+            "Ensure your downstream expects these names.\n"
+            "This overrides the base aggregations list.",
+        },
     )
 
 
@@ -112,16 +170,49 @@ class TradeFlagConfig(CombinatorialMetricConfig):
     metric_type: Literal["Trade_Flag"] = "Trade_Flag"
 
     flags: Union[TradeFlagType, List[TradeFlagType]] = Field(
-        ..., description="Trade flag to filter by."
+        ..., description="Trade flag to filter by.",
+        json_schema_extra={
+            "long_doc": "Selects trade flags to filter trades.\n"
+            "Examples: NegotiatedTrade, BlockTrade, IcebergExecution.\n"
+            "Each flag expands into separate output columns.\n"
+            "Used in `TradeFlagAnalytic` to filter flagged trades.\n"
+            "Requires flag columns in the input data.\n"
+            "If flag columns are missing, outputs may be empty.\n"
+            "Combine with sides and measures for expansion.\n"
+            "Output names include flag tokens.\n"
+            "Flags are dataset-specific; verify availability.",
+        },
     )
 
     sides: Union[SideWithTotal, List[SideWithTotal]] = Field(
         default="Total",
         description="Filter by aggressor side (applied on top of flag).",
+        json_schema_extra={
+            "long_doc": "Selects aggressor side(s) after flag filtering.\n"
+            "Options: Bid, Ask, Total, Unknown.\n"
+            "Each side expands into separate output columns.\n"
+            "Applied after flag filter in `TradeFlagAnalytic`.\n"
+            "Total aggregates across all sides.\n"
+            "Combine with measures for expansion.\n"
+            "Output names include side tokens.\n"
+            "Side filtering can reduce noisy signals.\n"
+            "Requires AggressorSide in input.",
+        },
     )
 
     measures: Union[TradeFlagMeasure, List[TradeFlagMeasure]] = Field(
-        ..., description="Measure to compute for the flagged trades."
+        ..., description="Measure to compute for the flagged trades.",
+        json_schema_extra={
+            "long_doc": "Selects measures for flagged trades.\n"
+            "Options: Volume, Count, AvgNotional.\n"
+            "Each measure expands into separate output columns.\n"
+            "Used in `TradeFlagAnalytic`.\n"
+            "AvgNotional requires trade notional columns.\n"
+            "Combine with flags and sides for expansion.\n"
+            "Output names include measure tokens.\n"
+            "Measures control units (shares, trades, notional).\n"
+            "Ensure input includes required columns.",
+        },
     )
 
 
@@ -134,58 +225,306 @@ VenueScope = Literal["Local", "Primary", "Venue"]
 class TradeChangeConfig(CombinatorialMetricConfig):
     """
     Analytics related to trade impact or state change.
+
+    Change metrics capture how price-related measures evolve within the
+    TimeBucket across different scopes (Local, Primary, Venue). Use this to
+    quantify microstructure shifts rather than absolute levels.
     """
 
     metric_type: Literal["Trade_Change"] = "Trade_Change"
 
     measures: Union[ImpactMeasure, List[ImpactMeasure]] = Field(
-        ..., description="Base measure name."
+        ..., description="Base measure name.",
+        json_schema_extra={
+            "long_doc": "Selects base measures for change metrics.\n"
+            "Options include PreTradeElapsedTimeChg, PostTradeElapsedTimeChg, PricePoint.\n"
+            "Each measure expands into separate output columns.\n"
+            "Used in `TradeChangeAnalytic`.\n"
+            "Requires the corresponding columns in input data.\n"
+            "If missing, outputs may be null.\n"
+            "Combine with scopes for expansion.\n"
+            "Output names include measure tokens.\n"
+            "Measures control units (time or price).",
+        },
     )
 
     scopes: Union[VenueScope, List[VenueScope]] = Field(
-        default="Local", description="Scope of the measure (Local, Primary, Venue)."
+        default="Local",
+        description="Scope of the measure (Local, Primary, Venue).",
+        json_schema_extra={
+            "long_doc": "Selects scope for change metrics.\n"
+            "Local uses venue-local prices; Primary uses primary venue.\n"
+            "Venue can use an explicit venue reference if available.\n"
+            "Each scope expands into separate output columns.\n"
+            "Used in `TradeChangeAnalytic` when selecting columns.\n"
+            "Requires corresponding scoped price columns in input.\n"
+            "If missing, outputs may be null.\n"
+            "Output names include scope tokens.\n"
+            "Scope changes interpretation of price movement.",
+        },
     )
 
 
 class TradeImpactConfig(CombinatorialMetricConfig):
     """
-    Trade Impact and Execution Quality analytics (TCA).
+    Trade impact and execution quality analytics (TCA).
+
+    Computes common transaction cost analysis metrics such as EffectiveSpread,
+    RealizedSpread, and PriceImpact across configurable horizons. The analytics
+    compare trade prices to reference prices (pre- and post-trade) to quantify
+    execution quality and market impact. The computation proceeds by selecting
+    a reference price column, aligning it with each trade, applying horizon
+    offsets when needed, and aggregating the resulting per-trade values within
+    the TimeBucket.
     """
 
     metric_type: Literal["Trade_Impact"] = "Trade_Impact"
 
     variant: Union[
         Literal["EffectiveSpread", "RealizedSpread", "PriceImpact"], List[str]
-    ] = Field(..., description="TCA analytic type.")
+    ] = Field(
+        ...,
+        description="TCA analytic type.",
+        json_schema_extra={
+            "long_doc": "Selects trade impact/TCA metric variants.\n"
+            "EffectiveSpread compares trade price to pre-trade reference.\n"
+            "RealizedSpread compares to post-trade reference.\n"
+            "PriceImpact measures movement in the reference price.\n"
+            "Each variant expands into separate output columns.\n"
+            "Used in `TradeImpactAnalytic`.\n"
+            "Requires reference price columns.\n"
+            "Combine with horizon for multiple time windows.\n"
+            "Output names include variant tokens.",
+        },
+    )
 
     horizon: Union[str, List[str]] = Field(
         default="1s",
         description="Time horizon for post-trade analysis (e.g., '100ms', '1s').",
+        json_schema_extra={
+            "long_doc": "Selects time horizon(s) for impact metrics.\n"
+            "Examples: '100ms', '1s', '5s'.\n"
+            "Each horizon expands into separate output columns.\n"
+            "Used in `TradeImpactAnalytic` to pick post-trade reference.\n"
+            "Short horizons capture immediate impact.\n"
+            "Longer horizons capture decay and drift.\n"
+            "Requires post-trade reference prices at those horizons.\n"
+            "Output names include horizon tokens.\n"
+            "Invalid horizons may yield null outputs.",
+        },
     )
 
     reference_price_col: str = Field(
         default="PreTradeMid",
         description="Column name for the reference price (T0 benchmark), e.g., 'PreTradeMid', 'MidPrice'.",
+        json_schema_extra={
+            "long_doc": "Selects the base reference price column for impact metrics.\n"
+            "Common choices: PreTradeMid, MidPrice.\n"
+            "Used by `TradeImpactAnalytic` as the T0 benchmark.\n"
+            "Must exist in the input trade frame.\n"
+            "If missing, impact metrics may be null.\n"
+            "Choose a reference aligned with your execution model.\n"
+            "Changing this affects sign and magnitude of impact.\n"
+            "Ensure reference prices are computed upstream.\n"
+            "Output names include reference tokens.",
+        },
+    )
+
+
+class RetailImbalanceConfig(BaseModel):
+    """
+    Retail imbalance configuration.
+
+    Computes imbalance of retail flows using retail participant labels.
+    """
+    ENABLED: bool = Field(
+        True,
+        description="Enable retail imbalance analytics.",
+        json_schema_extra={
+            "long_doc": "Enables or disables retail imbalance metrics.\n"
+            "When enabled, computes net retail notional / total retail notional.\n"
+            "Uses BMLLParticipantType == 'RETAIL' to identify retail trades.\n"
+            "Computed in `RetailImbalanceAnalytics`.\n"
+            "Requires TradeNotionalEUR and participant type columns.\n"
+            "If inputs are missing, outputs may be empty.\n"
+            "Sensitive to classification quality.\n"
+            "Useful for flow imbalance analysis.\n"
+            "Disable to save compute if you do not use retail signals.",
+        },
     )
 
 
 class TradeAnalyticsConfig(BaseModel):
+    """
+    Trade analytics configuration.
+
+    Defines which trade metrics are produced: generic aggregates, discrepancy,
+    flags, change metrics, impact/TCA, and optional retail imbalance. Each list
+    entry expands into multiple metric columns. The trade analytics pipeline
+    filters trades to the relevant classifications, applies side and reference
+    filters, computes metric expressions, and aggregates within each TimeBucket.
+    Many metrics require specific trade fields (e.g., notional, reference
+    prices), so configuration should match the available input schema.
+    """
     ENABLED: bool = True
-    metric_prefix: Optional[str] = None
-    generic_metrics: List[TradeGenericConfig] = Field(default_factory=list)
-    discrepancy_metrics: List[TradeDiscrepancyConfig] = Field(default_factory=list)
-    flag_metrics: List[TradeFlagConfig] = Field(default_factory=list)
-    change_metrics: List[TradeChangeConfig] = Field(default_factory=list)
-    impact_metrics: List[TradeImpactConfig] = Field(default_factory=list)
+    metric_prefix: Optional[str] = Field(
+        None,
+        description="Prefix for trade metric columns.",
+        json_schema_extra={
+            "long_doc": "Prepended to all trade output column names.\n"
+            "Useful to separate trade outputs from other modules.\n"
+            "Example: 'TR_' yields TR_TradeVolumeSum.\n"
+            "Applies to all trade metrics configured in this pass.\n"
+            "Implemented by `BaseAnalytics.metric_prefix`.\n"
+            "See `intraday_analytics/analytics_base.py` for naming logic.\n"
+            "Changing the prefix changes column names and downstream joins.\n"
+            "Keep stable across runs for consistent outputs.\n"
+            "Leave empty to use module default naming.\n"
+        },
+    )
+    generic_metrics: List[TradeGenericConfig] = Field(
+        default_factory=list,
+        description="Generic trade metrics configuration.",
+        json_schema_extra={
+            "long_doc": "Configures standard trade aggregates (volume, VWAP, etc).\n"
+            "Each entry expands by side, measure, and aggregations.\n"
+            "Example: sides=['Total'], measures=['Volume'] yields TradeTotalVolume.\n"
+            "Aggregations can add Sum/Mean/Last variants per series.\n"
+            "Computed in `TradeGenericAnalytic`.\n"
+            "Use this for baseline trade activity metrics.\n"
+            "The number of output columns grows with list sizes.\n"
+            "Keep configs minimal for large universes.\n"
+            "Input must include trade size and price columns.\n"
+        },
+    )
+    discrepancy_metrics: List[TradeDiscrepancyConfig] = Field(
+        default_factory=list,
+        description="Trade discrepancy metrics configuration.",
+        json_schema_extra={
+            "long_doc": "Configures discrepancy metrics relative to reference prices.\n"
+            "Examples: deviation from mid or primary best bid/ask.\n"
+            "Each entry expands by reference and side.\n"
+            "Computed in `TradeDiscrepancyAnalytic`.\n"
+            "Requires reference columns (PreTradeMid, BestBidPrice, etc.).\n"
+            "If references are missing, metrics may be null.\n"
+            "Use to quantify execution quality and price impact.\n"
+            "Large configs can be expensive due to multiple references.\n"
+            "Output names include reference tokens for clarity.",
+        },
+    )
+    flag_metrics: List[TradeFlagConfig] = Field(
+        default_factory=list,
+        description="Trade flag metrics configuration.",
+        json_schema_extra={
+            "long_doc": "Configures flag-based trade aggregates (e.g., negotiated, off-book).\n"
+            "Each entry filters trades by a specific flag.\n"
+            "Computed in `TradeFlagAnalytic`.\n"
+            "Useful for market structure analysis (auction/off-book splits).\n"
+            "Requires trade flag columns in the input.\n"
+            "If flags are missing, output may be empty.\n"
+            "Aggregation applies per TimeBucket.\n"
+            "Multiple flags increase output width.\n"
+            "Output names include flag identifiers.",
+        },
+    )
+    change_metrics: List[TradeChangeConfig] = Field(
+        default_factory=list,
+        description="Trade change metrics configuration.",
+        json_schema_extra={
+            "long_doc": "Configures change metrics on trade series (e.g., deltas).\n"
+            "Computes changes over time within the bucket.\n"
+            "Used in `TradeChangeAnalytic`.\n"
+            "Useful for momentum and regime change analysis.\n"
+            "Requires consistent time ordering within each bucket.\n"
+            "May be sensitive to sparse trading periods.\n"
+            "Aggregation controls how changes are summarized.\n"
+            "Keep configs small to reduce output columns.\n"
+            "Output names include change method tokens.",
+        },
+    )
+    impact_metrics: List[TradeImpactConfig] = Field(
+        default_factory=list,
+        description="Trade impact metrics configuration.",
+        json_schema_extra={
+            "long_doc": "Configures impact/TCA metrics including horizon and reference price.\n"
+            "Examples include price impact at 100ms or 1s horizons.\n"
+            "Computed in `TradeImpactAnalytic`.\n"
+            "Requires post-trade reference price columns.\n"
+            "If reference prices are missing, metrics may be null.\n"
+            "Horizon controls how far to look ahead from each trade.\n"
+            "Longer horizons increase sensitivity to market moves.\n"
+            "Use sparingly due to compute cost.\n"
+            "Output names include horizon and reference tokens.",
+        },
+    )
+    retail_imbalance: RetailImbalanceConfig = Field(
+        default_factory=RetailImbalanceConfig,
+        description="Retail imbalance configuration.",
+        json_schema_extra={
+            "long_doc": "Controls retail imbalance analytics.\n"
+            "When enabled, computes net retail notional / total retail notional.\n"
+            "Uses BMLLParticipantType == 'RETAIL' to identify retail trades.\n"
+            "Computed in `RetailImbalanceAnalytics`.\n"
+            "Requires BMLLParticipantType and TradeNotionalEUR columns.\n"
+            "If participant type is missing, output will be empty.\n"
+            "Useful for flow imbalance analysis.\n"
+            "Sensitive to classification quality.\n"
+            "Output column is RetailTradeImbalance.",
+        },
+    )
 
     # Legacy support
-    enable_retail_imbalance: bool = False
-    use_tagged_trades: bool = False
-    tagged_trades_context_key: str = "trades_iceberg"
+    enable_retail_imbalance: bool = Field(
+        False,
+        description="Legacy flag to enable retail imbalance.",
+        json_schema_extra={
+            "long_doc": "If true, forces `retail_imbalance.ENABLED`.\n"
+            "Kept for backward compatibility with older configs.\n"
+            "Prefer using `retail_imbalance.ENABLED` instead.\n"
+            "Both flags can coexist; this one takes precedence.\n"
+            "Implementation: `TradeAnalyticsConfig._propagate_retail_imbalance`.\n"
+            "No effect if `retail_imbalance` is missing.\n"
+            "Will be deprecated in a future release.\n"
+            "This flag does not change metric definitions.\n"
+            "Only controls enabling behavior.",
+        },
+    )
+    use_tagged_trades: bool = Field(
+        False,
+        description="Use trades tagged by preprocessing (e.g., iceberg).",
+        json_schema_extra={
+            "long_doc": "If true, uses context trades from `tagged_trades_context_key`.\n"
+            "This allows preprocessing modules (iceberg) to tag trades.\n"
+            "Implementation: `TradeAnalytics.compute()` selects tagged frame.\n"
+            "Requires preprocessing pass to populate the context.\n"
+            "If the key is missing, falls back to raw trades.\n"
+            "Useful when you want analytics on iceberg-identified trades.\n"
+            "Be careful: tagging may reduce sample size.\n"
+            "Use only when preprocessing is enabled.\n"
+            "This option changes the input universe of trades.",
+        },
+    )
+    tagged_trades_context_key: str = Field(
+        "trades_iceberg",
+        description="Context key for tagged trades.",
+        json_schema_extra={
+            "long_doc": "If `use_tagged_trades` is enabled, this selects the tagged frame.\n"
+            "Preprocessing modules must write to this key in the pipeline context.\n"
+            "Default key matches iceberg tagging configuration.\n"
+            "If you change this, ensure preprocessing uses the same key.\n"
+            "Used in `TradeAnalytics.compute()`.\n"
+            "If the key is missing, raw trades are used instead.\n"
+            "This is a configuration-level link between passes.\n"
+            "Changing the key requires coordination across passes.\n"
+            "Key names are arbitrary but should be descriptive.",
+        },
+    )
 
-
-class RetailImbalanceConfig(BaseModel):
-    ENABLED: bool = True
+    @model_validator(mode="after")
+    def _propagate_retail_imbalance(self) -> "TradeAnalyticsConfig":
+        if self.enable_retail_imbalance and self.retail_imbalance is not None:
+            self.retail_imbalance.ENABLED = True
+        return self
 
 
 # =============================
@@ -232,6 +571,15 @@ class TradeGenericAnalytic(AnalyticSpec):
     def _expression_count(self, cond):
         """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
         return self._filtered_zero(cond, 1).sum()
+
+    @analytic_expression(
+        "Notional",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Notional)$",
+        unit="EUR",
+    )
+    def _expression_notional(self, cond):
+        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        return self._filtered_zero(cond, pl.col("TradeNotionalEUR")).sum()
 
     @analytic_expression(
         "NotionalEUR",
@@ -697,12 +1045,12 @@ class RetailImbalanceDoc(AnalyticSpec):
     ]
 
 
-@register_analytics("retail_imbalance", config_attr="retail_imbalance_analytics")
+@register_analytics("retail_imbalance", config_attr="trade_analytics")
 class RetailImbalanceAnalytics(BaseAnalytics):
     REQUIRES = ["trades"]
 
-    def __init__(self, config: RetailImbalanceConfig):
-        self.config = config
+    def __init__(self, config: TradeAnalyticsConfig):
+        self.config = config.retail_imbalance
         super().__init__("retail_imbalance", {})
 
     def compute(self) -> pl.LazyFrame:

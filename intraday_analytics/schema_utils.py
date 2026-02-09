@@ -16,7 +16,14 @@ from .analytics.execution import ExecutionAnalytics
 from .analytics.iceberg import IcebergAnalytics
 from .analytics.common import METRIC_HINTS, METRIC_DOCS
 from .dense_analytics import DenseAnalytics
-from .analytics.l2 import L2AnalyticsConfig, L2LiquidityConfig, L2SpreadConfig, L2ImbalanceConfig, L2VolatilityConfig
+from .analytics.l2 import (
+    L2AnalyticsConfig,
+    L2LiquidityConfig,
+    L2SpreadConfig,
+    L2ImbalanceConfig,
+    L2VolatilityConfig,
+    L2OHLCConfig,
+)
 from .analytics.l3 import L3AnalyticsConfig, L3MetricConfig, L3AdvancedConfig
 from .analytics.execution import (
     ExecutionAnalyticsConfig,
@@ -62,6 +69,20 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
                 aggregations=["First", "Last", "Min", "Max", "Mean", "Sum", "Median", "Std"],
             )
         ],
+        ohlc=[
+            L2OHLCConfig(
+                source=["Mid", "Bid", "Ask", "WeightedMid"],
+                open_mode="event",
+                aggregations=["First", "Last", "Min", "Max", "Mean"],
+                output_name_pattern="{source}{ohlc}_{open_mode}",
+            ),
+            L2OHLCConfig(
+                source=["Mid", "Bid", "Ask", "WeightedMid"],
+                open_mode="prev_close",
+                aggregations=["First", "Last", "Min", "Max", "Mean"],
+                output_name_pattern="{source}{ohlc}_{open_mode}",
+            ),
+        ],
     )
 
     l3_config = L3AnalyticsConfig(
@@ -90,6 +111,7 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
                 measures=[
                     "Volume",
                     "Count",
+                    "Notional",
                     "NotionalEUR",
                     "NotionalUSD",
                     "VWAP",
@@ -165,6 +187,7 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
                     "ExecutionVolume",
                     "ExecutionCount",
                     "AverageSize",
+                    "RevealedPeakCount",
                     "OrderImbalance",
                     "AveragePeakCount",
                 ],
@@ -175,6 +198,11 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
         trade_match_enabled=False,
     )
 
+    cbbo_config = CBBOAnalyticsConfig(
+        measures=["TimeAtCBB", "TimeAtCBO", "QuantityAtCBB", "QuantityAtCBO"],
+        quantity_aggregations=["TWMean", "Min", "Max", "Median"],
+    )
+
     pass1 = PassConfig(
         name="pass1",
         l2_analytics=l2_config,
@@ -182,9 +210,18 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
         trade_analytics=trade_config,
         execution_analytics=exec_config,
         iceberg_analytics=iceberg_config,
+        cbbo_analytics=cbbo_config,
     )
 
     return AnalyticsConfig(PASSES=[pass1])
+
+
+def get_full_output_schema(levels: int = 10, impact_horizons=None) -> Dict[str, List[str]]:
+    """
+    Generates schema using a full combinatorics config.
+    """
+    config = _build_full_config(levels=levels, impact_horizons=impact_horizons)
+    return get_output_schema(config)
 
 
 def get_output_schema(config_or_pass) -> Dict[str, List[str]]:

@@ -94,6 +94,8 @@ def run_cli(
         config_overrides["END_DATE"] = end_date
     if datasetname:
         config_overrides["DATASETNAME"] = datasetname
+    if universe:
+        config_overrides["UNIVERSE"] = universe
     if temp_dir:
         config_overrides["TEMP_DIR"] = temp_dir
     if prepare_data_mode:

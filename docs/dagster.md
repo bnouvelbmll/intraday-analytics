@@ -195,6 +195,37 @@ from intraday_analytics.dagster_compat import build_demo_assets
 defs = Definitions(assets=build_demo_assets())
 ```
 
+## Schedules
+
+Demo schedules are driven by `AnalyticsConfig.SCHEDULES`. Each demo module can
+enable one or more schedules with cron, timezone, and partition selectors. If
+no partitions are provided, the schedule defaults to yesterday plus the first
+universe in `UNIVERSES`.
+
+Example (`demo/01_ohlcv_bars.yaml`):
+```yaml
+USER_CONFIG:
+  SCHEDULES:
+    - name: daily_demo
+      enabled: true
+      cron: "0 2 * * *"
+      timezone: "Europe/London"
+      partitions:
+        - date: yesterday
+          universe: mic=XLON
+```
+
+To register schedules in Dagster, include them in your Definitions:
+```python
+from dagster import Definitions
+from intraday_analytics.dagster_compat import build_demo_assets, build_demo_schedules
+
+defs = Definitions(
+    assets=build_demo_assets(split_passes=True),
+    schedules=build_demo_schedules(split_passes=True),
+)
+```
+
 ## Dagster UI Partitions
 
 To see partitions in the UI, define a Dagster partitions definition and attach

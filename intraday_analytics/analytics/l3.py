@@ -1,6 +1,6 @@
 import polars as pl
 from intraday_analytics.analytics_base import BaseAnalytics
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Union, Literal, Optional, Set, Dict, Any
 import logging
 
@@ -31,18 +31,67 @@ class L3MetricConfig(CombinatorialMetricConfig):
 
     metric_type: Literal["L3_Generic"] = "L3_Generic"
 
-    sides: Union[Side, List[Side]] = Field(..., description="Side of the book.")
+    sides: Union[Side, List[Side]] = Field(
+        ..., description="Side of the book.",
+        json_schema_extra={
+            "long_doc": "Selects book side(s) for L3 metrics.\n"
+            "Options: Bid, Ask, or list of both.\n"
+            "Each side expands into separate output columns.\n"
+            "Used in `L3GenericAnalytic.expressions()`.\n"
+            "Combines with actions and measures for expansion.\n"
+            "Example: sides=['Bid','Ask'] doubles output columns.\n"
+            "If you only need one side, choose a single value.\n"
+            "Side selection affects interpretation of order flow.\n"
+            "Output names include side tokens.",
+        },
+    )
 
     actions: Union[L3Action, List[L3Action]] = Field(
-        ..., description="LOB Action type."
+        ..., description="LOB Action type.",
+        json_schema_extra={
+            "long_doc": "Selects which L3 events to include (Insert/Remove/Update etc). "
+            "Used in `L3GenericAnalytic.expressions()` to filter `LobAction`.\n"
+            "Example: actions=['Insert','Remove'] yields separate metrics per action.\n"
+            "UpdateInserted/UpdateRemoved split updates into size changes.\n"
+            "Combine with sides to create bid/ask variants.\n"
+            "The action value maps to LOB action codes in the input.\n"
+            "If input uses different codes, update the parser accordingly.\n"
+            "Actions are expanded by `CombinatorialMetricConfig.expand()`.\n"
+            "This directly increases the number of output columns.\n"
+            "Output names include action tokens.",
+        },
     )
 
     measures: Union[L3Measure, List[L3Measure]] = Field(
-        ..., description="Measure to compute (Count or Volume)."
+        ..., description="Measure to compute (Count or Volume).",
+        json_schema_extra={
+            "long_doc": "Selects whether the metric counts events or sums sizes. "
+            "Used in `L3GenericAnalytic.expressions()`.\n"
+            "Measure='Count' returns event counts per bucket.\n"
+            "Measure='Volume' sums size for applicable actions.\n"
+            "Update actions use OldSize/Size depending on variant.\n"
+            "Combine with actions and sides for detailed flow metrics.\n"
+            "Measure selection affects units (Orders vs Shares).\n"
+            "Counts are typically less noisy than volumes.\n"
+            "Volume depends on availability of size columns.\n"
+            "If size is missing, volume results may be null.\n"
+        },
     )
     aggregations: List[AggregationMethod] = Field(
         default_factory=lambda: ["Sum"],
         description="Aggregations to apply to the analytic series.",
+        json_schema_extra={
+            "long_doc": "Overrides the base aggregation list for L3 metrics. "
+            "See `CombinatorialMetricConfig.aggregations`.\n"
+            "Most L3 metrics are event counts or sums, so Sum is common.\n"
+            "Mean/Last can be used for bucket-level summaries.\n"
+            "TWA/VWA are rarely used for event counts.\n"
+            "Aggregation selection increases output columns.\n"
+            "Used in `L3GenericAnalytic` when building expressions.\n"
+            "Example: aggregations=['Sum','Mean'] doubles output columns.\n"
+            "If you only need totals, keep a single aggregation.\n"
+            "Choose aggregations aligned with downstream analysis.\n"
+        },
     )
 
 
@@ -63,18 +112,107 @@ class L3AdvancedConfig(CombinatorialMetricConfig):
             "AvgReplacementLatency",
         ],
         List[str],
-    ] = Field(..., description="Advanced analytic type.")
+    ] = Field(
+        ...,
+        description="Advanced analytic type.",
+        json_schema_extra={
+            "long_doc": "Selects the advanced L3 metric variant(s).\n"
+            "Examples: ArrivalFlowImbalance, AvgRestingTime.\n"
+            "Each variant expands into a separate output column.\n"
+            "Some variants require extra columns (timestamps, sizes).\n"
+            "FleetingLiquidityRatio uses `fleeting_threshold_ms`.\n"
+            "Computed in `L3AdvancedAnalytic` inside `L3Analytics`.\n"
+            "Advanced variants are more expensive to compute.\n"
+            "Enable only what you need for analysis.\n"
+            "Output names include variant tokens.",
+        },
+    )
 
     fleeting_threshold_ms: Optional[int] = Field(
-        100, description="Threshold for fleeting liquidity."
+        100,
+        description="Threshold for fleeting liquidity.",
+        json_schema_extra={
+            "long_doc": "Only used when variant includes FleetingLiquidityRatio. "
+            "Controls the time window for cancellations in `L3Analytics`.\n"
+            "Defines how quickly an insert must be removed to count as fleeting.\n"
+            "Example: 100 means 100ms.\n"
+            "Lower values identify more aggressive fleeting behavior.\n"
+            "Higher values include slower cancellations.\n"
+            "Used in `L3Analytics._expression_fleeting_liquidity_ratio`.\n"
+            "If variant does not include FleetingLiquidityRatio, this is ignored.\n"
+            "Set to None to disable fleeting threshold usage.\n"
+        },
     )
+
+    @model_validator(mode="after")
+    def _validate_fleeting_threshold(self) -> "L3AdvancedConfig":
+        variant = self.variant
+        if isinstance(variant, list):
+            uses_fleeting = "FleetingLiquidityRatio" in variant
+        else:
+            uses_fleeting = variant == "FleetingLiquidityRatio"
+        if not uses_fleeting:
+            self.fleeting_threshold_ms = None
+        return self
 
 
 class L3AnalyticsConfig(BaseModel):
+    """
+    L3 analytics configuration.
+
+    Defines generic L3 event metrics (counts/volumes) and advanced L3 metrics
+    (flow imbalance, latency, fleeting liquidity). Each list expands into
+    multiple metric columns. The L3 analytics pipeline filters events by side,
+    action, and measure, computes event-level expressions, and aggregates into
+    TimeBuckets. Advanced metrics may require additional fields such as event
+    timestamps, sizes, or lifecycle attributes, so configuration should match
+    the available L3 schema.
+    """
     ENABLED: bool = True
-    metric_prefix: Optional[str] = None
-    generic_metrics: List[L3MetricConfig] = Field(default_factory=list)
-    advanced_metrics: List[L3AdvancedConfig] = Field(default_factory=list)
+    metric_prefix: Optional[str] = Field(
+        None,
+        description="Prefix for L3 metric columns.",
+        json_schema_extra={
+            "long_doc": "Prepended to all L3 output column names. "
+            "Handled by `BaseAnalytics` in `intraday_analytics/analytics_base.py`.\n"
+            "Useful for separating L3 outputs from other modules.\n"
+            "Example: 'L3_' yields L3_InsertCountBidSum.\n"
+            "Changing the prefix changes column names and downstream joins.\n"
+            "Recommended to keep stable across runs.\n"
+            "Set to None to keep module defaults.\n"
+            "Applies to both generic and advanced L3 metrics.\n"
+        },
+    )
+    generic_metrics: List[L3MetricConfig] = Field(
+        default_factory=list,
+        description="List of generic L3 metrics.",
+        json_schema_extra={
+            "long_doc": "Counts and volumes by side/action/measure. "
+            "Each entry expands into metrics via `CombinatorialMetricConfig.expand()`.\n"
+            "Example: sides=['Bid','Ask'], actions=['Insert'], measures=['Count'].\n"
+            "Generates InsertCountBid and InsertCountAsk columns.\n"
+            "Aggregation is controlled by the per-metric aggregations field.\n"
+            "Computed in `L3GenericAnalytic`.\n"
+            "Use this for broad activity measures on the order book.\n"
+            "The number of metrics grows with list sizes.\n"
+            "Reduce lists to control output width.\n"
+        },
+    )
+    advanced_metrics: List[L3AdvancedConfig] = Field(
+        default_factory=list,
+        description="List of advanced L3 metrics.",
+        json_schema_extra={
+            "long_doc": "Specialized metrics such as fleeting liquidity and latency. "
+            "Each entry expands into variants via `CombinatorialMetricConfig.expand()`.\n"
+            "Examples include ArrivalFlowImbalance and AvgRestingTime.\n"
+            "Some variants require extra columns (e.g., EventTimestamp).\n"
+            "FleetingLiquidityRatio uses `fleeting_threshold_ms`.\n"
+            "Computed in `L3AdvancedAnalytic` inside `L3Analytics`.\n"
+            "Advanced metrics are more expensive to compute.\n"
+            "Use sparingly for targeted analysis.\n"
+            "Check input schemas to ensure required columns exist.\n"
+        },
+    )
 
 
 # =============================

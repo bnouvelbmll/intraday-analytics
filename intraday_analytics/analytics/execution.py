@@ -28,10 +28,32 @@ class L3ExecutionConfig(CombinatorialMetricConfig):
     metric_type: Literal["L3_Execution"] = "L3_Execution"
 
     sides: Union[Side, List[Side]] = Field(
-        ..., description="Side of the execution (Bid/Ask)."
+        ..., description="Side of the execution (Bid/Ask).",
+        json_schema_extra={
+            "long_doc": "Selects execution side(s) for L3 execution metrics.\n"
+            "Options: Bid, Ask, or list of both.\n"
+            "Each side expands into separate output columns.\n"
+            "Used in `L3ExecutionAnalytic` to filter executions.\n"
+            "Combines with measures for expansion.\n"
+            "Example: sides=['Bid','Ask'] yields two columns.\n"
+            "If you only need total execution, pick one side.\n"
+            "Side selection affects interpretation of flow.\n"
+            "Output names include side tokens.",
+        },
     )
     measures: Union[L3ExecutionMeasure, List[L3ExecutionMeasure]] = Field(
-        ..., description="Measure to compute."
+        ..., description="Measure to compute.",
+        json_schema_extra={
+            "long_doc": "Selects execution measures (ExecutedVolume, VWAP).\n"
+            "Each measure expands into separate output columns.\n"
+            "Used in `L3ExecutionAnalytic` expressions.\n"
+            "ExecutedVolume sums execution size by side.\n"
+            "VWAP computes size-weighted average price.\n"
+            "Requires ExecutionPrice and ExecutionSize columns.\n"
+            "Combine with sides for expansion.\n"
+            "VWAP adds price dimension to execution flow.\n"
+            "Output names include measure tokens.",
+        },
     )
 
 
@@ -48,13 +70,46 @@ class TradeBreakdownConfig(CombinatorialMetricConfig):
     metric_type: Literal["Trade_Breakdown"] = "Trade_Breakdown"
 
     trade_types: Union[TradeType, List[TradeType]] = Field(
-        ..., description="Trade classification (LIT, DARK)."
+        ..., description="Trade classification (LIT, DARK).",
+        json_schema_extra={
+            "long_doc": "Selects trade type(s) for breakdown metrics.\n"
+            "Options: LIT, DARK (as defined in trade classifications).\n"
+            "Each type expands into separate output columns.\n"
+            "Used in `TradeBreakdownAnalytic` filtering.\n"
+            "Requires trade type columns in input data.\n"
+            "If missing, outputs may be empty.\n"
+            "Combine with aggressor sides and measures.\n"
+            "Output names include trade type tokens.\n"
+            "Trade type selection affects volume attribution.",
+        },
     )
     aggressor_sides: Union[AggressorSideType, List[AggressorSideType]] = Field(
-        ..., description="Aggressor side (Buy, Sell, Unknown)."
+        ..., description="Aggressor side (Buy, Sell, Unknown).",
+        json_schema_extra={
+            "long_doc": "Selects aggressor side(s) for trade breakdown.\n"
+            "Options: Buy, Sell, Unknown.\n"
+            "Each side expands into separate output columns.\n"
+            "Used in `TradeBreakdownAnalytic` filtering.\n"
+            "Requires aggressor side column in input trades.\n"
+            "Unknown includes trades without clear direction.\n"
+            "Combine with trade types and measures.\n"
+            "Output names include aggressor side tokens.\n"
+            "Side selection affects sign interpretation.",
+        },
     )
     measures: Union[TradeBreakdownMeasure, List[TradeBreakdownMeasure]] = Field(
-        ..., description="Measure (Volume, VWAP, VWPP)."
+        ..., description="Measure (Volume, VWAP, VWPP).",
+        json_schema_extra={
+            "long_doc": "Selects measures for trade breakdown metrics.\n"
+            "Options: Volume, VWAP, VWPP.\n"
+            "Each measure expands into separate output columns.\n"
+            "Used in `TradeBreakdownAnalytic`.\n"
+            "VWPP is volume-weighted price placement.\n"
+            "Requires price and size columns in input data.\n"
+            "Combine with trade types and aggressor sides.\n"
+            "Output names include measure tokens.\n"
+            "Measures control units (shares vs price).",
+        },
     )
 
 
@@ -69,16 +124,93 @@ class ExecutionDerivedConfig(CombinatorialMetricConfig):
     metric_type: Literal["Execution_Derived"] = "Execution_Derived"
 
     variant: Union[DerivedMetricVariant, List[DerivedMetricVariant]] = Field(
-        ..., description="Derived analytic name."
+        ..., description="Derived analytic name.",
+        json_schema_extra={
+            "long_doc": "Selects derived execution metric variant(s).\n"
+            "Currently supported: TradeImbalance.\n"
+            "Each variant expands into separate output columns.\n"
+            "Computed in `ExecutionDerivedAnalytic`.\n"
+            "Requires base execution/trade breakdown metrics.\n"
+            "If prerequisites are missing, outputs may be null.\n"
+            "Use to summarize execution flow in a single number.\n"
+            "Output names include derived variant tokens.\n"
+            "Derived metrics add minimal extra compute.",
+        },
     )
 
 
 class ExecutionAnalyticsConfig(BaseModel):
+    """
+    Execution analytics configuration.
+
+    Defines metrics derived from L3 executions and trade breakdowns, plus
+    optional derived metrics such as trade imbalance. The execution analytics
+    pipeline uses execution events and trade data to compute per-trade and
+    per-execution summaries (e.g., executed volume, VWAP), then aggregates these
+    within TimeBuckets. Derived metrics combine previously computed execution
+    components into higher-level summaries.
+    """
     ENABLED: bool = True
-    metric_prefix: Optional[str] = None
-    l3_execution: List[L3ExecutionConfig] = Field(default_factory=list)
-    trade_breakdown: List[TradeBreakdownConfig] = Field(default_factory=list)
-    derived_metrics: List[ExecutionDerivedConfig] = Field(default_factory=list)
+    metric_prefix: Optional[str] = Field(
+        None,
+        description="Prefix for execution metric columns.",
+        json_schema_extra={
+            "long_doc": "Prepended to all execution output columns.\n"
+            "Useful to namespace execution outputs vs trades/L3.\n"
+            "Example: 'EX_' yields EX_ExecutedVolumeBid.\n"
+            "Applies to all execution metrics in this pass.\n"
+            "Implementation uses `BaseAnalytics.metric_prefix`.\n"
+            "See `intraday_analytics/analytics_base.py` for naming.\n"
+            "Changing the prefix changes column names and joins.\n"
+            "Keep stable for production outputs.\n"
+            "Leave empty to use default module naming.\n"
+        },
+    )
+    l3_execution: List[L3ExecutionConfig] = Field(
+        default_factory=list,
+        description="Execution metrics derived from L3 executions.",
+        json_schema_extra={
+            "long_doc": "Metrics computed from L3 execution events (ExecutedVolume, VWAP).\n"
+            "Each entry expands by side and measure.\n"
+            "Example: sides=['Bid','Ask'], measures=['ExecutedVolume'].\n"
+            "Computed in `L3ExecutionAnalytic`.\n"
+            "Requires L3 execution columns (ExecutionPrice/ExecutionSize).\n"
+            "Aggregation is per TimeBucket.\n"
+            "Useful for execution-side flow metrics.\n"
+            "Large lists create many output columns.\n"
+            "Output names include side tokens.",
+        },
+    )
+    trade_breakdown: List[TradeBreakdownConfig] = Field(
+        default_factory=list,
+        description="Trade breakdown metrics.",
+        json_schema_extra={
+            "long_doc": "Metrics based on trade type and aggressor side.\n"
+            "Each entry expands by trade type, aggressor side, and measure.\n"
+            "Example: trade_types=['LIT'], aggressor_sides=['Buy'], measures=['VWAP'].\n"
+            "Computed in `TradeBreakdownAnalytic`.\n"
+            "Requires trade-level columns (Classification, AggressorSide).\n"
+            "Useful for lit vs dark or buy vs sell decompositions.\n"
+            "Aggregation is per TimeBucket.\n"
+            "Large configs can explode output width.\n"
+            "Output names include trade type and side tokens.",
+        },
+    )
+    derived_metrics: List[ExecutionDerivedConfig] = Field(
+        default_factory=list,
+        description="Derived execution metrics.",
+        json_schema_extra={
+            "long_doc": "Metrics derived from other execution analytics (e.g., trade imbalance).\n"
+            "These rely on previously computed execution components.\n"
+            "Computed in `ExecutionDerivedAnalytic`.\n"
+            "Variants expand by the specified derived metric names.\n"
+            "Useful for high-level summaries of execution flow.\n"
+            "Requires prerequisite metrics to be enabled.\n"
+            "If prerequisites are missing, outputs may be null.\n"
+            "Keep configs small to limit output width.\n"
+            "Output names include derived metric tokens.",
+        },
+    )
 
 
 # =============================

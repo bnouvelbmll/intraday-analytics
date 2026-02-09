@@ -11,10 +11,11 @@ from intraday_analytics.utils import (
     normalize_float_lf,
     normalize_float_df,
 )
+from intraday_analytics.configuration import OutputTarget
 
 
-def get_final_s3_path(start_date, end_date, config, pass_name):
-    """Constructs the final S3 output path for a given date range and pass."""
+def get_final_output_path(start_date, end_date, config, pass_name, output_target=None):
+    """Constructs the final output path for a given date range and pass."""
     import bmll2
 
     dataset_name = config.DATASETNAME
@@ -24,12 +25,24 @@ def get_final_s3_path(start_date, end_date, config, pass_name):
     # Append pass_name to the datasetname to distinguish pass outputs
     final_dataset_name = f"{dataset_name}_{pass_name}"
 
-    final_s3_path = config.FINAL_OUTPUT_PATH_TEMPLATE.format(
+    template = config.FINAL_OUTPUT_PATH_TEMPLATE
+    if output_target is not None and getattr(output_target, "path_template", None):
+        template = output_target.path_template
+
+    universe = config.UNIVERSE or "all"
+    def _coerce_date(value):
+        try:
+            return value.date()
+        except Exception:
+            return value
+
+    final_s3_path = template.format(
         bucket=output_bucket,
         prefix=output_prefix,
         datasetname=final_dataset_name,
-        start_date=start_date.date(),
-        end_date=end_date.date(),
+        universe=universe,
+        start_date=_coerce_date(start_date),
+        end_date=_coerce_date(end_date),
     )
 
     if final_s3_path.startswith("s3://"):
@@ -39,6 +52,10 @@ def get_final_s3_path(start_date, end_date, config, pass_name):
     else:
         final_s3_path = final_s3_path.replace("//", "/")
     return final_s3_path
+
+
+def get_final_s3_path(start_date, end_date, config, pass_name, output_target=None):
+    return get_final_output_path(start_date, end_date, config, pass_name, output_target)
 
 
 def aggregate_and_write_final_output(
@@ -78,15 +95,69 @@ def aggregate_and_write_final_output(
 
     final_df = normalize_float_lf(final_df)
 
-    final_s3_path = get_final_s3_path(start_date, end_date, config, pass_config.name)
+    output_target = pass_config.output or config.OUTPUT_TARGET
+    if output_target is None:
+        raise RuntimeError("No output target configured.")
+    if not isinstance(output_target, OutputTarget):
+        output_target = OutputTarget.model_validate(output_target)
+    final_s3_path = get_final_output_path(
+        start_date, end_date, config, pass_config.name, output_target
+    )
 
+    def _output_type():
+        t = output_target.type
+        try:
+            return t.value
+        except Exception:
+            return str(t)
+
+    output_type = _output_type()
     logging.info(
         f"Writing aggregated analytics for Pass {pass_config.name} to {final_s3_path}"
     )
+    logging.debug(
+        "Output target for Pass %s: type=%s sql_table=%s sql_connection=%s",
+        pass_config.name,
+        output_target.type,
+        getattr(output_target, "sql_table", None),
+        getattr(output_target, "sql_connection", None),
+    )
     def _write_output():
-        return final_df.sink_parquet(final_s3_path, compression="snappy")
+        if output_type == "parquet":
+            return final_df.sink_parquet(final_s3_path, compression="snappy")
+        if output_type == "delta":
+            try:
+                from deltalake.writer import write_deltalake
+            except Exception as exc:
+                raise RuntimeError("deltalake is required for delta outputs") from exc
+            return write_deltalake(
+                final_s3_path,
+                final_df.collect(),
+                mode=output_target.delta_mode,
+                storage_options=config.S3_STORAGE_OPTIONS,
+            )
+        if output_type == "sql":
+            try:
+                from sqlalchemy import create_engine
+            except Exception as exc:
+                raise RuntimeError("sqlalchemy is required for sql outputs") from exc
+            if not output_target.sql_connection or not output_target.sql_table:
+                raise RuntimeError("sql_connection and sql_table are required for sql outputs")
+            engine = create_engine(output_target.sql_connection)
+            try:
+                with engine.begin() as conn:
+                    result = final_df.collect().to_pandas().to_sql(
+                        output_target.sql_table,
+                        conn,
+                        if_exists=output_target.sql_if_exists,
+                        index=False,
+                    )
+                return result
+            finally:
+                engine.dispose()
+        raise RuntimeError(f"Unsupported output type: {output_target.type}")
 
-    if is_s3_path(final_s3_path):
+    if output_type == "parquet" and is_s3_path(final_s3_path):
         retry_s3(
             _write_output,
             desc=f"write final output for pass {pass_config.name}",
@@ -101,6 +172,7 @@ def aggregate_and_write_final_output(
             os.remove(f)
         except OSError as e:
             logging.error(f"Error removing temporary aggregated file {f}: {e}")
+    return final_s3_path
 
 
 class BatchWriter:

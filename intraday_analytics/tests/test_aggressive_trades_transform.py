@@ -45,7 +45,7 @@ def test_aggressive_trades_transform_with_trades_plus_fixture(trades_plus_fixtur
 
     assert (result_df["Size"] > 0).all(), "Aggregated 'Size' should always be positive."
     assert (result_df["NumExecutions"] >= 1).all(), "Each aggressive order must consist of at least one execution."
-    assert result_df["TradeTimestamp"].is_in(input_df["TradeTimestamp"]).all()
+    assert result_df["TradeTimestamp"].is_in(input_df["TradeTimestamp"].implode()).all()
 
     if "BMLLParticipantType" in result_df.columns:
         assert result_df["BMLLParticipantType"].dtype == pl.String, \

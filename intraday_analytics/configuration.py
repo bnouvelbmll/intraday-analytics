@@ -7,7 +7,6 @@ from .analytics.l3 import L3AnalyticsConfig
 from .analytics.trade import TradeAnalyticsConfig
 from .analytics.execution import ExecutionAnalyticsConfig
 from .analytics.generic import GenericAnalyticsConfig
-from .analytics.trade import RetailImbalanceConfig
 from .analytics.iceberg import IcebergAnalyticsConfig
 from .analytics.cbbo import CBBOAnalyticsConfig
 from .analytics.l3_characteristics import L3CharacteristicsConfig
@@ -29,6 +28,36 @@ class DenseOutputMode(str, Enum):
     UNIFORM = "uniform"
 
 
+class OutputType(str, Enum):
+    PARQUET = "parquet"
+    DELTA = "delta"
+    SQL = "sql"
+
+
+class OutputTarget(BaseModel):
+    type: OutputType = OutputType.PARQUET
+    path_template: Optional[str] = Field(
+        None,
+        description="Path template for parquet/delta outputs (supports {bucket}, {prefix}, {datasetname}, {universe}, {start_date}, {end_date}).",
+    )
+    io_manager_key: Optional[str] = Field(
+        None,
+        description="Dagster IO manager key to use when running in Dagster.",
+    )
+    delta_mode: Literal["append", "overwrite"] = Field(
+        "append", description="Write mode for delta outputs."
+    )
+    sql_connection: Optional[str] = Field(
+        None, description="SQLAlchemy connection string for SQL outputs."
+    )
+    sql_table: Optional[str] = Field(
+        None, description="SQL table name for SQL outputs."
+    )
+    sql_if_exists: Literal["fail", "replace", "append"] = Field(
+        "append", description="Behavior when SQL table exists."
+    )
+
+
 class PassConfig(BaseModel):
     """Configuration for a single analytics pass."""
 
@@ -37,16 +66,21 @@ class PassConfig(BaseModel):
     time_bucket_anchor: Literal["end", "start"] = "end"
     time_bucket_closed: Literal["right", "left"] = "right"
     sort_keys: Optional[List[str]] = None
+    batch_freq: Optional[str] = Field(
+        None, description="Override global BATCH_FREQ for this pass."
+    )
     modules: List[str] = Field(default_factory=list)
+    output: Optional[OutputTarget] = Field(
+        None,
+        description="Optional per-pass output target override.",
+        json_schema_extra={"section": "Advanced"},
+    )
     dense_analytics: DenseAnalyticsConfig = Field(default_factory=DenseAnalyticsConfig)
     l2_analytics: L2AnalyticsConfig = Field(default_factory=L2AnalyticsConfig)
     l3_analytics: L3AnalyticsConfig = Field(default_factory=L3AnalyticsConfig)
     trade_analytics: TradeAnalyticsConfig = Field(default_factory=TradeAnalyticsConfig)
     execution_analytics: ExecutionAnalyticsConfig = Field(
         default_factory=ExecutionAnalyticsConfig
-    )
-    retail_imbalance_analytics: RetailImbalanceConfig = Field(
-        default_factory=RetailImbalanceConfig
     )
     iceberg_analytics: IcebergAnalyticsConfig = Field(
         default_factory=IcebergAnalyticsConfig
@@ -63,6 +97,22 @@ class PassConfig(BaseModel):
     generic_analytics: GenericAnalyticsConfig = Field(
         default_factory=GenericAnalyticsConfig
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_retail_imbalance(cls, values):
+        if not isinstance(values, dict):
+            return values
+        legacy = values.pop("retail_imbalance_analytics", None)
+        if legacy is None:
+            return values
+        trade_cfg = values.get("trade_analytics")
+        if not isinstance(trade_cfg, dict):
+            trade_cfg = {}
+        if "retail_imbalance" not in trade_cfg:
+            trade_cfg["retail_imbalance"] = legacy
+        values["trade_analytics"] = trade_cfg
+        return values
 
     @model_validator(mode="after")
     def propagate_pass_settings(self) -> "PassConfig":
@@ -81,19 +131,91 @@ class PassConfig(BaseModel):
         return self
 
 
+class SchedulePartitionSelector(BaseModel):
+    date: Optional[str] = Field(
+        None,
+        description="Partition date key (YYYY-MM-DD, range, or 'yesterday').",
+    )
+    universe: Optional[str] = Field(
+        None,
+        description="Universe partition spec (e.g. mic=XLON).",
+    )
+
+
+class ScheduleConfig(BaseModel):
+    name: str = Field("schedule", description="Schedule name.")
+    enabled: bool = Field(False, description="Enable schedule.")
+    cron: str = Field("0 2 * * *", description="Cron expression.")
+    timezone: str = Field("UTC", description="Timezone for cron.")
+    partitions: List[SchedulePartitionSelector] = Field(
+        default_factory=list,
+        description="Optional list of partition selectors (defaults to yesterday + first universe).",
+    )
+
+
 class AnalyticsConfig(BaseModel):
     # --- Date & Scope ---
-    START_DATE: Optional[str] = None
-    END_DATE: Optional[str] = None
-    EXCLUDE_WEEKENDS: bool = True
-    DATASETNAME: str = "sample2d"
+    START_DATE: Optional[str] = Field(
+        None,
+        description="Start date for analytics (YYYY-MM-DD).",
+        json_schema_extra={"section": "Core"},
+    )
+    END_DATE: Optional[str] = Field(
+        None,
+        description="End date for analytics (YYYY-MM-DD).",
+        json_schema_extra={"section": "Core"},
+    )
+    EXCLUDE_WEEKENDS: bool = Field(
+        True,
+        description="Skip weekends when building date ranges.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    DATASETNAME: str = Field(
+        "sample2d",
+        description="Logical dataset name used in output paths.",
+        json_schema_extra={"section": "Core"},
+    )
+    UNIVERSE: Optional[str] = Field(
+        None,
+        description="Universe spec (e.g. mic=XLON). Used for output paths and metadata.",
+        json_schema_extra={"section": "Core"},
+    )
 
     # --- Analytics Passes ---
-    PASSES: List[PassConfig] = Field(default_factory=list)
+    PASSES: List[PassConfig] = Field(
+        default_factory=list,
+        description="Analytics passes to execute.",
+        json_schema_extra={"section": "Advanced"},
+    )
+
+    # --- Automation ---
+    AUTO_MATERIALIZE_ENABLED: bool = Field(
+        False,
+        description="Enable auto-materialization for assets.",
+        json_schema_extra={"section": "Automation"},
+    )
+    AUTO_MATERIALIZE_LATEST_DAYS: Optional[int] = Field(
+        7,
+        description="If set, limit auto-materialization to the last N days.",
+        json_schema_extra={"section": "Automation"},
+    )
+    SCHEDULES: List[ScheduleConfig] = Field(
+        default_factory=list,
+        description="Optional schedules for asset materialization.",
+        json_schema_extra={"section": "Automation"},
+    )
 
     # --- Batching & Performance ---
-    BATCHING_STRATEGY: BatchingStrategyType = BatchingStrategyType.HEURISTIC
-    NUM_WORKERS: int = -1
+    BATCHING_STRATEGY: BatchingStrategyType = Field(
+        BatchingStrategyType.HEURISTIC,
+        description="Controls how input data is batched.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    NUM_WORKERS: int = Field(
+        -1,
+        description="Number of worker processes (-1 uses all cores).",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
     """
     The number of worker processes to use for parallel computation.
     -1 uses all available CPU cores.
@@ -106,39 +228,129 @@ class AnalyticsConfig(BaseModel):
             "l3": 5_000_000,
             "cbbo": 1_000_000,
             "marketstate": 200_000,
-        }
+        },
+        description="Row caps per table for memory control.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
     )
 
     # --- File Paths ---
-    HEURISTIC_SIZES_PATH: str = "/tmp/symbol_sizes/latest.parquet"
-    TEMP_DIR: str = "/tmp/temp_ian3"
-    AREA: str = "user"
+    HEURISTIC_SIZES_PATH: str = Field(
+        "/tmp/symbol_sizes/latest.parquet",
+        description="Path to size heuristics parquet.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    TEMP_DIR: Optional[str] = Field(
+        None,
+        description="Local temp directory used during processing (auto-generated if empty).",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    AREA: str = Field(
+        "user",
+        description="Logical area / workspace label.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
 
     # --- Execution ---
-    PREPARE_DATA_MODE: PrepareDataMode = PrepareDataMode.S3_SHREDDING
-    DEFAULT_FFILL: bool = False
-    DENSE_OUTPUT: bool = True
-    MEMORY_PER_WORKER: int = Field(20, gt=0)
-    RUN_ONE_SYMBOL_AT_A_TIME: bool = False
-    EAGER_EXECUTION: bool = False
-    BATCH_FREQ: Optional[str] = "W"
-    LOGGING_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    TABLES_TO_LOAD: Optional[List[str]] = None
+    PREPARE_DATA_MODE: PrepareDataMode = Field(
+        PrepareDataMode.S3_SHREDDING,
+        description="How input data is prepared (naive or s3_shredding).",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    DEFAULT_FFILL: bool = Field(
+        False,
+        description="Forward-fill missing values when needed.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    DENSE_OUTPUT: bool = Field(
+        True,
+        description="Emit dense output tables.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    MEMORY_PER_WORKER: int = Field(
+        20,
+        gt=0,
+        description="Memory budget per worker (GB).",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    RUN_ONE_SYMBOL_AT_A_TIME: bool = Field(
+        False,
+        description="Serializes execution per symbol.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    EAGER_EXECUTION: bool = Field(
+        False,
+        description="Eagerly evaluate lazy frames.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    BATCH_FREQ: Optional[str] = Field(
+        "W",
+        description="Batch frequency for date partitions (e.g. D, W, M).",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    LOGGING_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        "INFO",
+        description="Logging verbosity.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    TABLES_TO_LOAD: Optional[List[str]] = Field(
+        None,
+        description="Restrict which tables are loaded.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
 
     # --- Profiling ---
-    ENABLE_PERFORMANCE_LOGS: bool = True
-    ENABLE_POLARS_PROFILING: bool = False
+    ENABLE_PERFORMANCE_LOGS: bool = Field(
+        True,
+        description="Emit performance logs per stage.",
+        json_schema_extra={"section": "Advanced"},
+    )
+    ENABLE_POLARS_PROFILING: bool = Field(
+        False,
+        description="Enable Polars profiling.",
+        json_schema_extra={"section": "Advanced"},
+    )
 
     # --- Output ---
-    FINAL_OUTPUT_PATH_TEMPLATE: str = (
-        "s3://{bucket}/{prefix}/data/{datasetname}/{start_date}_{end_date}.parquet"
+    FINAL_OUTPUT_PATH_TEMPLATE: str = Field(
+        "s3://{bucket}/{prefix}/data/{datasetname}/{universe}/{start_date}_{end_date}.parquet",
+        description="Template for output file paths.",
+        json_schema_extra={"section": "Outputs"},
     )
-    S3_STORAGE_OPTIONS: Dict[str, str] = Field(default_factory=dict)
-    DEFAULT_S3_REGION: str = "us-east-1"
-    CLEAN_UP_BATCH_FILES: bool = True
-    CLEAN_UP_TEMP_DIR: bool = True
-    OVERWRITE_TEMP_DIR: bool = False
-    SKIP_EXISTING_OUTPUT: bool = False
+    OUTPUT_TARGET: OutputTarget = Field(
+        default_factory=OutputTarget,
+        description="Default output target configuration.",
+        json_schema_extra={"section": "Outputs"},
+    )
+    S3_STORAGE_OPTIONS: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Extra options for S3 storage.",
+        json_schema_extra={"section": "Outputs"},
+    )
+    DEFAULT_S3_REGION: str = Field(
+        "us-east-1",
+        description="Default S3 region for IO.",
+        json_schema_extra={"section": "Outputs"},
+    )
+    CLEAN_UP_BATCH_FILES: bool = Field(
+        True,
+        description="Delete batch files after use.",
+        json_schema_extra={"section": "Outputs"},
+    )
+    CLEAN_UP_TEMP_DIR: bool = Field(
+        True,
+        description="Delete temp dir after run.",
+        json_schema_extra={"section": "Outputs"},
+    )
+    OVERWRITE_TEMP_DIR: bool = Field(
+        False,
+        description="Overwrite temp dir if it exists.",
+        json_schema_extra={"section": "Outputs"},
+    )
+    SKIP_EXISTING_OUTPUT: bool = Field(
+        False,
+        description="Skip outputs if they already exist.",
+        json_schema_extra={"section": "Outputs"},
+    )
 
     def to_dict(self):
         return self.model_dump()

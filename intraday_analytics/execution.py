@@ -27,6 +27,7 @@ from .utils import (
 from .tables import ALL_TABLES
 from .api_stats import init_api_stats, summarize_api_stats
 from .process import aggregate_and_write_final_output, BatchWriter, get_final_s3_path
+from .configuration import OutputTarget
 
 
 def _coerce_to_iso_date(value):
@@ -446,7 +447,7 @@ class ProcessInterval(Process):
             else:
                 sort_keys = ["ListingId", "TimeBucket"]
 
-            aggregate_and_write_final_output(
+            final_path = aggregate_and_write_final_output(
                 self.sd,
                 self.ed,
                 self.config,
@@ -456,10 +457,6 @@ class ProcessInterval(Process):
             )
 
             # Update context with the result of this pass
-            final_path = get_final_s3_path(
-                self.sd, self.ed, self.config, self.pass_config.name
-            )
-
             self.update_and_persist_context(pipe, final_path)
 
         except Exception as e:
@@ -514,6 +511,12 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
         config.S3_STORAGE_OPTIONS["region"] = config.DEFAULT_S3_REGION
 
     temp_dir = config.TEMP_DIR
+    if not temp_dir:
+        import tempfile
+
+        temp_dir = tempfile.mkdtemp(prefix="ian3_")
+        config = config.model_copy(update={"TEMP_DIR": temp_dir})
+        os.environ["INTRADAY_ANALYTICS_TEMP_DIR"] = temp_dir
     if os.path.exists(temp_dir) and config.OVERWRITE_TEMP_DIR:
         shutil.rmtree(temp_dir)
     os.makedirs(temp_dir, exist_ok=True)
@@ -527,8 +530,9 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
         for pass_config in config.PASSES:
             logging.info(f"🚀 Starting Pass {pass_config.name}")
 
+            batch_freq = pass_config.batch_freq or config.BATCH_FREQ
             date_batches = create_date_batches(
-                config.START_DATE, config.END_DATE, config.BATCH_FREQ
+                config.START_DATE, config.END_DATE, batch_freq
             )
             logging.info(
                 f"📅 Created {len(date_batches)} date batches for Pass {pass_config.name}."
@@ -536,8 +540,15 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
 
             for sd, ed in date_batches:
                 if config.SKIP_EXISTING_OUTPUT:
-                    final_s3_path = get_final_s3_path(sd, ed, config, pass_config.name)
-                    if check_s3_url_exists(final_s3_path):
+                    output_target = pass_config.output or config.OUTPUT_TARGET
+                    if output_target is None:
+                        raise RuntimeError("No output target configured.")
+                    if not isinstance(output_target, OutputTarget):
+                        output_target = OutputTarget.model_validate(output_target)
+                    final_s3_path = get_final_s3_path(
+                        sd, ed, config, pass_config.name, output_target
+                    )
+                    if output_target.type.value == "parquet" and check_s3_url_exists(final_s3_path):
                         logging.info(
                             f"✅ Output already exists for {sd.date()} -> {ed.date()} (Pass {pass_config.name}). Skipping."
                         )
