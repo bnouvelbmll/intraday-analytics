@@ -28,7 +28,8 @@ class L3ExecutionConfig(CombinatorialMetricConfig):
     metric_type: Literal["L3_Execution"] = "L3_Execution"
 
     sides: Union[Side, List[Side]] = Field(
-        ..., description="Side of the execution (Bid/Ask).",
+        ...,
+        description="Side of the execution (Bid/Ask).",
         json_schema_extra={
             "long_doc": "Selects execution side(s) for L3 execution metrics.\n"
             "Options: Bid, Ask, or list of both.\n"
@@ -42,7 +43,8 @@ class L3ExecutionConfig(CombinatorialMetricConfig):
         },
     )
     measures: Union[L3ExecutionMeasure, List[L3ExecutionMeasure]] = Field(
-        ..., description="Measure to compute.",
+        ...,
+        description="Measure to compute.",
         json_schema_extra={
             "long_doc": "Selects execution measures (ExecutedVolume, VWAP).\n"
             "Each measure expands into separate output columns.\n"
@@ -70,7 +72,8 @@ class TradeBreakdownConfig(CombinatorialMetricConfig):
     metric_type: Literal["Trade_Breakdown"] = "Trade_Breakdown"
 
     trade_types: Union[TradeType, List[TradeType]] = Field(
-        ..., description="Trade classification (LIT, DARK).",
+        ...,
+        description="Trade classification (LIT, DARK).",
         json_schema_extra={
             "long_doc": "Selects trade type(s) for breakdown metrics.\n"
             "Options: LIT, DARK (as defined in trade classifications).\n"
@@ -84,7 +87,8 @@ class TradeBreakdownConfig(CombinatorialMetricConfig):
         },
     )
     aggressor_sides: Union[AggressorSideType, List[AggressorSideType]] = Field(
-        ..., description="Aggressor side (Buy, Sell, Unknown).",
+        ...,
+        description="Aggressor side (Buy, Sell, Unknown).",
         json_schema_extra={
             "long_doc": "Selects aggressor side(s) for trade breakdown.\n"
             "Options: Buy, Sell, Unknown.\n"
@@ -98,7 +102,8 @@ class TradeBreakdownConfig(CombinatorialMetricConfig):
         },
     )
     measures: Union[TradeBreakdownMeasure, List[TradeBreakdownMeasure]] = Field(
-        ..., description="Measure (Volume, VWAP, VWPP).",
+        ...,
+        description="Measure (Volume, VWAP, VWPP).",
         json_schema_extra={
             "long_doc": "Selects measures for trade breakdown metrics.\n"
             "Options: Volume, VWAP, VWPP.\n"
@@ -124,7 +129,8 @@ class ExecutionDerivedConfig(CombinatorialMetricConfig):
     metric_type: Literal["Execution_Derived"] = "Execution_Derived"
 
     variant: Union[DerivedMetricVariant, List[DerivedMetricVariant]] = Field(
-        ..., description="Derived analytic name.",
+        ...,
+        description="Derived analytic name.",
         json_schema_extra={
             "long_doc": "Selects derived execution metric variant(s).\n"
             "Currently supported: TradeImbalance.\n"
@@ -150,6 +156,7 @@ class ExecutionAnalyticsConfig(BaseModel):
     within TimeBuckets. Derived metrics combine previously computed execution
     components into higher-level summaries.
     """
+
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(
         None,
@@ -293,7 +300,9 @@ class TradeBreakdownAnalytic(AnalyticSpec):
     )
     def _expression_vwap(self, cond):
         """{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket."""
-        num = pl.when(cond).then(pl.col("LocalPrice") * pl.col("Size")).otherwise(0).sum()
+        num = (
+            pl.when(cond).then(pl.col("LocalPrice") * pl.col("Size")).otherwise(0).sum()
+        )
         den = pl.when(cond).then(pl.col("Size")).otherwise(0).sum()
         return num / den
 
@@ -310,7 +319,10 @@ class TradeBreakdownAnalytic(AnalyticSpec):
         return num / den
 
     def expressions(
-        self, ctx: AnalyticContext, config: TradeBreakdownConfig, variant: Dict[str, Any]
+        self,
+        ctx: AnalyticContext,
+        config: TradeBreakdownConfig,
+        variant: Dict[str, Any],
     ) -> List[pl.Expr]:
         t_type = variant["trade_types"]
         agg_side_str = variant["aggressor_sides"]
@@ -348,7 +360,9 @@ class ExecutionDerivedAnalytic(AnalyticSpec):
         pattern=r"^TradeImbalance$",
         unit="Imbalance",
     )
-    def _expression_trade_imbalance(self, df: pl.LazyFrame, prefix: str) -> pl.LazyFrame:
+    def _expression_trade_imbalance(
+        self, df: pl.LazyFrame, prefix: str
+    ) -> pl.LazyFrame:
         """Normalized trade volume imbalance between buy and sell aggressor sides per TimeBucket."""
         cols = df.collect_schema().names()
         ask_col = f"{prefix}ExecutedVolumeAsk" if prefix else "ExecutedVolumeAsk"
@@ -364,7 +378,10 @@ class ExecutionDerivedAnalytic(AnalyticSpec):
         return df
 
     def expressions(
-        self, ctx: AnalyticContext, config: ExecutionDerivedConfig, variant: Dict[str, Any]
+        self,
+        ctx: AnalyticContext,
+        config: ExecutionDerivedConfig,
+        variant: Dict[str, Any],
     ) -> List[pl.Expr]:
         return []
 
@@ -474,7 +491,9 @@ class ExecutionAnalytics(BaseAnalytics):
         else:
             df = l3.select(["ListingId", "TimeBucketInt"]).unique()
 
-        df = df.filter(pl.col("ListingId").is_not_null() & pl.col("TimeBucketInt").is_not_null())
+        df = df.filter(
+            pl.col("ListingId").is_not_null() & pl.col("TimeBucketInt").is_not_null()
+        )
 
         df = df.with_columns(
             pl.col("TimeBucketInt").cast(pl.Datetime("ns")).alias("TimeBucket")

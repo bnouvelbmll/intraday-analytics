@@ -49,11 +49,15 @@ def _emit_events(
 ):
     if emit_observations:
         instance.report_runless_asset_event(
-            AssetObservation(asset_key=asset_key, partition=partition, metadata=metadata)
+            AssetObservation(
+                asset_key=asset_key, partition=partition, metadata=metadata
+            )
         )
     if emit_materializations:
         instance.report_runless_asset_event(
-            AssetMaterialization(asset_key=asset_key, partition=partition, metadata=metadata)
+            AssetMaterialization(
+                asset_key=asset_key, partition=partition, metadata=metadata
+            )
         )
 
 

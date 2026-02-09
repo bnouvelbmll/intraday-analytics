@@ -91,7 +91,7 @@ class TestEagerExecution(unittest.TestCase):
                 "PricePoint": [0.5],
                 "BMLLParticipantType": ["RETAIL"],
                 "AggressorSide": [1],
-                "TradeNotional": [1000.0],                
+                "TradeNotional": [1000.0],
                 "TradeNotionalEUR": [1000.0],
             }
         ).write_parquet(self.trades_file)
@@ -149,8 +149,8 @@ class TestEagerExecution(unittest.TestCase):
                 return AnalyticsPipeline(modules, config, pass_config, context)
 
             run_metrics_pipeline(
-            config=config, get_universe=mock_get_universe, get_pipeline=get_pipeline
-        )
+                config=config, get_universe=mock_get_universe, get_pipeline=get_pipeline
+            )
 
             expected_out = os.path.join(
                 self.temp_dir,

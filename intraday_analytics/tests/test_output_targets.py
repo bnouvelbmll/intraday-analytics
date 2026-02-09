@@ -8,7 +8,13 @@ import polars as pl
 import pandas as pd
 
 from intraday_analytics.execution import run_metrics_pipeline, ProcessInterval
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig, OutputTarget, OutputType
+from intraday_analytics.configuration import (
+    AnalyticsConfig,
+    PassConfig,
+    OutputTarget,
+    OutputType,
+)
+
 
 # Helper class to run ProcessInterval synchronously
 class SyncProcessInterval(ProcessInterval):
@@ -51,6 +57,7 @@ class TestOutputTargets(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import sys
+
         sys.modules["bmll2"] = MagicMock()
 
     def setUp(self):
@@ -108,14 +115,20 @@ class TestOutputTargets(unittest.TestCase):
             return mock_future
 
         with patch(
-            "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
-        ), patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures), patch(
+            "intraday_analytics.execution.ProcessInterval",
+            side_effect=SyncProcessInterval,
+        ), patch(
+            "intraday_analytics.execution.as_completed",
+            side_effect=lambda futures: futures,
+        ), patch(
             "intraday_analytics.execution.get_files_for_date_range"
         ) as mock_get_files, patch(
             "intraday_analytics.execution.ProcessPoolExecutor"
         ) as mock_pool:
             mock_get_files.side_effect = mock_files
-            mock_pool.return_value.__enter__.return_value.submit.side_effect = mock_submit
+            mock_pool.return_value.__enter__.return_value.submit.side_effect = (
+                mock_submit
+            )
             run_metrics_pipeline(config=config, get_universe=mock_get_universe)
 
     def test_multi_pass_delta_output(self):
@@ -135,7 +148,9 @@ class TestOutputTargets(unittest.TestCase):
                 PassConfig(name="pass1", modules=["dense", "trade"]),
                 PassConfig(name="pass2", modules=["trade"]),
             ],
-            OUTPUT_TARGET=OutputTarget(type=OutputType.DELTA, path_template=delta_template),
+            OUTPUT_TARGET=OutputTarget(
+                type=OutputType.DELTA, path_template=delta_template
+            ),
             CLEAN_UP_TEMP_DIR=False,
             BATCH_FREQ=None,
         )
@@ -202,9 +217,14 @@ class TestOutputTargets(unittest.TestCase):
         self.assertIn("pass2_metrics", inspector.get_table_names())
 
         from sqlalchemy import text as sql_text
+
         with engine.connect() as conn_handle:
-            res1 = conn_handle.execute(sql_text("SELECT COUNT(*) FROM pass1_metrics")).fetchone()[0]
-            res2 = conn_handle.execute(sql_text("SELECT COUNT(*) FROM pass2_metrics")).fetchone()[0]
+            res1 = conn_handle.execute(
+                sql_text("SELECT COUNT(*) FROM pass1_metrics")
+            ).fetchone()[0]
+            res2 = conn_handle.execute(
+                sql_text("SELECT COUNT(*) FROM pass2_metrics")
+            ).fetchone()[0]
             self.assertGreater(res1, 0)
             self.assertGreater(res2, 0)
 

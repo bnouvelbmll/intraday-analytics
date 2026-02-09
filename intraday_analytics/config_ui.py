@@ -14,7 +14,17 @@ from pydantic_core import PydanticUndefined
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Checkbox, Footer, Header, Input, Label, Select, Static, TextArea
+from textual.widgets import (
+    Button,
+    Checkbox,
+    Footer,
+    Header,
+    Input,
+    Label,
+    Select,
+    Static,
+    TextArea,
+)
 from rich.panel import Panel
 
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig, OutputTarget
@@ -33,12 +43,19 @@ def _iter_global_sections(model_cls: type[BaseModel]):
         sections.setdefault(section, []).append(name)
 
     ordered = []
-    for section in ("Core", "Outputs", "Automation", "PerformanceAndExecutionEnvironment", "Advanced"):
+    for section in (
+        "Core",
+        "Outputs",
+        "Automation",
+        "PerformanceAndExecutionEnvironment",
+        "Advanced",
+    ):
         if section in sections:
             ordered.append((section, sections.pop(section)))
     for section, names in sections.items():
         ordered.append((section, names))
     return ordered
+
 
 def _load_module_from_path(path: Path):
     spec = importlib.util.spec_from_file_location(path.stem, path)
@@ -59,7 +76,9 @@ def _default_yaml_content(py_path: Path) -> str:
     module = _load_module_from_path(py_path)
     if module is None or not hasattr(module, "USER_CONFIG"):
         return yaml.safe_dump({"USER_CONFIG": {}}, sort_keys=False)
-    return yaml.safe_dump({"USER_CONFIG": getattr(module, "USER_CONFIG")}, sort_keys=False)
+    return yaml.safe_dump(
+        {"USER_CONFIG": getattr(module, "USER_CONFIG")}, sort_keys=False
+    )
 
 
 def _load_yaml_user_config(path: Path) -> dict:
@@ -167,6 +186,7 @@ def _field_long_doc(field) -> Optional[str]:
         return extra.get("long_doc")
     return None
 
+
 def _yaml_from_value(value: Any) -> str:
     if value is PydanticUndefined:
         return yaml.safe_dump(None, sort_keys=False)
@@ -206,7 +226,7 @@ class RotatingText(Static):
             self.update(self._text)
             return
         self._offset = (self._offset + 1) % max_offset
-        window = scroll[self._offset:self._offset + width]
+        window = scroll[self._offset : self._offset + width]
         self.update(window)
 
 
@@ -244,12 +264,13 @@ class PassSummaryBox(Vertical):
 
 
 class ModelEditor(Screen):
-    CSS =  """
+    CSS = """
     Screen { background: $surface; color: $text; }
     Vertical { height: auto; }
     Horizontal { height: auto; }
     .field-box { height: auto; margin-bottom: 1; }
     """
+
     def __init__(
         self,
         model_cls: type[BaseModel],
@@ -299,7 +320,10 @@ class ModelEditor(Screen):
                 for name, field in self.model_cls.model_fields.items():  # type: ignore[attr-defined]
                     if name in self._skip_fields:
                         continue
-                    if self._allowed_fields is not None and name not in self._allowed_fields:
+                    if (
+                        self._allowed_fields is not None
+                        and name not in self._allowed_fields
+                    ):
                         continue
                     annotation = _unwrap_optional(field.annotation)
                     value = self.data.get(name, field.default)
@@ -360,7 +384,10 @@ class ModelEditor(Screen):
                 return
             if isinstance(value, list):
                 value = value[0] if value else None
-            widget = Select([(o, o) for o in options], value=str(value) if value is not None else options[0])
+            widget = Select(
+                [(o, o) for o in options],
+                value=str(value) if value is not None else options[0],
+            )
         elif (list_literal := _is_list_of_literal(annotation)) is not None:
             widget = []
             current = set(value or [])
@@ -373,7 +400,10 @@ class ModelEditor(Screen):
                 self.data[name] = options[0] if value is None else value
                 return
             current = value.value if hasattr(value, "value") else value
-            widget = Select([(o, o) for o in options], value=str(current) if current is not None else options[0])
+            widget = Select(
+                [(o, o) for o in options],
+                value=str(current) if current is not None else options[0],
+            )
         elif annotation in (int, float, str):
             widget = Input(value="" if value is None else str(value))
         elif _is_list_of_basemodel(annotation) is not None:
@@ -449,11 +479,17 @@ class ModelEditor(Screen):
             widget, annotation = self.widgets[field_name]
             current = self.data.get(field_name, {})
             if _is_basemodel(annotation):
+
                 def _on_save(updated):
                     self.data[field_name] = updated
+
                 screen = ModelEditor(
                     annotation,
-                    current if isinstance(current, dict) else getattr(current, "model_dump", lambda: {})(),
+                    (
+                        current
+                        if isinstance(current, dict)
+                        else getattr(current, "model_dump", lambda: {})()
+                    ),
                     title=f"{self.title}.{field_name}",
                     on_save=_on_save,
                 )
@@ -504,7 +540,10 @@ class ModelEditor(Screen):
                 raw[name] = [cb.label for cb in widget if cb.value]
             elif isinstance(widget, Button) and _is_basemodel(annotation):
                 raw[name] = self.data.get(name, {})
-            elif isinstance(widget, Button) and _is_list_of_basemodel(annotation) is not None:
+            elif (
+                isinstance(widget, Button)
+                and _is_list_of_basemodel(annotation) is not None
+            ):
                 raw[name] = self.data.get(name, [])
 
         try:
@@ -530,7 +569,11 @@ class ListEditor(Screen):
         yield Label(self.title)
         with VerticalScroll():
             for idx, item in enumerate(self.items):
-                label = item.get("metric_type", f"item{idx+1}") if isinstance(item, dict) else f"item{idx+1}"
+                label = (
+                    item.get("metric_type", f"item{idx+1}")
+                    if isinstance(item, dict)
+                    else f"item{idx+1}"
+                )
                 yield Button(f"Edit {label}", id=f"edit_{idx}")
                 yield Button(f"Remove {label}", id=f"remove_{idx}")
         with Horizontal():
@@ -545,9 +588,11 @@ class ListEditor(Screen):
             self.app.pop_screen()
             return
         if button_id == "add":
+
             def _on_save(updated):
                 self.items.append(updated)
                 self.on_save(self.items)
+
             screen = ModelEditor(self.model_cls, {}, f"{self.title}.new", _on_save)
             self.app.push_screen(screen)
             return
@@ -559,7 +604,9 @@ class ListEditor(Screen):
                 self.items[idx] = updated
                 self.on_save(self.items)
 
-            screen = ModelEditor(self.model_cls, current, f"{self.title}[{idx}]", _on_save)
+            screen = ModelEditor(
+                self.model_cls, current, f"{self.title}[{idx}]", _on_save
+            )
             self.app.push_screen(screen)
             return
         if button_id.startswith("remove_"):
@@ -660,6 +707,7 @@ class ConfigEditor(App):
         def _on_save(updated):
             self.config_data.update(updated)
             self._refresh_summary()
+
         screen = ModelEditor(
             AnalyticsConfig,
             self.config_data,
@@ -704,7 +752,9 @@ class ConfigEditor(App):
             if p.get("sort_keys"):
                 grouping = p.get("sort_keys")
             elif "generic" in (p.get("modules") or []):
-                grouping = (p.get("generic_analytics") or {}).get("group_by", ["ListingId", "TimeBucket"])
+                grouping = (p.get("generic_analytics") or {}).get(
+                    "group_by", ["ListingId", "TimeBucket"]
+                )
             else:
                 grouping = ["ListingId", "TimeBucket"]
             grouping_label = ",".join(grouping)
@@ -789,7 +839,10 @@ PASS_MODULE_FIELD_MAP = {
     "execution": ["execution_analytics"],
     "cbbo": ["cbbo_analytics"],
     "generic": ["generic_analytics"],
-    "characteristics": ["l3_characteristics_analytics", "trade_characteristics_analytics"],
+    "characteristics": [
+        "l3_characteristics_analytics",
+        "trade_characteristics_analytics",
+    ],
 }
 
 MODULE_SCHEMA_KEYS = {
@@ -828,7 +881,9 @@ class PassListEditor(Screen):
                 if p.get("sort_keys"):
                     grouping = p.get("sort_keys")
                 elif "generic" in (p.get("modules") or []):
-                    grouping = (p.get("generic_analytics") or {}).get("group_by", ["ListingId", "TimeBucket"])
+                    grouping = (p.get("generic_analytics") or {}).get(
+                        "group_by", ["ListingId", "TimeBucket"]
+                    )
                 else:
                     grouping = ["ListingId", "TimeBucket"]
                 grouping_label = ",".join(grouping)
@@ -873,12 +928,12 @@ class PassListEditor(Screen):
             idx = int(button_id.split("_", 1)[1])
             self._edit_pass(idx)
 
-
     def _open_pass_editor(self) -> None:
         def _on_save(updated):
             self.config_data.setdefault("PASSES", []).append(updated)
             if hasattr(self.app, "_refresh_summary"):
                 self.app._refresh_summary()
+
         screen = PassEditor(
             {},
             "PassConfig",
@@ -939,7 +994,11 @@ class PassEditor(Screen):
         with VerticalScroll():
             yield Label("Pass type")
             pass_type = Select(
-                [("Preprocessing", "pre"), ("Core", "core"), ("Postprocessing", "post")],
+                [
+                    ("Preprocessing", "pre"),
+                    ("Core", "core"),
+                    ("Postprocessing", "post"),
+                ],
                 value=self.data.get("_pass_type", "core"),
             )
             pass_type.id = "pass_type"
@@ -977,9 +1036,13 @@ class PassEditor(Screen):
             self.app.pop_screen()
             return
         if button_id == "edit_full":
+
             def _on_save(updated):
                 self.data.update(updated)
-            selected_modules = self.data.get("modules", []) if isinstance(self.data, dict) else []
+
+            selected_modules = (
+                self.data.get("modules", []) if isinstance(self.data, dict) else []
+            )
             allowed = {
                 "name",
                 "time_bucket_seconds",
@@ -992,7 +1055,9 @@ class PassEditor(Screen):
             }
             for mod in selected_modules:
                 allowed.update(PASS_MODULE_FIELD_MAP.get(mod, []))
-            screen = ModelEditor(PassConfig, self.data, "PassConfig (Advanced)", _on_save)
+            screen = ModelEditor(
+                PassConfig, self.data, "PassConfig (Advanced)", _on_save
+            )
             screen._allowed_fields = allowed
             self.app.push_screen(screen)
             return
@@ -1018,11 +1083,13 @@ class PassEditor(Screen):
             return
 
         if self.pass_readonly:
+
             def _on_confirm():
                 self.pass_readonly = False
                 if self.on_readonly_change:
                     self.on_readonly_change(False)
                 self._save_pass()
+
             self.app.push_screen(
                 ConfirmScreen(
                     "Passes are in read-only mode. Editing will change the process. Continue?",
@@ -1044,9 +1111,16 @@ class PassEditor(Screen):
         pass_type = self.widgets["pass_type"].value
         # enforce pass type constraints
         if pass_type == "pre":
-            selected_modules = [m for m in selected_modules if MODULE_INFO[m]["tier"] == "pre"]
+            selected_modules = [
+                m for m in selected_modules if MODULE_INFO[m]["tier"] == "pre"
+            ]
         elif pass_type == "core":
-            selected_modules = [m for m in selected_modules if MODULE_INFO[m]["tier"] == "core" or MODULE_INFO[m]["tier"] == "advanced"]
+            selected_modules = [
+                m
+                for m in selected_modules
+                if MODULE_INFO[m]["tier"] == "core"
+                or MODULE_INFO[m]["tier"] == "advanced"
+            ]
         else:
             # postprocessing = free
             pass
@@ -1096,12 +1170,18 @@ class PassEditor(Screen):
                     normalized.append(name)
             raw_modules = normalized
             self.data["modules"] = raw_modules
-        current = {key for key, cb in self.widgets.get("modules", []) if cb.value} or set(raw_modules or [])
+        current = {
+            key for key, cb in self.widgets.get("modules", []) if cb.value
+        } or set(raw_modules or [])
         self.widgets["modules"] = []
         self.widgets["module_edit_buttons"] = {}
         self._module_edit_map.clear()
         self._render_token += 1
-        pass_type = self.widgets.get("pass_type").value if self.widgets.get("pass_type") else "core"
+        pass_type = (
+            self.widgets.get("pass_type").value
+            if self.widgets.get("pass_type")
+            else "core"
+        )
 
         current_counts, full_counts = self._module_schema_counts()
 
@@ -1132,7 +1212,9 @@ class PassEditor(Screen):
                 self._module_edit_map[edit_id] = key
                 modules_box.mount(edit_btn)
             modules_box.mount(Label(f"  {meta['desc']}", classes="help"))
-            modules_box.mount(Label(f"  Outputs: {', '.join(meta['columns'])}", classes="help"))
+            modules_box.mount(
+                Label(f"  Outputs: {', '.join(meta['columns'])}", classes="help")
+            )
 
     def _open_module_editor(self, field_name: str) -> None:
         current = self.data.get(field_name, {})
@@ -1140,8 +1222,10 @@ class PassEditor(Screen):
             current = {}
         annotation = PassConfig.model_fields.get(field_name).annotation  # type: ignore[attr-defined]
         if _is_basemodel(annotation):
+
             def _on_save(updated):
                 self.data[field_name] = updated
+
             screen = ModelEditor(
                 annotation,
                 current,
@@ -1160,7 +1244,9 @@ class PassEditor(Screen):
 
         try:
             current_data = dict(self.data)
-            current_modules = [key for key, cb in self.widgets.get("modules", []) if cb.value]
+            current_modules = [
+                key for key, cb in self.widgets.get("modules", []) if cb.value
+            ]
             if current_modules:
                 current_data["modules"] = current_modules
             pass_cfg = PassConfig.model_validate(current_data)
@@ -1175,7 +1261,9 @@ class PassEditor(Screen):
             full_counts["generic"] = _generic_metric_count(PassConfig(name="pass"))
         if "generic" not in current_counts:
             current_counts = dict(current_counts)
-            current_counts["generic"] = _generic_metric_count(pass_cfg) if "pass_cfg" in locals() else 0
+            current_counts["generic"] = (
+                _generic_metric_count(pass_cfg) if "pass_cfg" in locals() else 0
+            )
         return current_counts, full_counts
 
 
@@ -1210,13 +1298,17 @@ def _module_metric_count(data: dict, module_key: str) -> Optional[int]:
         cfg = data.get("l3_analytics", {}) or {}
         if not isinstance(cfg, dict):
             return None
-        return len(cfg.get("generic_metrics", [])) + len(cfg.get("advanced_metrics", []))
+        return len(cfg.get("generic_metrics", [])) + len(
+            cfg.get("advanced_metrics", [])
+        )
     if module_key == "execution":
         cfg = data.get("execution_analytics", {}) or {}
         if not isinstance(cfg, dict):
             return None
-        return len(cfg.get("l3_execution", [])) + len(cfg.get("trade_breakdown", [])) + len(
-            cfg.get("derived_metrics", [])
+        return (
+            len(cfg.get("l3_execution", []))
+            + len(cfg.get("trade_breakdown", []))
+            + len(cfg.get("derived_metrics", []))
         )
     if module_key == "iceberg":
         cfg = data.get("iceberg_analytics", {}) or {}
@@ -1305,7 +1397,9 @@ def _format_output_driver(output_target: Any, config_data: dict) -> str:
         table = target.get("sql_table", "unknown_table")
         conn = target.get("sql_connection", "unknown_connection")
         return f"sql {table} @ {conn}"
-    template = target.get("path_template") or config_data.get("FINAL_OUTPUT_PATH_TEMPLATE", "")
+    template = target.get("path_template") or config_data.get(
+        "FINAL_OUTPUT_PATH_TEMPLATE", ""
+    )
     return f"{output_type} {template}".strip()
 
 

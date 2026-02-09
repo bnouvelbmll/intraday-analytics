@@ -2,7 +2,11 @@ import unittest
 import datetime as dt
 import polars as pl
 
-from intraday_analytics.analytics.l2 import L2AnalyticsLast, L2AnalyticsConfig, L2OHLCConfig
+from intraday_analytics.analytics.l2 import (
+    L2AnalyticsLast,
+    L2AnalyticsConfig,
+    L2OHLCConfig,
+)
 
 
 class TestL2Ohlc(unittest.TestCase):
@@ -51,8 +55,12 @@ class TestL2Ohlc(unittest.TestCase):
         row1 = result.filter(pl.col("TimeBucket") == bucket1).row(0)
         col_index = {c: i for i, c in enumerate(result.columns)}
         self.assertAlmostEqual(row1[col_index["WeightedMidOpen"]], wm1, places=6)
-        self.assertAlmostEqual(row1[col_index["WeightedMidHigh"]], max(wm1, wm2), places=6)
-        self.assertAlmostEqual(row1[col_index["WeightedMidLow"]], min(wm1, wm2), places=6)
+        self.assertAlmostEqual(
+            row1[col_index["WeightedMidHigh"]], max(wm1, wm2), places=6
+        )
+        self.assertAlmostEqual(
+            row1[col_index["WeightedMidLow"]], min(wm1, wm2), places=6
+        )
         self.assertAlmostEqual(row1[col_index["WeightedMidClose"]], wm2, places=6)
 
         # Bucket3 single row
@@ -81,10 +89,18 @@ class TestL2Ohlc(unittest.TestCase):
 
         row2 = result.filter(pl.col("TimeBucket") == bucket2).row(0)
         col_index = {c: i for i, c in enumerate(result.columns)}
-        self.assertAlmostEqual(row2[col_index["MidOpen"]], expected_close_bucket1, places=6)
-        self.assertAlmostEqual(row2[col_index["MidHigh"]], expected_close_bucket1, places=6)
-        self.assertAlmostEqual(row2[col_index["MidLow"]], expected_close_bucket1, places=6)
-        self.assertAlmostEqual(row2[col_index["MidClose"]], expected_close_bucket1, places=6)
+        self.assertAlmostEqual(
+            row2[col_index["MidOpen"]], expected_close_bucket1, places=6
+        )
+        self.assertAlmostEqual(
+            row2[col_index["MidHigh"]], expected_close_bucket1, places=6
+        )
+        self.assertAlmostEqual(
+            row2[col_index["MidLow"]], expected_close_bucket1, places=6
+        )
+        self.assertAlmostEqual(
+            row2[col_index["MidClose"]], expected_close_bucket1, places=6
+        )
 
     def test_metric_prefix_applies_to_ohlc(self):
         df, _, _, _ = self._base_df()

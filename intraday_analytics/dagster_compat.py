@@ -64,8 +64,7 @@ class MICUniverse:
         return (
             bmll.reference.available_markets()
             .query("Schema=='Equity'")
-            .query("IsAlive")
-            ["MIC"]
+            .query("IsAlive")["MIC"]
             .tolist()
         )
 
@@ -172,7 +171,11 @@ def _intersect_universe_frames(frames: Sequence) -> object:
     for frame in frames[1:]:
         if not isinstance(result, pl.DataFrame) or not isinstance(frame, pl.DataFrame):
             continue
-        keys = [c for c in ("ListingId", "MIC") if c in result.columns and c in frame.columns]
+        keys = [
+            c
+            for c in ("ListingId", "MIC")
+            if c in result.columns and c in frame.columns
+        ]
         if not keys:
             keys = [c for c in result.columns if c in frame.columns]
         if not keys:
@@ -291,8 +294,8 @@ def build_partition_runs(
     return [PartitionRun(u, d) for u in universes for d in dates]
 
 
-def build_demo_assets(
-    demo_pkg: str = "demo",
+def build_assets(
+    pkg: str = "demo",
     partitions_def=None,
     universe_dim: str = "universe",
     date_dim: str = "date",
@@ -300,27 +303,31 @@ def build_demo_assets(
     input_asset_keys: Sequence | None = None,
 ):
     """
-    Discover demo modules and return Dagster assets for each demo.
+    Discover modules and return Dagster assets for each module.
     """
     try:
         import importlib
         import pkgutil
         from dagster import asset
     except Exception as exc:
-        raise ImportError("Dagster is required to build demo assets.") from exc
+        raise ImportError("Dagster is required to build datasets.") from exc
 
-    demos = _discover_demo_modules(demo_pkg)
+    pipelines = _discover_modules(pkg)
 
     assets = []
-    for module in demos:
+    for module in pipelines:
         name = module.__name__.split(".")[-1]
-        asset_base = f"demo{name}" if name[0].isdigit() else name
+        asset_base = f"{pkg}{name}" if name[0].isdigit() else name
         package_root = module.__name__.split(".")[0]
         precedence = getattr(module, "CONFIG_YAML_PRECEDENCE", "yaml_overrides")
         base_config = resolve_user_config(
             module.USER_CONFIG, getattr(module, "__file__", None), precedence
         )
-        config_model = AnalyticsConfig(**base_config) if isinstance(base_config, dict) else AnalyticsConfig()
+        config_model = (
+            AnalyticsConfig(**base_config)
+            if isinstance(base_config, dict)
+            else AnalyticsConfig()
+        )
         auto_kwargs = _auto_materialize_kwargs(config_model)
         output_target = config_model.OUTPUT_TARGET
         io_manager_key = getattr(output_target, "io_manager_key", None)
@@ -330,7 +337,7 @@ def build_demo_assets(
         universes = getattr(module, "UNIVERSES", None) or default_universes()
         default_universe_spec = _first_universe_spec(universes) or "default"
 
-        def _make_demo_asset(
+        def _make_asset(
             module, asset_name, asset_group, config_override, deps, key_prefix
         ):
             @asset(
@@ -342,7 +349,7 @@ def build_demo_assets(
                 io_manager_key=io_manager_key,
                 **auto_kwargs,
             )
-            def _demo_asset(context=None):
+            def _new_asset(context=None):
                 base_config = config_override
                 default_get_universe = module.get_universe
                 get_pipeline = getattr(module, "get_pipeline", None)
@@ -382,7 +389,9 @@ def build_demo_assets(
                     except Exception:
                         return None
                     if split_passes and passes:
-                        pass_names = [p.get("name", "pass") for p in base_config.get("PASSES", [])]
+                        pass_names = [
+                            p.get("name", "pass") for p in base_config.get("PASSES", [])
+                        ]
                         outputs = {}
                         for name in pass_names:
                             outputs[name] = get_final_output_path(
@@ -401,7 +410,7 @@ def build_demo_assets(
                         output_target,
                     )
 
-            return _demo_asset
+            return _new_asset
 
         if split_passes and passes:
             for pass_config in passes:
@@ -412,7 +421,7 @@ def build_demo_assets(
                 if last_pass_key is not None:
                     deps.append(last_pass_key)
                 assets.append(
-                    _make_demo_asset(
+                    _make_asset(
                         module,
                         asset_name,
                         asset_base,
@@ -425,7 +434,7 @@ def build_demo_assets(
         else:
             deps = list(input_asset_keys or [])
             assets.append(
-                _make_demo_asset(
+                _make_asset(
                     module,
                     asset_base,
                     asset_base,
@@ -455,6 +464,7 @@ def _auto_materialize_kwargs(config: AnalyticsConfig) -> dict:
     except Exception:
         try:
             from dagster import AutoMaterializePolicy
+
             if config.AUTO_MATERIALIZE_LATEST_DAYS:
                 return {
                     "auto_materialize_policy": AutoMaterializePolicy.eager(
@@ -474,7 +484,9 @@ def _first_universe_spec(universes: Sequence) -> Optional[str]:
     return None
 
 
-def _resolve_schedule_date(value: Optional[str], context, timezone: str) -> Optional[str]:
+def _resolve_schedule_date(
+    value: Optional[str], context, timezone: str
+) -> Optional[str]:
     if value and value not in {"today", "yesterday"}:
         return value
 
@@ -521,32 +533,42 @@ def _schedule_partitions(
     return resolved
 
 
-def build_demo_schedules(
-    demo_pkg: str = "demo",
+def build_schedules(
+    pkg: str = "demo",
     partitions_def=None,
     universe_dim: str = "universe",
     date_dim: str = "date",
     split_passes: bool = False,
 ):
     """
-    Build Dagster schedules for demo assets based on AnalyticsConfig.SCHEDULES.
+    Build Dagster schedules for assets based on AnalyticsConfig.SCHEDULES.
     """
     try:
-        from dagster import AssetSelection, MultiPartitionKey, RunRequest, define_asset_job, schedule
+        from dagster import (
+            AssetSelection,
+            MultiPartitionKey,
+            RunRequest,
+            define_asset_job,
+            schedule,
+        )
     except Exception as exc:
         raise ImportError("Dagster is required to build schedules.") from exc
 
-    demos = _discover_demo_modules(demo_pkg)
+    pipelines = _discover_modules(pkg)
     schedules = []
 
-    for module in demos:
+    for module in pipelines:
         name = module.__name__.split(".")[-1]
-        asset_base = f"demo{name}" if name[0].isdigit() else name
+        asset_base = f"{pkg}{name}" if name[0].isdigit() else name
         precedence = getattr(module, "CONFIG_YAML_PRECEDENCE", "yaml_overrides")
         base_config = resolve_user_config(
             module.USER_CONFIG, getattr(module, "__file__", None), precedence
         )
-        config_model = AnalyticsConfig(**base_config) if isinstance(base_config, dict) else AnalyticsConfig()
+        config_model = (
+            AnalyticsConfig(**base_config)
+            if isinstance(base_config, dict)
+            else AnalyticsConfig()
+        )
         if not config_model.SCHEDULES:
             continue
 
@@ -585,7 +607,9 @@ def build_demo_schedules(
                 _name=schedule_name,
             ):
                 for spec in _specs:
-                    date_value = _resolve_schedule_date(spec.get(date_dim), context, _timezone)
+                    date_value = _resolve_schedule_date(
+                        spec.get(date_dim), context, _timezone
+                    )
                     universe_value = spec.get(universe_dim)
                     if universe_value is None or date_value is None:
                         continue
@@ -601,30 +625,30 @@ def build_demo_schedules(
     return schedules
 
 
-def build_demo_materialization_checks(
-    demo_pkg: str = "demo",
+def build_materialization_checks(
+    pkg: str = "demo",
     universe_dim: str = "universe",
     date_dim: str = "date",
     check_mode: str = "head",
     split_passes: bool = False,
 ):
     """
-    Create Dagster asset checks that validate demo materializations by checking
+    Create Dagster asset checks that validate materializations by checking
     for output files in S3.
     """
     try:
         from dagster import AssetCheckResult, AssetKey, asset_check
     except Exception as exc:
-        raise ImportError("Dagster is required to build demo asset checks.") from exc
+        raise ImportError("Dagster is required to build  asset checks.") from exc
 
     from intraday_analytics.process import get_final_s3_path
 
-    demos = _discover_demo_modules(demo_pkg)
+    modules = _discover_modules(pkg)
     checks = []
 
-    for module in demos:
+    for module in modules:
         name = module.__name__.split(".")[-1]
-        asset_base = f"demo{name}" if name[0].isdigit() else name
+        asset_base = f"{pkg}{name}" if name[0].isdigit() else name
         package_root = module.__name__.split(".")[0]
         base_config = module.USER_CONFIG
         passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
@@ -690,7 +714,9 @@ def build_demo_materialization_checks(
             for pass_config in passes:
                 pass_name = _sanitize_name(pass_config.get("name", "pass"))
                 asset_key = AssetKey([package_root, asset_base, pass_name])
-                checks.append(_make_materialized_check(base_config, asset_key, pass_name))
+                checks.append(
+                    _make_materialized_check(base_config, asset_key, pass_name)
+                )
         else:
             checks.append(
                 _make_materialized_check(
@@ -721,6 +747,7 @@ def build_input_source_assets(
     """
     try:
         from dagster import AssetKey, MultiPartitionsDefinition, SourceAsset
+
         try:
             from dagster import AssetSpec
         except Exception:
@@ -847,7 +874,9 @@ def build_s3_input_asset_checks(
                 if not date_key or "_" in date_key:
                     return AssetCheckResult(
                         passed=False,
-                        metadata={"reason": "input assets must use single-day partitions"},
+                        metadata={
+                            "reason": "input assets must use single-day partitions"
+                        },
                     )
 
                 y, m, d = (int(part) for part in date_key.split("-"))
@@ -864,7 +893,9 @@ def build_s3_input_asset_checks(
                         )
                     s3_paths = table.get_s3_paths([mic], y, m, d)
 
-                exists = all(_s3_path_exists(p, check_mode=check_mode) for p in s3_paths)
+                exists = all(
+                    _s3_path_exists(p, check_mode=check_mode) for p in s3_paths
+                )
                 logging.info(
                     "s3_exists partitioned asset=%s exists=%s paths=%s",
                     asset.key,
@@ -926,11 +957,17 @@ def build_s3_input_observation_sensor(
             or (dt.date.today() - dt.timedelta(days=1)).isoformat()
         )
         mic_env = os.getenv("S3_SENSOR_MICS", "")
-        mic_list = list(mics) if mics is not None else [m for m in mic_env.split(",") if m]
+        mic_list = (
+            list(mics) if mics is not None else [m for m in mic_env.split(",") if m]
+        )
 
         emit_all = os.getenv("S3_SENSOR_EMIT_ALL", "0") in {"1", "true", "True"}
         max_events = int(os.getenv("S3_SENSOR_MAX_OBSERVATIONS", "1000"))
-        force_refresh = os.getenv("S3_SENSOR_FORCE_REFRESH", "0") in {"1", "true", "True"}
+        force_refresh = os.getenv("S3_SENSOR_FORCE_REFRESH", "0") in {
+            "1",
+            "true",
+            "True",
+        }
 
         events = []
         logging.info(
@@ -962,7 +999,9 @@ def build_s3_input_observation_sensor(
                         continue
                     part_mic, part_date = parsed
                     if asset.metadata.get("partitioning") == "cbbo_date":
-                        pk = MultiPartitionKey({date_dim: part_date, cbbo_dim: part_mic})
+                        pk = MultiPartitionKey(
+                            {date_dim: part_date, cbbo_dim: part_mic}
+                        )
                     else:
                         pk = MultiPartitionKey({date_dim: part_date, mic_dim: part_mic})
                     events.append(
@@ -985,7 +1024,9 @@ def build_s3_input_observation_sensor(
 
             if asset.metadata.get("partitioning") == "cbbo_date":
                 cbbo_value = os.getenv("S3_SENSOR_CBBO", "cbbo")
-                partition_key = MultiPartitionKey({date_dim: date_key, cbbo_dim: cbbo_value})
+                partition_key = MultiPartitionKey(
+                    {date_dim: date_key, cbbo_dim: cbbo_value}
+                )
                 y, m, d = (int(part) for part in date_key.split("-"))
                 s3_paths = table.get_s3_paths([cbbo_value], y, m, d)
                 if all(_s3_path_exists(p, check_mode=check_mode) for p in s3_paths):
@@ -1042,7 +1083,13 @@ def build_s3_input_sync_job(
     Intended for fast initial sync without relying on the sensor.
     """
     try:
-        from dagster import AssetMaterialization, AssetObservation, MultiPartitionKey, job, op
+        from dagster import (
+            AssetMaterialization,
+            AssetObservation,
+            MultiPartitionKey,
+            job,
+            op,
+        )
     except Exception as exc:
         raise ImportError("Dagster is required to build sync jobs.") from exc
 
@@ -1185,7 +1232,9 @@ def build_s3_input_sync_asset(
 
             root = repo_root or os.getenv("BMLL_REPO_ROOT")
             if not root:
-                raise RuntimeError("Missing repo_root for db bulk sync (set BMLL_REPO_ROOT).")
+                raise RuntimeError(
+                    "Missing repo_root for db bulk sync (set BMLL_REPO_ROOT)."
+                )
             script_path = os.path.join(root, "scripts", "s3_bulk_sync_db.py")
             if not os.path.exists(script_path):
                 raise RuntimeError(f"Bulk sync script not found: {script_path}")
@@ -1328,18 +1377,18 @@ def run_partition(
         on_result(partition, config)
 
 
-def _discover_demo_modules(demo_pkg: str):
+def _discover_modules(pkg: str):
     import importlib
     import pkgutil
 
-    demos = []
-    pkg = importlib.import_module(demo_pkg)
+    modules = []
+    pkg = importlib.import_module(pkg)
     for mod in pkgutil.iter_modules(pkg.__path__, pkg.__name__ + "."):
         module = importlib.import_module(mod.name)
         if not hasattr(module, "USER_CONFIG") or not hasattr(module, "get_universe"):
             continue
-        demos.append(module)
-    return demos
+        modules.append(module)
+    return modules
 
 
 _S3_LIST_CACHE: dict[str, dict[str, dict]] = {}
@@ -1388,7 +1437,9 @@ def _s3_path_in_recursive_listing(path: str) -> bool:
     return path in _S3_LIST_CACHE[prefix]
 
 
-def _s3_list_all_objects(prefix: str, *, force_refresh: bool = False) -> dict[str, dict]:
+def _s3_list_all_objects(
+    prefix: str, *, force_refresh: bool = False
+) -> dict[str, dict]:
     try:
         import boto3
     except Exception:
@@ -1416,9 +1467,11 @@ def _s3_list_all_objects(prefix: str, *, force_refresh: bool = False) -> dict[st
             path = f"s3://{bucket}/{item['Key']}"
             objects[path] = {
                 "size_bytes": item.get("Size"),
-                "last_modified": item.get("LastModified").isoformat()
-                if item.get("LastModified")
-                else None,
+                "last_modified": (
+                    item.get("LastModified").isoformat()
+                    if item.get("LastModified")
+                    else None
+                ),
             }
     _s3_cache_store(prefix, objects)
     logging.info(
@@ -1577,7 +1630,11 @@ def _safe_partition_keys(context) -> dict | None:
 
 
 def _full_check_on_unpartitioned() -> bool:
-    return os.getenv("S3_CHECK_FULL_ON_UNPARTITIONED", "1") not in {"0", "false", "False"}
+    return os.getenv("S3_CHECK_FULL_ON_UNPARTITIONED", "1") not in {
+        "0",
+        "false",
+        "False",
+    }
 
 
 def _s3_table_root_prefix(table) -> str | None:

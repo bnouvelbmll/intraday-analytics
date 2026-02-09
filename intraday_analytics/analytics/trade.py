@@ -68,7 +68,8 @@ class TradeGenericConfig(CombinatorialMetricConfig):
     )
 
     measures: Union[TradeGenericMeasure, List[TradeGenericMeasure]] = Field(
-        ..., description="The trade attribute to aggregate.",
+        ...,
+        description="The trade attribute to aggregate.",
         json_schema_extra={
             "long_doc": "Selects which trade attributes to aggregate.\n"
             "Examples: Volume, VWAP, Count, Notional, NotionalEUR.\n"
@@ -106,7 +107,8 @@ class TradeDiscrepancyConfig(CombinatorialMetricConfig):
     metric_type: Literal["Trade_Discrepancy"] = "Trade_Discrepancy"
 
     references: Union[DiscrepancyReference, List[DiscrepancyReference]] = Field(
-        ..., description="Reference price to compare against.",
+        ...,
+        description="Reference price to compare against.",
         json_schema_extra={
             "long_doc": "Selects reference prices for discrepancy metrics.\n"
             "Examples: PreTradeMid, BestBid, BestAskAtPrimary.\n"
@@ -170,7 +172,8 @@ class TradeFlagConfig(CombinatorialMetricConfig):
     metric_type: Literal["Trade_Flag"] = "Trade_Flag"
 
     flags: Union[TradeFlagType, List[TradeFlagType]] = Field(
-        ..., description="Trade flag to filter by.",
+        ...,
+        description="Trade flag to filter by.",
         json_schema_extra={
             "long_doc": "Selects trade flags to filter trades.\n"
             "Examples: NegotiatedTrade, BlockTrade, IcebergExecution.\n"
@@ -201,7 +204,8 @@ class TradeFlagConfig(CombinatorialMetricConfig):
     )
 
     measures: Union[TradeFlagMeasure, List[TradeFlagMeasure]] = Field(
-        ..., description="Measure to compute for the flagged trades.",
+        ...,
+        description="Measure to compute for the flagged trades.",
         json_schema_extra={
             "long_doc": "Selects measures for flagged trades.\n"
             "Options: Volume, Count, AvgNotional.\n"
@@ -234,7 +238,8 @@ class TradeChangeConfig(CombinatorialMetricConfig):
     metric_type: Literal["Trade_Change"] = "Trade_Change"
 
     measures: Union[ImpactMeasure, List[ImpactMeasure]] = Field(
-        ..., description="Base measure name.",
+        ...,
+        description="Base measure name.",
         json_schema_extra={
             "long_doc": "Selects base measures for change metrics.\n"
             "Options include PreTradeElapsedTimeChg, PostTradeElapsedTimeChg, PricePoint.\n"
@@ -337,6 +342,7 @@ class RetailImbalanceConfig(BaseModel):
 
     Computes imbalance of retail flows using retail participant labels.
     """
+
     ENABLED: bool = Field(
         True,
         description="Enable retail imbalance analytics.",
@@ -366,6 +372,7 @@ class TradeAnalyticsConfig(BaseModel):
     Many metrics require specific trade fields (e.g., notional, reference
     prices), so configuration should match the available input schema.
     """
+
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(
         None,
@@ -602,7 +609,8 @@ class TradeGenericAnalytic(AnalyticSpec):
     @analytic_expression("RetailCount")
     def _expression_retail_count(self, cond):
         return self._filtered_zero(
-            cond, pl.when(pl.col("BMLLParticipantType") == "RETAIL").then(1).otherwise(0)
+            cond,
+            pl.when(pl.col("BMLLParticipantType") == "RETAIL").then(1).otherwise(0),
         ).sum()
 
     @analytic_expression("BlockCount")
@@ -732,7 +740,10 @@ class TradeDiscrepancyAnalytic(AnalyticSpec):
     ConfigModel = TradeDiscrepancyConfig
 
     def expressions(
-        self, ctx: AnalyticContext, config: TradeDiscrepancyConfig, variant: Dict[str, Any]
+        self,
+        ctx: AnalyticContext,
+        config: TradeDiscrepancyConfig,
+        variant: Dict[str, Any],
     ) -> List[pl.Expr]:
         ref_name = variant["references"]
         side = variant["sides"]
@@ -1118,7 +1129,7 @@ class TradeAnalytics(BaseAnalytics):
             cache={"metric_prefix": self.metric_prefix},
             context=self.context,
         )
-        
+
         analytic_specs = [
             (TradeGenericAnalytic(), self.config.generic_metrics),
             (TradeDiscrepancyAnalytic(), self.config.discrepancy_metrics),

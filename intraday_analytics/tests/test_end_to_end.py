@@ -97,7 +97,7 @@ class TestEndToEnd(unittest.TestCase):
                 "PricePoint": [0.5],
                 "BMLLParticipantType": ["RETAIL"],
                 "AggressorSide": [1],
-                "TradeNotional": [1000.0],                
+                "TradeNotional": [1000.0],
                 "TradeNotionalEUR": [1000.0],
             }
         ).write_parquet(self.trades_file)
@@ -120,7 +120,9 @@ class TestEndToEnd(unittest.TestCase):
     @patch(
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
-    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
+    @patch(
+        "intraday_analytics.execution.as_completed", side_effect=lambda futures: futures
+    )
     @patch("intraday_analytics.execution.get_files_for_date_range")
     @patch("intraday_analytics.execution.ProcessPoolExecutor")
     def test_run_pipeline(

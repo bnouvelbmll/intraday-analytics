@@ -3,6 +3,7 @@ from unittest import mock
 
 try:
     from dagster import MultiPartitionKey, StaticPartitionsDefinition
+
     DAGSTER_AVAILABLE = True
 except Exception:
     DAGSTER_AVAILABLE = False
@@ -33,7 +34,9 @@ class TestDagsterCompatInputAssets(unittest.TestCase):
 
         self.assertEqual(len(assets), 4)
         for asset in assets:
-            self.assertEqual(asset.partitions_def.partition_dimension_names, ["date", "mic"])
+            self.assertEqual(
+                asset.partitions_def.partition_dimension_names, ["date", "mic"]
+            )
             partitioning = asset.metadata.get("partitioning")
             if hasattr(partitioning, "value"):
                 partitioning = partitioning.value
@@ -57,7 +60,9 @@ class TestDagsterCompatInputAssets(unittest.TestCase):
 
             def get_s3_paths(self, mics, year, month, day):
                 self.calls.append((mics, year, month, day))
-                return [f"s3://bucket/{self.name}/{mics[0]}/{year}{month:02d}{day:02d}.parquet"]
+                return [
+                    f"s3://bucket/{self.name}/{mics[0]}/{year}{month:02d}{day:02d}.parquet"
+                ]
 
         dummy_tables = {asset.key: DummyTable(asset.key.path[-1]) for asset in assets}
         table_map = dummy_tables
@@ -73,7 +78,9 @@ class TestDagsterCompatInputAssets(unittest.TestCase):
         ctx = type("Ctx", (), {})()
         ctx.partition_key = MultiPartitionKey({"date": "2025-01-02", "mic": "XLON"})
 
-        with mock.patch("intraday_analytics.dagster_compat._s3_path_exists", return_value=True):
+        with mock.patch(
+            "intraday_analytics.dagster_compat._s3_path_exists", return_value=True
+        ):
             for check_def in checks:
                 result = check_def.node_def.compute_fn.decorated_fn(ctx)
                 self.assertTrue(result.passed)

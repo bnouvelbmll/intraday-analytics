@@ -70,10 +70,16 @@ def _event_to_row(
         return None
     mat = event.dagster_event.step_materialization_data.materialization
     partition = mat.partition
-    parts = _parse_partition_key(partition, date_dim=date_dim, universe_dim=universe_dim)
+    parts = _parse_partition_key(
+        partition, date_dim=date_dim, universe_dim=universe_dim
+    )
     date_value = _coerce_date(parts.get(date_dim))
     universe_value = parts.get(universe_dim)
-    metadata_value = _metadata_value_to_python(mat.metadata.get(metric_key)) if mat.metadata else None
+    metadata_value = (
+        _metadata_value_to_python(mat.metadata.get(metric_key))
+        if mat.metadata
+        else None
+    )
     return {
         "asset_key": mat.asset_key.to_string(),
         "partition": partition,
@@ -112,11 +118,17 @@ def load_materialization_frame(
                 == DagsterEventType.ASSET_MATERIALIZATION.value
             )
             if asset_key_strs:
-                query = query.where(SqlEventLogStorageTable.c.asset_key.in_(asset_key_strs))
+                query = query.where(
+                    SqlEventLogStorageTable.c.asset_key.in_(asset_key_strs)
+                )
             if after_timestamp:
-                query = query.where(SqlEventLogStorageTable.c.timestamp >= after_timestamp)
+                query = query.where(
+                    SqlEventLogStorageTable.c.timestamp >= after_timestamp
+                )
             if before_timestamp:
-                query = query.where(SqlEventLogStorageTable.c.timestamp <= before_timestamp)
+                query = query.where(
+                    SqlEventLogStorageTable.c.timestamp <= before_timestamp
+                )
             if limit:
                 query = query.limit(limit)
             result = conn.execute(query).fetchall()
@@ -161,6 +173,7 @@ def load_materialization_frame(
             now = pd.Timestamp.utcnow()
             # prefer metadata last_modified if available
             if "metadata" in df.columns:
+
                 def _to_dt(val):
                     if val is None:
                         return None
@@ -170,7 +183,14 @@ def load_materialization_frame(
                         return pd.to_datetime(val, utc=True)
                     except Exception:
                         return None
-                lm = df["metadata"].apply(lambda m: _metadata_value_to_python(m.get("last_modified")) if isinstance(m, dict) else None)
+
+                lm = df["metadata"].apply(
+                    lambda m: (
+                        _metadata_value_to_python(m.get("last_modified"))
+                        if isinstance(m, dict)
+                        else None
+                    )
+                )
                 lm = lm.apply(_to_dt)
             else:
                 lm = pd.Series([None] * len(df))
@@ -261,11 +281,7 @@ def calendar_heatmap(
     tmp["date"] = pd.to_datetime(tmp["date"])
     tmp["week_start"] = tmp["date"] - pd.to_timedelta(tmp["date"].dt.weekday, unit="D")
     tmp["dow"] = tmp["date"].dt.weekday
-    grid = (
-        tmp.groupby(["week_start", "dow"])[value_col]
-        .sum()
-        .reset_index()
-    )
+    grid = tmp.groupby(["week_start", "dow"])[value_col].sum().reset_index()
     pivot = grid.pivot(index="dow", columns="week_start", values=value_col)
     fig = px.imshow(
         pivot,
@@ -327,34 +343,36 @@ def build_plots(
     metric_unit: Optional[str] = None,
 ) -> dict[str, go.Figure]:
     if df.empty:
-        return {"calendar_count": go.Figure(), "calendar_size": go.Figure(), "heatmap": go.Figure()}
+        return {
+            "calendar_count": go.Figure(),
+            "calendar_size": go.Figure(),
+            "heatmap": go.Figure(),
+        }
 
     latest = (
         df.sort_values("timestamp")
         .groupby(["universe", "date"], as_index=False)
         .tail(1)
     )
-    count_df = (
-        latest.groupby("date")["universe"]
-        .nunique()
-        .reset_index(name="count")
-    )
-    size_df = (
-        latest.groupby("date")["metric"]
-        .sum()
-        .reset_index(name="total")
-    )
+    count_df = latest.groupby("date")["universe"].nunique().reset_index(name="count")
+    size_df = latest.groupby("date")["metric"].sum().reset_index(name="total")
 
     return {
         "calendar_count": calendar_heatmap(
             count_df, value_col="count", title="Universe count by date"
         ),
         "calendar_size": calendar_heatmap(
-            size_df, value_col="total", title=f"Total {metric_label} by date", unit=metric_unit
+            size_df,
+            value_col="total",
+            title=f"Total {metric_label} by date",
+            unit=metric_unit,
         ),
         "heatmap": universe_heatmap(
-            latest, value_col="metric", title=f"{metric_label} by universe/date",
-            exclude_unpopulated=exclude_unpopulated, unit=metric_unit
+            latest,
+            value_col="metric",
+            title=f"{metric_label} by universe/date",
+            exclude_unpopulated=exclude_unpopulated,
+            unit=metric_unit,
         ),
     }
 
@@ -413,8 +431,13 @@ def materialization_dashboard(
                 metric_label_local = "size_gb"
             else:
                 metric_label_local = metric_label
-        elif metric_key_value in {"age_in_days", "age_days"} and inferred_unit == "log2_days":
-            df["metric"] = df["metric"].apply(lambda v: math.log2(1 + v) if pd.notna(v) else v)
+        elif (
+            metric_key_value in {"age_in_days", "age_days"}
+            and inferred_unit == "log2_days"
+        ):
+            df["metric"] = df["metric"].apply(
+                lambda v: math.log2(1 + v) if pd.notna(v) else v
+            )
             metric_label_local = "log2_days"
         else:
             metric_label_local = metric_label
@@ -441,7 +464,12 @@ def materialization_dashboard(
         description="Metric",
     )
     unit_dropdown = widgets.Dropdown(
-        options=[("auto", "auto"), ("GB", "GB"), ("days", "days"), ("log2_days", "log2_days")],
+        options=[
+            ("auto", "auto"),
+            ("GB", "GB"),
+            ("days", "days"),
+            ("log2_days", "log2_days"),
+        ],
         value=metric_unit or "auto",
         description="Unit",
     )
@@ -457,9 +485,7 @@ def materialization_dashboard(
     exclude_checkbox = widgets.Checkbox(
         value=exclude_unpopulated, description="Exclude unpopulated"
     )
-    use_db_checkbox = widgets.Checkbox(
-        value=use_db_direct, description="DB direct"
-    )
+    use_db_checkbox = widgets.Checkbox(value=use_db_direct, description="DB direct")
     after_days = widgets.IntText(value=90, description="Lookback days")
     apply_btn = widgets.Button(description="Apply")
 
@@ -516,7 +542,12 @@ def materialization_dashboard_interactive(
         description="Metric",
     )
     unit_dropdown = widgets.Dropdown(
-        options=[("auto", "auto"), ("GB", "GB"), ("days", "days"), ("log2_days", "log2_days")],
+        options=[
+            ("auto", "auto"),
+            ("GB", "GB"),
+            ("days", "days"),
+            ("log2_days", "log2_days"),
+        ],
         value=metric_unit or "auto",
         description="Unit",
     )
@@ -532,9 +563,7 @@ def materialization_dashboard_interactive(
     exclude_checkbox = widgets.Checkbox(
         value=exclude_unpopulated, description="Exclude unpopulated"
     )
-    use_db_checkbox = widgets.Checkbox(
-        value=use_db_direct, description="DB direct"
-    )
+    use_db_checkbox = widgets.Checkbox(value=use_db_direct, description="DB direct")
     start_picker = widgets.DatePicker(description="Start")
     end_picker = widgets.DatePicker(description="End")
     lookback_days = widgets.IntText(value=90, description="Lookback days")
@@ -590,8 +619,13 @@ def materialization_dashboard_interactive(
             if inferred_unit == "GB":
                 df["metric"] = df["metric"] / (1024**3)
                 metric_label_local = "size_gb"
-        elif metric_key_value in {"age_in_days", "age_days"} and inferred_unit == "log2_days":
-            df["metric"] = df["metric"].apply(lambda v: math.log2(1 + v) if pd.notna(v) else v)
+        elif (
+            metric_key_value in {"age_in_days", "age_days"}
+            and inferred_unit == "log2_days"
+        ):
+            df["metric"] = df["metric"].apply(
+                lambda v: math.log2(1 + v) if pd.notna(v) else v
+            )
             metric_label_local = "log2_days"
 
         figs = build_plots(
@@ -613,7 +647,9 @@ def materialization_dashboard_interactive(
 
     controls = widgets.VBox(
         [
-            widgets.HBox([dataset_dropdown, metric_dropdown, unit_dropdown, plot_dropdown]),
+            widgets.HBox(
+                [dataset_dropdown, metric_dropdown, unit_dropdown, plot_dropdown]
+            ),
             widgets.HBox([start_picker, end_picker, lookback_days]),
             widgets.HBox([exclude_checkbox, use_db_checkbox, apply_btn]),
         ]

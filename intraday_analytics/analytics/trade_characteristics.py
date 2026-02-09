@@ -54,12 +54,18 @@ class TradeCharacteristicsAnalytics(BaseAnalytics):
                 )
                 schema = trades.collect_schema()
             else:
-                logger.warning("Trade characteristics skipped: TimeBucket not available.")
+                logger.warning(
+                    "Trade characteristics skipped: TimeBucket not available."
+                )
                 return pl.DataFrame(
                     schema={"ListingId": pl.Int64, "TimeBucket": pl.Datetime("ns")}
                 ).lazy()
 
-        gcols = [c for c in ["MIC", "ListingId", "Ticker", "TimeBucket"] if c in schema.names()]
+        gcols = [
+            c
+            for c in ["MIC", "ListingId", "Ticker", "TimeBucket"]
+            if c in schema.names()
+        ]
 
         expressions: List[pl.Expr] = [
             pl.len().alias(self.apply_prefix("TradeEventCount"))
@@ -73,14 +79,18 @@ class TradeCharacteristicsAnalytics(BaseAnalytics):
                 (pl.col("Size") == 0).any().alias(self.apply_prefix("TradeHasZeroSize"))
             )
             expressions.append(
-                (pl.col("Size") < 0).any().alias(self.apply_prefix("TradeHasCancellations"))
+                (pl.col("Size") < 0)
+                .any()
+                .alias(self.apply_prefix("TradeHasCancellations"))
             )
 
         if "AggressorSide" in schema.names():
             if schema["AggressorSide"] == pl.String:
                 unknown = pl.col("AggressorSide") == "UNKNOWN"
             else:
-                unknown = pl.col("AggressorSide").is_null() | (pl.col("AggressorSide") == 0)
+                unknown = pl.col("AggressorSide").is_null() | (
+                    pl.col("AggressorSide") == 0
+                )
             expressions.append(
                 unknown.any().alias(self.apply_prefix("TradeHasUnknownAggressorSide"))
             )
@@ -110,10 +120,15 @@ class TradeCharacteristicsAnalytics(BaseAnalytics):
                 .alias(self.apply_prefix("TradeHasLitTrades"))
             )
 
-        if "PublicationTimestamp" in schema.names() and "TradeTimestamp" in schema.names():
+        if (
+            "PublicationTimestamp" in schema.names()
+            and "TradeTimestamp" in schema.names()
+        ):
             eq_pub = pl.col("PublicationTimestamp") == pl.col("TradeTimestamp")
             expressions.append(
-                eq_pub.mean().alias(self.apply_prefix("TradePubEqualsTradeTimestampRatio"))
+                eq_pub.mean().alias(
+                    self.apply_prefix("TradePubEqualsTradeTimestampRatio")
+                )
             )
             expressions.append(
                 (
@@ -126,8 +141,9 @@ class TradeCharacteristicsAnalytics(BaseAnalytics):
 
         if "ExecutionVenue" in schema.names():
             expressions.append(
-                (pl.col("ExecutionVenue").n_unique() > 1)
-                .alias(self.apply_prefix("TradeHasMultipleExecutionVenues"))
+                (pl.col("ExecutionVenue").n_unique() > 1).alias(
+                    self.apply_prefix("TradeHasMultipleExecutionVenues")
+                )
             )
 
         for col, name in [

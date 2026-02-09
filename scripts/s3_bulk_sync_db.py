@@ -285,30 +285,29 @@ def _update_asset_indexes(
                 insert_stmt = AssetKeyTable.insert().values(
                     asset_key=event.dagster_event.asset_key.to_string(), **values
                 )
-                
+
                 # Only update if the new event is more recent than what's in the DB
                 update_condition = (
-                    AssetKeyTable.c.asset_key == event.dagster_event.asset_key.to_string()
+                    AssetKeyTable.c.asset_key
+                    == event.dagster_event.asset_key.to_string()
                 )
-                
+
                 if "last_materialization_timestamp" in values:
                     new_ts = values["last_materialization_timestamp"]
                     update_condition = update_condition & or_(
                         AssetKeyTable.c.last_materialization_timestamp.is_(None),
-                        AssetKeyTable.c.last_materialization_timestamp < new_ts
+                        AssetKeyTable.c.last_materialization_timestamp < new_ts,
                     )
-                
+
                 if "last_observation_timestamp" in values:
                     new_ts = values["last_observation_timestamp"]
                     update_condition = update_condition & or_(
                         AssetKeyTable.c.last_observation_timestamp.is_(None),
-                        AssetKeyTable.c.last_observation_timestamp < new_ts
+                        AssetKeyTable.c.last_observation_timestamp < new_ts,
                     )
 
                 update_stmt = (
-                    AssetKeyTable.update()
-                    .values(**values)
-                    .where(update_condition)
+                    AssetKeyTable.update().values(**values).where(update_condition)
                 )
                 try:
                     conn.execute(insert_stmt)
@@ -433,7 +432,10 @@ def sync(
                 obs = AssetObservation(
                     asset_key=asset_key, partition=partition, metadata=metadata
                 )
-                if seed_with_api and DagsterEventType.ASSET_OBSERVATION.value not in seed_templates:
+                if (
+                    seed_with_api
+                    and DagsterEventType.ASSET_OBSERVATION.value not in seed_templates
+                ):
                     seed = _seed_with_api(
                         instance, storage, obs, target_run_id, target_job_name, ts
                     )
@@ -445,7 +447,9 @@ def sync(
                     if DagsterEventType.ASSET_OBSERVATION.value in seed_templates:
                         batch.append(
                             _build_event_from_seed(
-                                seed_templates[DagsterEventType.ASSET_OBSERVATION.value],
+                                seed_templates[
+                                    DagsterEventType.ASSET_OBSERVATION.value
+                                ],
                                 obs,
                                 ts,
                                 target_run_id,
@@ -453,20 +457,25 @@ def sync(
                             )
                         )
                     else:
-                        batch.append(_build_event(obs, ts, target_run_id, target_job_name))
+                        batch.append(
+                            _build_event(obs, ts, target_run_id, target_job_name)
+                        )
             if emit_materializations:
                 mat = AssetMaterialization(
                     asset_key=asset_key, partition=partition, metadata=metadata
                 )
                 if (
                     seed_with_api
-                    and DagsterEventType.ASSET_MATERIALIZATION.value not in seed_templates
+                    and DagsterEventType.ASSET_MATERIALIZATION.value
+                    not in seed_templates
                 ):
                     seed = _seed_with_api(
                         instance, storage, mat, target_run_id, target_job_name, ts
                     )
                     if seed:
-                        seed_templates[DagsterEventType.ASSET_MATERIALIZATION.value] = seed
+                        seed_templates[DagsterEventType.ASSET_MATERIALIZATION.value] = (
+                            seed
+                        )
                         total_emitted += 1
                         mat = None
                 if mat is not None:
@@ -483,7 +492,9 @@ def sync(
                             )
                         )
                     else:
-                        batch.append(_build_event(mat, ts, target_run_id, target_job_name))
+                        batch.append(
+                            _build_event(mat, ts, target_run_id, target_job_name)
+                        )
 
             if len(batch) >= batch_size:
                 event_ids = _insert_events(storage, batch, target_run_id)

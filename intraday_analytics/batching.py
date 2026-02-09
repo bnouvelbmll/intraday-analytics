@@ -111,7 +111,9 @@ class SymbolBatcherStreaming:
         citer = {name: next(liter[name]) for name, lf in self.lf_dict.items()}
         last_symbol_seen: Dict[str, str] = {name: "" for name in self.lf_dict.keys()}
 
-        def _check_sorted_by_symbol(name: str, df: pl.DataFrame, last_symbol: str) -> None:
+        def _check_sorted_by_symbol(
+            name: str, df: pl.DataFrame, last_symbol: str
+        ) -> None:
             if df.is_empty():
                 return
             if not df[SYMBOL_COL].is_sorted():
@@ -120,9 +122,7 @@ class SymbolBatcherStreaming:
                 )
             first_symbol = df[SYMBOL_COL][0]
             if last_symbol and first_symbol < last_symbol:
-                raise ValueError(
-                    f"{name} data is not globally sorted by {SYMBOL_COL}."
-                )
+                raise ValueError(f"{name} data is not globally sorted by {SYMBOL_COL}.")
 
         for name, df in citer.items():
             _check_sorted_by_symbol(name, df, last_symbol_seen[name])
@@ -292,11 +292,7 @@ class SymbolSizeEstimator:
                     ),
                     extra={"mic": mic},
                 )
-                res = (
-                    res.groupby("ObjectId")["TradeCount|Lit"]
-                    .median()
-                    .reset_index()
-                )
+                res = res.groupby("ObjectId")["TradeCount|Lit"].median().reset_index()
                 if not isinstance(res, pd.DataFrame):
                     return None
                 return res
@@ -539,6 +535,7 @@ def _process_s3_chunk(
             f"No readable files found for table {table_name} (worker {worker_id})."
         )
         return
+
     def _stream_and_write(lf_filtered: pl.LazyFrame) -> int:
         total_rows = 0
         pl_map = pl.from_arrow(batch_map_table)

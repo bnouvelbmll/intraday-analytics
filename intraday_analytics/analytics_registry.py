@@ -59,10 +59,8 @@ def build_module_registry(pass_config, ref) -> Dict[str, Callable[[], BaseAnalyt
         if entry.needs_ref:
             registry[name] = lambda entry=entry, cfg=cfg: entry.cls(ref, cfg)
         else:
-            registry[name] = (
-                lambda entry=entry, cfg=cfg: entry.cls(cfg)
-                if cfg is not None
-                else entry.cls()
+            registry[name] = lambda entry=entry, cfg=cfg: (
+                entry.cls(cfg) if cfg is not None else entry.cls()
             )
 
     return registry

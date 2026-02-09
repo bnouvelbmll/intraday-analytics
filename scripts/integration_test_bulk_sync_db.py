@@ -54,7 +54,9 @@ def _build_partitions(
     partitions = []
     for date_key in dates:
         for mic in mics:
-            partitions.append(str(MultiPartitionKey({date_dim: date_key, mic_dim: mic})))
+            partitions.append(
+                str(MultiPartitionKey({date_dim: date_key, mic_dim: mic}))
+            )
     return partitions
 
 
@@ -70,7 +72,9 @@ def _event_summary(entry) -> dict:
         "step_key": de.step_key if de else None,
         "asset_key": de.asset_key.to_string() if de and de.asset_key else None,
         "partition": de.partition if de else None,
-        "metadata_keys": sorted(list(mat.metadata.keys())) if mat and mat.metadata else [],
+        "metadata_keys": (
+            sorted(list(mat.metadata.keys())) if mat and mat.metadata else []
+        ),
         "metadata_source": (
             mat.metadata.get("source").value
             if mat
@@ -129,7 +133,9 @@ def main() -> int:
 
     # Asset-graph check: ensure the asset exists and partition keys are valid
     # DailyPartitionsDefinition uses an exclusive end_date; set to 2020-01-03 to cover 1st + 2nd.
-    date_parts = DailyPartitionsDefinition(start_date="2020-01-01", end_date="2020-01-03")
+    date_parts = DailyPartitionsDefinition(
+        start_date="2020-01-01", end_date="2020-01-03"
+    )
     mic_parts = StaticPartitionsDefinition(["XNAS", "XLON"])
     assets, _ = build_input_source_assets(
         tables=["l2"],

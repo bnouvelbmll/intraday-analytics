@@ -46,13 +46,16 @@ def get_universe(date):
 
     This example uses a query to the BMLL reference data service to get a list of
     instruments. You can replace this with your own logic to define the universe.
-    """ 
-    blacklist=['@ALP','SGMX','SGMU','BOTC']
-    universe_query = bmll.reference.query(
-        Index="bezacp", object_type="Instrument", start_date=date
-    ).query("IsAlive").query("MIC not in @blacklist")
+    """
+    blacklist = ["@ALP", "SGMX", "SGMU", "BOTC"]
+    universe_query = (
+        bmll.reference.query(Index="bezacp", object_type="Instrument", start_date=date)
+        .query("IsAlive")
+        .query("MIC not in @blacklist")
+    )
 
     return pl.DataFrame(universe_query)
+
 
 # Explicit universes config for Dagster definitions.
 UNIVERSES = [CustomUniverse(get_universe, name="demo_ohlcv")]

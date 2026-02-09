@@ -26,6 +26,7 @@ class CBBOAnalyticsConfig(BaseModel):
     computes time-at-best and quantity-at-best metrics, and aggregates these
     within TimeBuckets using the specified aggregation methods.
     """
+
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(
         None,
@@ -123,7 +124,10 @@ class CBBOAnalytic(AnalyticSpec):
         if agg == "TWMean":
             denom = dt.sum()
             numer = (dt * qty).sum()
-            return pl.when(denom > 0).then(numer / denom).otherwise(None), "QuantityAtCBB"
+            return (
+                pl.when(denom > 0).then(numer / denom).otherwise(None),
+                "QuantityAtCBB",
+            )
         if agg == "Min":
             return qty.min(), "QuantityAtCBBMin"
         if agg == "Max":
@@ -146,7 +150,10 @@ class CBBOAnalytic(AnalyticSpec):
         if agg == "TWMean":
             denom = dt.sum()
             numer = (dt * qty).sum()
-            return pl.when(denom > 0).then(numer / denom).otherwise(None), "QuantityAtCBO"
+            return (
+                pl.when(denom > 0).then(numer / denom).otherwise(None),
+                "QuantityAtCBO",
+            )
         if agg == "Min":
             return qty.min(), "QuantityAtCBOMin"
         if agg == "Max":
@@ -201,9 +208,7 @@ class CBBOAnalytics(BaseAnalytics):
 
         l2 = (
             l2.join(ref_cols, on="ListingId", how="left")
-            .with_columns(
-                EventTimestampMs=pl.col("EventTimestamp").dt.truncate("1ms")
-            )
+            .with_columns(EventTimestampMs=pl.col("EventTimestamp").dt.truncate("1ms"))
             .sort(["ListingId", "EventTimestamp"])
             .with_columns(
                 NextEventTimestamp=pl.col("EventTimestamp").shift(-1).over("ListingId")
@@ -217,9 +222,7 @@ class CBBOAnalytics(BaseAnalytics):
 
         cbbo = (
             cbbo.join(ref_cols, on="ListingId", how="left")
-            .with_columns(
-                EventTimestampMs=pl.col("EventTimestamp").dt.truncate("1ms")
-            )
+            .with_columns(EventTimestampMs=pl.col("EventTimestamp").dt.truncate("1ms"))
             .select(
                 [
                     "InstrumentId",

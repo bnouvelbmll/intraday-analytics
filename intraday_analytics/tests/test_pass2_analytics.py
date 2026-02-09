@@ -152,7 +152,9 @@ class TestPass2Analytics(unittest.TestCase):
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
     @patch("intraday_analytics.execution.get_files_for_date_range")
-    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
+    @patch(
+        "intraday_analytics.execution.as_completed", side_effect=lambda futures: futures
+    )
     @patch("bmll.time_series.query")
     @patch("intraday_analytics.execution.ProcessPoolExecutor")
     def test_pass2_aggregation_by_instrument(
@@ -184,7 +186,9 @@ class TestPass2Analytics(unittest.TestCase):
             mock_future.result.return_value = True
             return mock_future
 
-        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = mock_submit
+        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = (
+            mock_submit
+        )
 
         # Mock bmll.time_series.query for SymbolSizeEstimator
         mock_api_timeseries_query.return_value = pl.DataFrame(
@@ -252,7 +256,9 @@ class TestPass2Analytics(unittest.TestCase):
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
     @patch("intraday_analytics.execution.get_files_for_date_range")
-    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
+    @patch(
+        "intraday_analytics.execution.as_completed", side_effect=lambda futures: futures
+    )
     @patch("bmll.time_series.query")
     @patch("intraday_analytics.execution.ProcessPoolExecutor")
     def test_pass2_resampling(
@@ -284,7 +290,9 @@ class TestPass2Analytics(unittest.TestCase):
             mock_future.result.return_value = True
             return mock_future
 
-        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = mock_submit
+        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = (
+            mock_submit
+        )
 
         # Mock bmll.time_series.query for SymbolSizeEstimator
         mock_api_timeseries_query.return_value = pl.DataFrame(
@@ -345,7 +353,9 @@ class TestPass2Analytics(unittest.TestCase):
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
     @patch("intraday_analytics.execution.get_files_for_date_range")
-    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
+    @patch(
+        "intraday_analytics.execution.as_completed", side_effect=lambda futures: futures
+    )
     @patch("bmll.time_series.query")
     @patch("intraday_analytics.execution.ProcessPoolExecutor")
     def test_pass2_talib(
@@ -377,7 +387,9 @@ class TestPass2Analytics(unittest.TestCase):
             mock_future.result.return_value = True
             return mock_future
 
-        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = mock_submit
+        mock_process_pool_executor.return_value.__enter__.return_value.submit.side_effect = (
+            mock_submit
+        )
 
         # Mock bmll.time_series.query for SymbolSizeEstimator
         mock_api_timeseries_query.return_value = pl.DataFrame(

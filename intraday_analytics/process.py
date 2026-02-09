@@ -30,6 +30,7 @@ def get_final_output_path(start_date, end_date, config, pass_name, output_target
         template = output_target.path_template
 
     universe = config.UNIVERSE or "all"
+
     def _coerce_date(value):
         try:
             return value.date()
@@ -101,6 +102,7 @@ def aggregate_and_write_final_output(
         raise RuntimeError("No output target configured.")
     if not isinstance(output_target, OutputTarget):
         output_target = OutputTarget.model_validate(output_target)
+
     def _output_type():
         t = output_target.type
         try:
@@ -127,6 +129,7 @@ def aggregate_and_write_final_output(
         getattr(output_target, "sql_table", None),
         getattr(output_target, "sql_connection", None),
     )
+
     def _partition_key_value() -> str:
         universe = config.UNIVERSE or "all"
         try:
@@ -157,12 +160,19 @@ def aggregate_and_write_final_output(
         schema_keys = final_df.collect_schema().names()
         partition_cols = _resolve_partition_columns(schema_keys)
         final_with_pk = final_df
-        if "$dagsterpartitionkey" in partition_cols and "$dagsterpartitionkey" not in schema_keys:
+        if (
+            "$dagsterpartitionkey" in partition_cols
+            and "$dagsterpartitionkey" not in schema_keys
+        ):
             final_with_pk = final_with_pk.with_columns(
                 pl.lit(_partition_key_value()).alias("$dagsterpartitionkey")
             )
             schema_keys = final_with_pk.collect_schema().names()
-        missing = [col for col in partition_cols if col not in schema_keys and col != "$dagsterpartitionkey"]
+        missing = [
+            col
+            for col in partition_cols
+            if col not in schema_keys and col != "$dagsterpartitionkey"
+        ]
         if missing:
             raise RuntimeError(
                 f"Partition columns missing from output: {missing}. "
@@ -216,11 +226,17 @@ def aggregate_and_write_final_output(
             except Exception as exc:
                 raise RuntimeError("sqlalchemy is required for sql outputs") from exc
             if not output_target.sql_connection or not output_target.sql_table:
-                raise RuntimeError("sql_connection and sql_table are required for sql outputs")
+                raise RuntimeError(
+                    "sql_connection and sql_table are required for sql outputs"
+                )
             engine = create_engine(output_target.sql_connection)
             try:
                 df = df_to_write.collect(streaming=True)
-                if output_target.dedupe_on_partition and partition_cols and output_target.sql_if_exists != "replace":
+                if (
+                    output_target.dedupe_on_partition
+                    and partition_cols
+                    and output_target.sql_if_exists != "replace"
+                ):
                     partition_values = (
                         df_to_write.select(partition_cols).unique().to_dicts()
                     )
@@ -228,7 +244,9 @@ def aggregate_and_write_final_output(
                         try:
                             with engine.begin() as conn:
                                 for vals in partition_values:
-                                    where = " AND ".join([f"{k} = :{k}" for k in partition_cols])
+                                    where = " AND ".join(
+                                        [f"{k} = :{k}" for k in partition_cols]
+                                    )
                                     conn.execute(
                                         sql_text(
                                             f"DELETE FROM {output_target.sql_table} WHERE {where}"
@@ -245,7 +263,11 @@ def aggregate_and_write_final_output(
                             chunk.to_pandas().to_sql(
                                 output_target.sql_table,
                                 conn,
-                                if_exists=output_target.sql_if_exists if offset == 0 else "append",
+                                if_exists=(
+                                    output_target.sql_if_exists
+                                    if offset == 0
+                                    else "append"
+                                ),
                                 index=False,
                                 method="multi",
                             )
@@ -254,11 +276,22 @@ def aggregate_and_write_final_output(
                 metadata = MetaData()
                 if output_target.sql_if_exists == "replace":
                     with engine.begin() as conn:
-                        conn.execute(sql_text(f"DROP TABLE IF EXISTS {output_target.sql_table}"))
+                        conn.execute(
+                            sql_text(f"DROP TABLE IF EXISTS {output_target.sql_table}")
+                        )
                 # Define table schema (basic mapping)
                 cols = []
                 for name, dtype in zip(df.columns, df.dtypes):
-                    if dtype in (pl.Int8, pl.Int16, pl.Int32, pl.Int64, pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64):
+                    if dtype in (
+                        pl.Int8,
+                        pl.Int16,
+                        pl.Int32,
+                        pl.Int64,
+                        pl.UInt8,
+                        pl.UInt16,
+                        pl.UInt32,
+                        pl.UInt64,
+                    ):
                         coltype = Integer
                     elif dtype in (pl.Float32, pl.Float64):
                         coltype = Float

@@ -36,7 +36,10 @@ def _register_metric_hint(data: dict):
 
 
 def metric_hint(
-    module: str, pattern: str, default_agg: AggregationMethod, weight_col: str | None = None
+    module: str,
+    pattern: str,
+    default_agg: AggregationMethod,
+    weight_col: str | None = None,
 ):
     def _decorator(fn):
         _register_metric_hint(
@@ -96,6 +99,8 @@ def metric_doc(
         return fn
 
     return _decorator
+
+
 Side = Literal["Bid", "Ask"]
 MarketState = Literal[
     "AUCTION_ON_DEMAND",
@@ -157,7 +162,7 @@ class CombinatorialMetricConfig(BaseModel, ABC):
             "Used by `AnalyticSpec` when generating column aliases.\n"
             "Implementation is in `intraday_analytics/analytics_base.py`.\n"
             "Be consistent across passes if you join outputs downstream.\n"
-            "Changing the pattern changes column names and downstream expectations.\n"
+            "Changing the pattern changes column names and downstream expectations.\n",
         },
     )
 

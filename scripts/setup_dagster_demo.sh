@@ -27,9 +27,9 @@ from dagster import (
     schedule,
 )
 from intraday_analytics.dagster_compat import (
-    build_demo_assets,
-    build_demo_materialization_checks,
-    build_demo_schedules,
+    build_assets,
+    build_materialization_checks,
+    build_schedules,
     build_input_source_assets,
     build_s3_input_asset_checks,
     build_s3_input_observation_sensor,
@@ -111,16 +111,16 @@ input_assets, input_table_map = build_input_source_assets(
     group_name="BMLL",
 )
 
-demo_assets = build_demo_assets(
+demo_assets = build_assets(
     partitions_def=partitions_def,
     split_passes=True,
     input_asset_keys=[asset.key for asset in input_assets],
 )
-demo_schedules = build_demo_schedules(
+demo_schedules = build_schedules(
     partitions_def=partitions_def,
     split_passes=True,
 )
-demo_checks = build_demo_materialization_checks(
+demo_checks = build_materialization_checks(
     check_mode=os.getenv("S3_CHECK_MODE", "recursive"),
     split_passes=True,
 )

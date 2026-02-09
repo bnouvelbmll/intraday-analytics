@@ -57,7 +57,9 @@ def fixture_files(_sd, _ed, _mics, table_name, exclude_weekends=True):
 
 
 def _run_with_fixtures(config: AnalyticsConfig, get_pipeline=None):
-    with patch("intraday_analytics.execution.ProcessInterval", SyncProcessInterval), patch(
+    with patch(
+        "intraday_analytics.execution.ProcessInterval", SyncProcessInterval
+    ), patch(
         "intraday_analytics.execution.get_files_for_date_range",
         side_effect=fixture_files,
     ), patch(
@@ -100,7 +102,9 @@ class TestDemoAndMainFixtures(unittest.TestCase):
         sys.modules.setdefault("bmll", MagicMock())
         bmll_reference = MagicMock()
         bmll_reference.query = MagicMock(
-            side_effect=lambda *args, **kwargs: fixture_universe("2025-01-02").to_pandas()
+            side_effect=lambda *args, **kwargs: fixture_universe(
+                "2025-01-02"
+            ).to_pandas()
         )
         sys.modules.setdefault("bmll.reference", bmll_reference)
 

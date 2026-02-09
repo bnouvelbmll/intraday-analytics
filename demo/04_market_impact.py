@@ -50,6 +50,7 @@ def get_universe(date):
 
     return pl.DataFrame(universe_query)
 
+
 # Explicit universes config for Dagster definitions.
 UNIVERSES = [CustomUniverse(get_universe, name="demo_market_impact")]
 

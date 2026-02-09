@@ -39,4 +39,3 @@ class TestTimeBucketOptions(unittest.TestCase):
 
         self.assertEqual(df_start["TimeBucket"][0], dt.datetime(2025, 1, 1, 0, 0, 0))
         self.assertEqual(df_start["TimeBucket"][1], dt.datetime(2025, 1, 1, 0, 1, 0))
-

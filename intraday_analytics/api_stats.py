@@ -48,7 +48,9 @@ class ApiStat:
         return json.dumps(payload, separators=(",", ":"))
 
 
-def record_api_timing(name: str, duration_s: float, extra: dict[str, Any] | None = None):
+def record_api_timing(
+    name: str, duration_s: float, extra: dict[str, Any] | None = None
+):
     path = _stats_path()
     if not path:
         return

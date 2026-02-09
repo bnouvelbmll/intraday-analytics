@@ -23,7 +23,10 @@ from abc import ABC, abstractmethod
 import polars as pl
 from pydantic import BaseModel
 
-from intraday_analytics.analytics.common import _register_metric_doc, _register_metric_hint
+from intraday_analytics.analytics.common import (
+    _register_metric_doc,
+    _register_metric_hint,
+)
 from intraday_analytics.utils import dc, ffill_with_shifts
 
 
@@ -37,6 +40,7 @@ class AnalyticDoc:
     output names the doc applies to (regex string), and the `template` should
     be a short sentence that can be formatted with any captured groups.
     """
+
     pattern: str
     template: str
     module: str | None = None
@@ -67,6 +71,7 @@ class AnalyticHint:
     They are optional but provide a consistent, discoverable way to attach
     aggregation semantics to a family of outputs.
     """
+
     pattern: str
     default_agg: str
     module: str | None = None
@@ -92,6 +97,7 @@ class AnalyticContext:
 
     Specs should treat this as read-only; the module owns how it is built.
     """
+
     base_df: pl.LazyFrame
     cache: Dict[str, Any]
     context: Dict[str, Any]
@@ -114,6 +120,7 @@ def analytic_expression(
     docstring, the docstring becomes the documentation template for that
     output family.
     """
+
     def _decorator(fn):
         setattr(fn, "_analytic_expression_name", name)
         if pattern:
@@ -145,6 +152,7 @@ class AnalyticSpec(ABC):
     Polars expressions that the module can aggregate. The module decides the
     grouping columns and the final aggregation call.
     """
+
     MODULE: str = ""
     DOCS: List[AnalyticDoc] = []
     HINTS: List[AnalyticHint] = []
@@ -364,7 +372,11 @@ class BaseTWAnalytics(BaseAnalytics):
     """
 
     def __init__(
-        self, name: str, specific_fill_cols=None, nanoseconds=None, metric_prefix: str | None = None
+        self,
+        name: str,
+        specific_fill_cols=None,
+        nanoseconds=None,
+        metric_prefix: str | None = None,
     ):
         super().__init__(
             name,

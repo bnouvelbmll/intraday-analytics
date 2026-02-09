@@ -44,7 +44,7 @@ USER_CONFIG = {
     ],
     "SKIP_EXISTING_OUTPUT": True,
     "EAGER_EXECUTION": True,
-    "LOGGING_LEVEL": "DEBUG"
+    "LOGGING_LEVEL": "DEBUG",
 }
 
 # --- Universe Definition ---
@@ -56,13 +56,16 @@ def get_universe(date):
 
     This example uses a query to the BMLL reference data service to get a list of
     instruments. You can replace this with your own logic to define the universe.
-    """ 
-    blacklist=['@ALP','SGMX','SGMU','BOTC']
-    universe_query = bmll.reference.query(
-        Index="bezacp", object_type="Instrument", start_date=date
-    ).query("IsAlive").query("MIC not in @blacklist")
+    """
+    blacklist = ["@ALP", "SGMX", "SGMU", "BOTC"]
+    universe_query = (
+        bmll.reference.query(Index="bezacp", object_type="Instrument", start_date=date)
+        .query("IsAlive")
+        .query("MIC not in @blacklist")
+    )
 
     return pl.DataFrame(universe_query)
+
 
 # Explicit universes config for Dagster definitions.
 UNIVERSES = [CustomUniverse(get_universe, name="demo_talib")]
@@ -95,7 +98,7 @@ class TALibAnalytics(BaseAnalytics):
 
         ohlcv_pass = source_df
         print(source_df.shape)
-        res= (
+        res = (
             ohlcv_pass.group_by("ListingId", maintain_order=True)
             .agg(
                 [
@@ -107,23 +110,26 @@ class TALibAnalytics(BaseAnalytics):
                     .apply(lambda s: talib.RSI(s, timeperiod=14))
                     .alias("RSI14"),
                 ]
-            ).with_columns([
-        pl.col("Close")
-        .map_elements(
-            lambda s: talib.SMA(s.to_numpy(), timeperiod=14),
-            return_dtype=pl.Float64
+            )
+            .with_columns(
+                [
+                    pl.col("Close")
+                    .map_elements(
+                        lambda s: talib.SMA(s.to_numpy(), timeperiod=14),
+                        return_dtype=pl.Float64,
+                    )
+                    .over("ListingId")
+                    .alias("SMA14"),
+                    pl.col("Close")
+                    .map_elements(
+                        lambda s: talib.RSI(s.to_numpy(), timeperiod=14),
+                        return_dtype=pl.Float64,
+                    )
+                    .over("ListingId")
+                    .alias("RSI14"),
+                ]
+            )
         )
-        .over("ListingId")
-        .alias("SMA14"),
-
-        pl.col("Close")
-        .map_elements(
-            lambda s: talib.RSI(s.to_numpy(), timeperiod=14),
-            return_dtype=pl.Float64
-        )
-        .over("ListingId")
-        .alias("RSI14"),
-    ]))
         print(res)
         print("/X")
         return res

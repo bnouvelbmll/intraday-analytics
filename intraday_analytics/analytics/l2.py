@@ -41,7 +41,8 @@ class L2LiquidityConfig(CombinatorialMetricConfig):
     metric_type: Literal["L2_Liquidity"] = "L2_Liquidity"
 
     sides: Union[Side, List[Side]] = Field(
-        ..., description="Side of the book to analyze (Bid, Ask).",
+        ...,
+        description="Side of the book to analyze (Bid, Ask).",
         json_schema_extra={
             "long_doc": "Selects book side(s) for liquidity metrics.\n"
             "Options: Bid, Ask, or a list of both.\n"
@@ -72,7 +73,8 @@ class L2LiquidityConfig(CombinatorialMetricConfig):
     )
 
     measures: Union[L2LiquidityMeasure, List[L2LiquidityMeasure]] = Field(
-        ..., description="The specific measure to extract (e.g., 'Quantity', 'Price').",
+        ...,
+        description="The specific measure to extract (e.g., 'Quantity', 'Price').",
         json_schema_extra={
             "long_doc": "Selects which liquidity measures to compute.\n"
             "Examples: Quantity, Price, NumOrders, CumQuantity.\n"
@@ -236,6 +238,7 @@ class L2AnalyticsConfig(BaseModel):
     reflect the depth available in the input order book and the desired
     granularity of output columns.
     """
+
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(
         None,
@@ -358,7 +361,14 @@ def _price_series(source: str) -> pl.Expr | None:
 
 
 def _liquidity_raw(side: str, level: int, measure: str) -> pl.Expr | None:
-    if measure in ["Quantity", "Price", "NumOrders", "InsertAge", "LastMod", "SizeAhead"]:
+    if measure in [
+        "Quantity",
+        "Price",
+        "NumOrders",
+        "InsertAge",
+        "LastMod",
+        "SizeAhead",
+    ]:
         return pl.col(f"{side}{measure}{level}")
     if measure == "CumQuantity":
         cols = [f"{side}Quantity{i}" for i in range(1, level + 1)]
@@ -387,19 +397,11 @@ def _imbalance_raw_pattern(measure: str, suffix: str = "") -> str:
 
 def _imbalance_raw(level: int, measure: str) -> pl.Expr:
     if measure == "CumQuantity":
-        bid_val = pl.sum_horizontal(
-            [f"BidQuantity{i}" for i in range(1, level + 1)]
-        )
-        ask_val = pl.sum_horizontal(
-            [f"AskQuantity{i}" for i in range(1, level + 1)]
-        )
+        bid_val = pl.sum_horizontal([f"BidQuantity{i}" for i in range(1, level + 1)])
+        ask_val = pl.sum_horizontal([f"AskQuantity{i}" for i in range(1, level + 1)])
     elif measure == "Orders":
-        bid_val = pl.sum_horizontal(
-            [f"BidNumOrders{i}" for i in range(1, level + 1)]
-        )
-        ask_val = pl.sum_horizontal(
-            [f"AskNumOrders{i}" for i in range(1, level + 1)]
-        )
+        bid_val = pl.sum_horizontal([f"BidNumOrders{i}" for i in range(1, level + 1)])
+        ask_val = pl.sum_horizontal([f"AskNumOrders{i}" for i in range(1, level + 1)])
     elif measure == "CumNotional":
         bid_val = pl.sum_horizontal(
             [
@@ -524,7 +526,9 @@ class L2LastLiquidityAnalytic(AnalyticSpec):
             return []
 
         if config.market_states:
-            base_expr = base_expr.filter(pl.col("MarketState").is_in(config.market_states))
+            base_expr = base_expr.filter(
+                pl.col("MarketState").is_in(config.market_states)
+            )
 
         expr = base_expr.last()
         alias = (
@@ -578,7 +582,9 @@ class L2LastSpreadAnalytic(AnalyticSpec):
         base_expr = expression_fn(self)
 
         if config.market_states:
-            base_expr = base_expr.filter(pl.col("MarketState").is_in(config.market_states))
+            base_expr = base_expr.filter(
+                pl.col("MarketState").is_in(config.market_states)
+            )
 
         expr = base_expr.last()
         if config.output_name_pattern:
@@ -640,7 +646,9 @@ class L2LastImbalanceAnalytic(AnalyticSpec):
         base_expr = expression_fn(self, level)
 
         if config.market_states:
-            base_expr = base_expr.filter(pl.col("MarketState").is_in(config.market_states))
+            base_expr = base_expr.filter(
+                pl.col("MarketState").is_in(config.market_states)
+            )
 
         expr = base_expr.last()
         alias = (
@@ -967,9 +975,7 @@ class L2TWVolatilityAnalytic(AnalyticSpec):
         expressions = []
         for agg in config.aggregations:
             if agg not in agg_map:
-                logging.warning(
-                    f"Unsupported aggregation '{agg}' for L2 volatility."
-                )
+                logging.warning(f"Unsupported aggregation '{agg}' for L2 volatility.")
                 continue
 
             expr = agg_map[agg]
@@ -1050,7 +1056,12 @@ class L2AnalyticsLast(BaseAnalytics):
                     }
                 )
 
-        if not (self.config.liquidity or self.config.spreads or self.config.imbalances or self.config.ohlc):
+        if not (
+            self.config.liquidity
+            or self.config.spreads
+            or self.config.imbalances
+            or self.config.ohlc
+        ):
             levels = list(range(1, self.config.levels + 1))
             default_configs = [
                 (
@@ -1069,7 +1080,14 @@ class L2AnalyticsLast(BaseAnalytics):
                         )
                     ],
                 ),
-                (imbalance, [L2ImbalanceConfig(levels=levels, measure=["CumQuantity", "Orders"])]),
+                (
+                    imbalance,
+                    [
+                        L2ImbalanceConfig(
+                            levels=levels, measure=["CumQuantity", "Orders"]
+                        )
+                    ],
+                ),
                 (spread, [L2SpreadConfig(variant=["BPS"])]),
             ]
             expressions.extend(build_expressions(ctx, default_configs))
@@ -1094,7 +1112,9 @@ class L2AnalyticsLast(BaseAnalytics):
         self, df: pl.LazyFrame, gcols: list[str]
     ) -> pl.LazyFrame:
         if not self.config.time_bucket_seconds:
-            raise ValueError("time_bucket_seconds must be set for OHLC prev_close mode.")
+            raise ValueError(
+                "time_bucket_seconds must be set for OHLC prev_close mode."
+            )
         group_cols = [c for c in gcols if c != "TimeBucket"]
         df = df.with_columns(pl.col("TimeBucket").cast(pl.Datetime("ns")))
         interval = int(self.config.time_bucket_seconds * 1e9)
@@ -1118,7 +1138,6 @@ class L2AnalyticsLast(BaseAnalytics):
         return ranges.join(df, on=group_cols + ["TimeBucket"], how="left")
 
 
-
 @register_analytics("l2tw", config_attr="l2_analytics")
 class L2AnalyticsTW(BaseTWAnalytics):
     """
@@ -1131,7 +1150,11 @@ class L2AnalyticsTW(BaseTWAnalytics):
         super().__init__(
             "l2tw",
             {},
-            nanoseconds=int(config.time_bucket_seconds * 1e9) if config.time_bucket_seconds else 0,
+            nanoseconds=(
+                int(config.time_bucket_seconds * 1e9)
+                if config.time_bucket_seconds
+                else 0
+            ),
             metric_prefix=config.metric_prefix,
         )
         self.config = config
@@ -1163,7 +1186,9 @@ class L2AnalyticsTW(BaseTWAnalytics):
         )
 
         if not expressions:
-            default_spread_config = [L2SpreadConfig(variant=["Abs", "BPS"], aggregations=["TWA"])]
+            default_spread_config = [
+                L2SpreadConfig(variant=["Abs", "BPS"], aggregations=["TWA"])
+            ]
             default_liquidity_config = [
                 L2LiquidityConfig(
                     sides=["Bid", "Ask"],
@@ -1192,9 +1217,7 @@ class L2AnalyticsTW(BaseTWAnalytics):
                     .sum()
                     .truediv(pl.col("DT").sum())
                     .alias(self.apply_prefix("SpreadRelTWA")),
-                    (
-                        0.5 * (pl.col("AskPrice1") + pl.col("BidPrice1"))
-                    )
+                    (0.5 * (pl.col("AskPrice1") + pl.col("BidPrice1")))
                     .mul(pl.col("DT"))
                     .sum()
                     .truediv(pl.col("DT").sum())

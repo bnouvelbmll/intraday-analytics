@@ -254,7 +254,6 @@ def get_pipeline(
         "l2_last": lambda: L2AnalyticsLast(pass_config.l2_analytics),
         "l2_tw": lambda: L2AnalyticsTW(pass_config.l2_analytics),
         "execution": lambda: ExecutionAnalytics(pass_config.execution_analytics),
-         
     }
 
     modules = []
@@ -266,6 +265,7 @@ def get_pipeline(
             logging.warning(f"Module '{module_name}' not recognized in get_pipeline.")
 
     return AnalyticsPipeline(modules, config, pass_config, context)
+
 
 if __name__ == "__main__":
     os.environ["POLARS_MAX_THREADS"] = "48"

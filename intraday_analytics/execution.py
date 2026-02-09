@@ -26,7 +26,12 @@ from .utils import (
 )
 from .tables import ALL_TABLES
 from .api_stats import init_api_stats, summarize_api_stats
-from .process import aggregate_and_write_final_output, BatchWriter, get_final_s3_path, get_final_output_path
+from .process import (
+    aggregate_and_write_final_output,
+    BatchWriter,
+    get_final_s3_path,
+    get_final_output_path,
+)
 from .configuration import OutputTarget
 
 
@@ -212,6 +217,7 @@ class ProcessInterval(Process):
         try:
             if not isinstance(final_path, str) or not final_path:
                 return
+
             # Store the result as a LazyFrame in the context
             # This allows subsequent passes to use it as input
             def _scan_output():
@@ -232,7 +238,6 @@ class ProcessInterval(Process):
         # After the pass is complete, save the context
         with open(self.context_path, "wb") as f:
             pickle.dump(pipe.context, f)
-
 
     def run_naive(self, pipe, nanoseconds, ref, current_date):
         logging.info("🚚 Creating batch files (Streaming)...")
@@ -279,7 +284,6 @@ class ProcessInterval(Process):
                 )
                 df.write_parquet(out_path)
             tasks.append(i)
-
 
         # 3. Process batches in parallel
         n_jobs = self.config.NUM_WORKERS
@@ -383,7 +387,6 @@ class ProcessInterval(Process):
             for future in as_completed(futures):
                 future.result()
 
-
     def run(self):
         logging.basicConfig(
             level=self.config.LOGGING_LEVEL.upper(),
@@ -473,22 +476,24 @@ import boto3
 from botocore.exceptions import ClientError
 from urllib.parse import urlparse
 
+
 def check_s3_url_exists(s3_url):
     # 1. Parse the URL (e.g., s3://my-bucket/folder/file.txt)
     parsed = urlparse(s3_url)
     bucket = parsed.netloc
     # lstrip('/') is critical because urlparse keeps the leading slash
-    key = parsed.path.lstrip('/')
-    s3 = boto3.client('s3')
+    key = parsed.path.lstrip("/")
+    s3 = boto3.client("s3")
     try:
         s3.head_object(Bucket=bucket, Key=key)
         return True
     except ClientError as e:
         # 404 means the object definitely does not exist
-        if e.response['Error']['Code'] == "404":
+        if e.response["Error"]["Code"] == "404":
             return False
         # 403 means you don't have permission to see if it exists
         raise e
+
 
 def run_metrics_pipeline(config, get_universe, get_pipeline=None):
     """
@@ -553,10 +558,10 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
                             sd, ed, config, pass_label, output_target
                         )
                     else:
-                        final_s3_path = get_final_s3_path(
-                            sd, ed, config, pass_label
-                        )
-                    if output_target.type.value == "parquet" and check_s3_url_exists(final_s3_path):
+                        final_s3_path = get_final_s3_path(sd, ed, config, pass_label)
+                    if output_target.type.value == "parquet" and check_s3_url_exists(
+                        final_s3_path
+                    ):
                         logging.info(
                             f"✅ Output already exists for {sd.date()} -> {ed.date()} (Pass {pass_config.name}). Skipping."
                         )

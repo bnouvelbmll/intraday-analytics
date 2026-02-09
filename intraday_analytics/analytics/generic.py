@@ -21,6 +21,7 @@ class TalibIndicatorConfig(BaseModel):
     Each entry defines the indicator name, input column, and optional parameters
     used by the generic analytics postprocessing stage.
     """
+
     name: str = Field(
         ...,
         description="TA-Lib indicator name (e.g., SMA, RSI).",
@@ -94,6 +95,7 @@ class GenericAnalyticsConfig(BaseModel):
     provides a flexible way to derive secondary metrics without modifying core
     analytics modules.
     """
+
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(
         None,

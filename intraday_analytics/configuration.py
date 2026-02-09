@@ -78,12 +78,18 @@ class OutputTarget(BaseModel):
     partition_columns: Optional[List[str]] = Field(
         None,
         description="Optional partition/primary key columns for delta/sql writes.",
-        json_schema_extra={"section": "Advanced", "depends_on": {"type": ["delta", "sql"]}},
+        json_schema_extra={
+            "section": "Advanced",
+            "depends_on": {"type": ["delta", "sql"]},
+        },
     )
     dedupe_on_partition: bool = Field(
         True,
         description="Remove duplicate rows based on partition columns before append.",
-        json_schema_extra={"section": "Advanced", "depends_on": {"type": ["delta", "sql"]}},
+        json_schema_extra={
+            "section": "Advanced",
+            "depends_on": {"type": ["delta", "sql"]},
+        },
     )
 
 
@@ -120,9 +126,7 @@ class PassConfig(BaseModel):
     iceberg_analytics: IcebergAnalyticsConfig = Field(
         default_factory=IcebergAnalyticsConfig
     )
-    cbbo_analytics: CBBOAnalyticsConfig = Field(
-        default_factory=CBBOAnalyticsConfig
-    )
+    cbbo_analytics: CBBOAnalyticsConfig = Field(default_factory=CBBOAnalyticsConfig)
     l3_characteristics_analytics: L3CharacteristicsConfig = Field(
         default_factory=L3CharacteristicsConfig
     )
@@ -132,7 +136,6 @@ class PassConfig(BaseModel):
     generic_analytics: GenericAnalyticsConfig = Field(
         default_factory=GenericAnalyticsConfig
     )
-
 
     @model_validator(mode="after")
     def propagate_pass_settings(self) -> "PassConfig":
@@ -144,7 +147,9 @@ class PassConfig(BaseModel):
         self.l2_analytics.time_bucket_anchor = self.time_bucket_anchor
         self.l2_analytics.time_bucket_closed = self.time_bucket_closed
         self.l3_characteristics_analytics.time_bucket_seconds = self.time_bucket_seconds
-        self.trade_characteristics_analytics.time_bucket_seconds = self.time_bucket_seconds
+        self.trade_characteristics_analytics.time_bucket_seconds = (
+            self.time_bucket_seconds
+        )
         if self.sort_keys:
             if "TimeBucket" not in self.sort_keys:
                 self.sort_keys.append("TimeBucket")
@@ -168,6 +173,7 @@ class ScheduleConfig(BaseModel):
 
     Defines cron, timezone, and optional partition selectors to trigger runs.
     """
+
     name: str = Field("schedule", description="Schedule name.")
     enabled: bool = Field(False, description="Enable schedule.")
     cron: str = Field("0 2 * * *", description="Cron expression.")
@@ -184,6 +190,7 @@ class AnalyticsConfig(BaseModel):
 
     Defines date range, passes, batching, I/O targets, and automation settings.
     """
+
     # --- Date & Scope ---
     START_DATE: Optional[str] = Field(
         None,

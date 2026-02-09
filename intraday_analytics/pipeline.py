@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 from .analytics_base import BaseAnalytics, BaseTWAnalytics
 
+
 class AnalyticsPipeline:
     """
     Orchestrates the execution of a series of analytics modules for a single pass.
@@ -153,11 +154,11 @@ class AnalyticsRunner:
         # RUN SYMBOL BY SYMBOL
         if self.config.RUN_ONE_SYMBOL_AT_A_TIME:
             for sym in sorted(
-                    set().union(
-                        *[
-                            df.select(SYMBOL_COL).collect()[SYMBOL_COL].to_list()
-                            for df in batch_data.values()
-                            if len(df) > 0
+                set().union(
+                    *[
+                        df.select(SYMBOL_COL).collect()[SYMBOL_COL].to_list()
+                        for df in batch_data.values()
+                        if len(df) > 0
                     ]
                 )
             ):

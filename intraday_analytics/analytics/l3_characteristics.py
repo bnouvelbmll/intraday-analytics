@@ -20,9 +20,7 @@ class L3CharacteristicsConfig(BaseModel):
     time_bucket_seconds: Optional[float] = None
 
 
-@register_analytics(
-    "l3_characteristics", config_attr="l3_characteristics_analytics"
-)
+@register_analytics("l3_characteristics", config_attr="l3_characteristics_analytics")
 class L3CharacteristicsAnalytics(BaseAnalytics):
     """
     Lightweight data quality and structure characteristics for L3 data.
@@ -59,21 +57,30 @@ class L3CharacteristicsAnalytics(BaseAnalytics):
                     schema={"ListingId": pl.Int64, "TimeBucket": pl.Datetime("ns")}
                 ).lazy()
 
-        gcols = [c for c in ["MIC", "ListingId", "Ticker", "TimeBucket"] if c in schema.names()]
+        gcols = [
+            c
+            for c in ["MIC", "ListingId", "Ticker", "TimeBucket"]
+            if c in schema.names()
+        ]
 
         expressions: List[pl.Expr] = [pl.len().alias(self.apply_prefix("L3EventCount"))]
 
         exec_col = "ExecutionSize" if "ExecutionSize" in schema.names() else None
         if exec_col:
             exec_expr = pl.col(exec_col) > 0
-            expressions.append(exec_expr.sum().alias(self.apply_prefix("L3ExecutionCount")))
-            expressions.append(exec_expr.any().alias(self.apply_prefix("L3HasExecution")))
+            expressions.append(
+                exec_expr.sum().alias(self.apply_prefix("L3ExecutionCount"))
+            )
+            expressions.append(
+                exec_expr.any().alias(self.apply_prefix("L3HasExecution"))
+            )
 
         if "OrderExecuted" in schema.names():
             expressions.append(
-                pl.col("OrderExecuted").cast(pl.Boolean).any().alias(
-                    self.apply_prefix("L3HasOrderExecuted")
-                )
+                pl.col("OrderExecuted")
+                .cast(pl.Boolean)
+                .any()
+                .alias(self.apply_prefix("L3HasOrderExecuted"))
             )
 
         if "MarketState" in schema.names():
@@ -99,27 +106,21 @@ class L3CharacteristicsAnalytics(BaseAnalytics):
             )
             if exec_col:
                 expressions.append(
-                    (
-                        (pl.col("MarketState") == "PRE_OPEN")
-                        & (pl.col(exec_col) > 0)
-                    )
+                    ((pl.col("MarketState") == "PRE_OPEN") & (pl.col(exec_col) > 0))
                     .any()
                     .alias(self.apply_prefix("L3HasPreOpenExecution"))
                 )
                 expressions.append(
-                    (
-                        (pl.col("MarketState") == "POST_TRADE")
-                        & (pl.col(exec_col) > 0)
-                    )
+                    ((pl.col("MarketState") == "POST_TRADE") & (pl.col(exec_col) > 0))
                     .any()
                     .alias(self.apply_prefix("L3HasPostTradeExecution"))
                 )
 
         if "EndOfEvent" in schema.names():
             expressions.append(
-                (~pl.col("EndOfEvent").cast(pl.Boolean)).any().alias(
-                    self.apply_prefix("L3HasMultiRowEvent")
-                )
+                (~pl.col("EndOfEvent").cast(pl.Boolean))
+                .any()
+                .alias(self.apply_prefix("L3HasMultiRowEvent"))
             )
 
         if "TradeId" in schema.names():
@@ -201,7 +202,11 @@ class L3CharacteristicsAnalytics(BaseAnalytics):
                 .alias(self.apply_prefix("L3HasSendTimestamp"))
             )
 
-        if "LobAction" in schema.names() and "OldPrice" in schema.names() and "OldSize" in schema.names():
+        if (
+            "LobAction" in schema.names()
+            and "OldPrice" in schema.names()
+            and "OldSize" in schema.names()
+        ):
             if schema["LobAction"] == pl.String:
                 is_update = pl.col("LobAction") == "UPDATE"
             else:

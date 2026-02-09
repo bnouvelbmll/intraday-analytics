@@ -24,6 +24,7 @@ class DenseAnalyticsConfig(BaseModel):
     downstream analytics can align to. Use this to control bucket size, anchor,
     and optional symbol column overrides.
     """
+
     ENABLED: bool = True
     metric_prefix: Optional[str] = None
     mode: Literal["adaptative", "uniform"] = "adaptative"
@@ -96,7 +97,9 @@ class DenseAnalytics(BaseAnalytics):
                 }
             )
 
-            ref_cols = [c for c in ["MIC", "Ticker", "CurrencyCode"] if c in self.ref.columns]
+            ref_cols = [
+                c for c in ["MIC", "Ticker", "CurrencyCode"] if c in self.ref.columns
+            ]
             ref_sel = self.ref.select(scs + ref_cols).unique(subset=scs).lazy()
 
             return (
@@ -128,14 +131,8 @@ class DenseAnalytics(BaseAnalytics):
             continuous_intervals = (
                 calendar.with_columns(
                     [
-                        pl.col("MarketState")
-                        .shift(1)
-                        .over(scs)
-                        .alias("pstate"),
-                        pl.col("MarketState")
-                        .shift(-1)
-                        .over(scs)
-                        .alias("nstate"),
+                        pl.col("MarketState").shift(1).over(scs).alias("pstate"),
+                        pl.col("MarketState").shift(-1).over(scs).alias("nstate"),
                         pl.col(tsc).shift(-1).over(scs).alias("nts"),
                     ]
                 )
@@ -169,9 +166,9 @@ class DenseAnalytics(BaseAnalytics):
                         pd.Timestamp(ciq.iloc[0]).floor(str(frequency)) - TS_PADDING
                     )
                     end_dt = (
-                        pd.Timestamp(continuous_intervals.loc[mask, "nts"].iloc[-1]).ceil(
-                            str(frequency)
-                        )
+                        pd.Timestamp(
+                            continuous_intervals.loc[mask, "nts"].iloc[-1]
+                        ).ceil(str(frequency))
                         + TS_PADDING
                     )
                     res.append(
@@ -198,7 +195,10 @@ class DenseAnalytics(BaseAnalytics):
 
             if not res:
                 return pl.DataFrame(
-                    schema={**{c: pl.Int64 for c in scs}, "TimeBucket": pl.Datetime("ns")}
+                    schema={
+                        **{c: pl.Int64 for c in scs},
+                        "TimeBucket": pl.Datetime("ns"),
+                    }
                 ).lazy()
 
             r = pl.concat(res).sort(scs + ["TimeBucket"])

@@ -66,7 +66,16 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
         volatility=[
             L2VolatilityConfig(
                 source=["Mid", "Bid", "Ask", "WeightedMid"],
-                aggregations=["First", "Last", "Min", "Max", "Mean", "Sum", "Median", "Std"],
+                aggregations=[
+                    "First",
+                    "Last",
+                    "Min",
+                    "Max",
+                    "Mean",
+                    "Sum",
+                    "Median",
+                    "Std",
+                ],
             )
         ],
         ohlc=[
@@ -89,9 +98,24 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
         generic_metrics=[
             L3MetricConfig(
                 sides=["Bid", "Ask"],
-                actions=["Insert", "Remove", "Update", "UpdateInserted", "UpdateRemoved"],
+                actions=[
+                    "Insert",
+                    "Remove",
+                    "Update",
+                    "UpdateInserted",
+                    "UpdateRemoved",
+                ],
                 measures=["Count", "Volume"],
-                aggregations=["First", "Last", "Min", "Max", "Mean", "Sum", "Median", "Std"],
+                aggregations=[
+                    "First",
+                    "Last",
+                    "Min",
+                    "Max",
+                    "Mean",
+                    "Sum",
+                    "Median",
+                    "Std",
+                ],
             )
         ],
         advanced_metrics=[
@@ -136,7 +160,16 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
                     "BestAskAtPrimary",
                 ],
                 sides=["Total", "Bid", "Ask"],
-                aggregations=["First", "Last", "Min", "Max", "Mean", "Sum", "Median", "Std"],
+                aggregations=[
+                    "First",
+                    "Last",
+                    "Min",
+                    "Max",
+                    "Mean",
+                    "Sum",
+                    "Median",
+                    "Std",
+                ],
             )
         ],
         flag_metrics=[
@@ -154,7 +187,11 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
         ],
         change_metrics=[
             TradeChangeConfig(
-                measures=["PreTradeElapsedTimeChg", "PostTradeElapsedTimeChg", "PricePoint"],
+                measures=[
+                    "PreTradeElapsedTimeChg",
+                    "PostTradeElapsedTimeChg",
+                    "PricePoint",
+                ],
                 scopes=["Local", "Primary", "Venue"],
             )
         ],
@@ -216,7 +253,9 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
     return AnalyticsConfig(PASSES=[pass1])
 
 
-def get_full_output_schema(levels: int = 10, impact_horizons=None) -> Dict[str, List[str]]:
+def get_full_output_schema(
+    levels: int = 10, impact_horizons=None
+) -> Dict[str, List[str]]:
     """
     Generates schema using a full combinatorics config.
     """
@@ -514,7 +553,13 @@ def _apply_docs(module: str, col: str):
             "group_role": group_role,
             "group_semantics": group_semantics,
         }
-    return {"definition": "", "unit": "", "group": "", "group_role": "", "group_semantics": ""}
+    return {
+        "definition": "",
+        "unit": "",
+        "group": "",
+        "group_role": "",
+        "group_semantics": "",
+    }
 
 
 def _default_hint_for_column(col: str, weight_col: str | None):
@@ -525,7 +570,11 @@ def _default_hint_for_column(col: str, weight_col: str | None):
         return {"default_agg": "Last", "weight_col": None}
     if col == "MarketState":
         return {"default_agg": "Last", "weight_col": None}
-    if col.endswith("_right") or col.endswith("TimeBucketInt") or col.endswith("TimeBucketInt_right"):
+    if (
+        col.endswith("_right")
+        or col.endswith("TimeBucketInt")
+        or col.endswith("TimeBucketInt_right")
+    ):
         return {"default_agg": "Last", "weight_col": None}
 
     stat_markers = ["avg", "mean", "median", "std", "vwap"]

@@ -119,7 +119,11 @@ def inspect_db(
                     SqlEventLogStorageTable.c.asset_key,
                     SqlEventLogStorageTable.c.dagster_event_type,
                 )
-                .order_by(func.count(func.distinct(SqlEventLogStorageTable.c.partition)).desc())
+                .order_by(
+                    func.count(
+                        func.distinct(SqlEventLogStorageTable.c.partition)
+                    ).desc()
+                )
             )
             if asset_key:
                 q = q.where(SqlEventLogStorageTable.c.asset_key == asset_key)
@@ -141,7 +145,9 @@ def inspect_db(
             )
             if asset_key:
                 q = q.where(SqlEventLogStorageTable.c.asset_key == asset_key)
-            rows = conn.execute(q.order_by(SqlEventLogStorageTable.c.id.desc()).limit(limit)).fetchall()
+            rows = conn.execute(
+                q.order_by(SqlEventLogStorageTable.c.id.desc()).limit(limit)
+            ).fetchall()
             print(f"materialization_rows: {len(rows)}")
             for row in rows:
                 print(
@@ -175,8 +181,7 @@ def inspect_db(
 
             if show_partition_breakdown:
                 part_rows = conn.execute(
-                    select(SqlEventLogStorageTable.c.partition)
-                    .where(
+                    select(SqlEventLogStorageTable.c.partition).where(
                         SqlEventLogStorageTable.c.asset_key == asset_key,
                         SqlEventLogStorageTable.c.partition != None,  # noqa: E711
                     )

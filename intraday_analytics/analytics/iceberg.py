@@ -34,7 +34,8 @@ class IcebergMetricConfig(CombinatorialMetricConfig):
     metric_type: Literal["Iceberg"] = "Iceberg"
 
     measures: Union[IcebergMeasure, List[IcebergMeasure]] = Field(
-        ..., description="Iceberg measure to compute.",
+        ...,
+        description="Iceberg measure to compute.",
         json_schema_extra={
             "long_doc": "Selects iceberg measures to compute.\n"
             "Examples: ExecutionVolume, ExecutionCount, AverageSize.\n"
@@ -75,6 +76,7 @@ class IcebergAnalyticsConfig(BaseModel):
     resulting metrics within TimeBuckets. Configuration should be tuned to the
     timing and size characteristics of the venue to avoid over- or under-matching.
     """
+
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(
         None,
@@ -537,12 +539,9 @@ class IcebergAnalytics(BaseAnalytics):
 
     def _iceberg_execution_df(self) -> pl.LazyFrame:
         base = self._l3_execution_df()
-        return (
-            base.with_columns(
-                RevealedQty=(pl.col("ExecutionSize") - pl.col("OldSize")).clip(0)
-            )
-            .filter(pl.col("RevealedQty") > self.config.min_revealed_qty)
-        )
+        return base.with_columns(
+            RevealedQty=(pl.col("ExecutionSize") - pl.col("OldSize")).clip(0)
+        ).filter(pl.col("RevealedQty") > self.config.min_revealed_qty)
 
     def _l3_execution_df(self) -> pl.LazyFrame:
         base = self.l3.filter(pl.col("LobAction") == 3).filter(
@@ -600,9 +599,13 @@ class IcebergAnalytics(BaseAnalytics):
 
         trade_cols = trades.collect_schema().names()
         if "BMLLTradeType" in trade_cols and self.config.trade_match_trade_types:
-            trades = trades.filter(pl.col("BMLLTradeType").is_in(self.config.trade_match_trade_types))
+            trades = trades.filter(
+                pl.col("BMLLTradeType").is_in(self.config.trade_match_trade_types)
+            )
         if "Classification" in trade_cols and self.config.trade_match_classifications:
-            trades = trades.filter(pl.col("Classification").is_in(self.config.trade_match_classifications))
+            trades = trades.filter(
+                pl.col("Classification").is_in(self.config.trade_match_classifications)
+            )
 
         trades = trades.with_columns(
             L3Side=pl.when(pl.col("TradeSide") == 1)
@@ -638,7 +641,9 @@ class IcebergAnalytics(BaseAnalytics):
 
         return joined.with_columns(IcebergTradeMatch=cond.fill_null(False))
 
-    def _tag_trades(self, iceberg_exec: pl.LazyFrame, exec_base: pl.LazyFrame) -> pl.LazyFrame:
+    def _tag_trades(
+        self, iceberg_exec: pl.LazyFrame, exec_base: pl.LazyFrame
+    ) -> pl.LazyFrame:
         trades = self.trades
         if isinstance(trades, pl.DataFrame):
             trades = trades.lazy()
@@ -664,7 +669,9 @@ class IcebergAnalytics(BaseAnalytics):
         if self.config.trade_match_enabled:
             trade_match = self._trade_match_tag(exec_base)
             joined = joined.join(
-                trade_match.select(["ListingId", "TradeTimestamp", "IcebergTradeMatch"]),
+                trade_match.select(
+                    ["ListingId", "TradeTimestamp", "IcebergTradeMatch"]
+                ),
                 on=["ListingId", "TradeTimestamp"],
                 how="left",
             )
@@ -675,7 +682,9 @@ class IcebergAnalytics(BaseAnalytics):
             IcebergExecution=(
                 pl.col("IcebergL3Revealed") | pl.col("IcebergTradeMatch")
             ).fill_null(False),
-            IcebergTag=pl.when(pl.col("IcebergL3Revealed") & pl.col("IcebergTradeMatch"))
+            IcebergTag=pl.when(
+                pl.col("IcebergL3Revealed") & pl.col("IcebergTradeMatch")
+            )
             .then(pl.lit("BOTH"))
             .when(pl.col("IcebergL3Revealed"))
             .then(pl.lit("L3_REVEALED"))
@@ -783,9 +792,7 @@ class IcebergAnalytics(BaseAnalytics):
             mapping = self._iceberg_link_map(iceberg_exec)
             iceberg_exec = iceberg_exec.join(
                 mapping.lazy(), on=["ListingId", "OrderID"], how="left"
-            ).with_columns(
-                IcebergId=pl.col("IcebergId").cast(pl.Int64)
-            )
+            ).with_columns(IcebergId=pl.col("IcebergId").cast(pl.Int64))
             iceberg_exec = iceberg_exec.sort("EventTimestamp").with_columns(
                 IcebergEventCount=pl.when(pl.col("IcebergId").is_not_null())
                 .then(pl.col("IcebergId").cum_count().over("IcebergId") + 1)
@@ -808,7 +815,7 @@ class IcebergAnalytics(BaseAnalytics):
 
         analytic = IcebergExecutionAnalytic()
         expressions = build_expressions(ctx, [(analytic, self.config.metrics)])
-        
+
         if not expressions:
             default_cfg = [
                 IcebergMetricConfig(
@@ -837,7 +844,10 @@ class IcebergAnalytics(BaseAnalytics):
             )
         }
 
-        if "AveragePeakCount" in requested_measures and "IcebergEventCount" in iceberg_exec.collect_schema().names():
+        if (
+            "AveragePeakCount" in requested_measures
+            and "IcebergEventCount" in iceberg_exec.collect_schema().names()
+        ):
             peak_avg = (
                 iceberg_exec.drop_nulls(["IcebergId"])
                 .group_by(["ListingId", "TimeBucket", "IcebergId"])

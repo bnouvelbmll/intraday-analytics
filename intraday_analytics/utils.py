@@ -157,7 +157,7 @@ def retry_s3(fn, *, attempts=4, base_delay=1.0, factor=5.0, max_delay=300.0, des
                 raise
             if attempt == attempts - 1:
                 raise
-            delay = min(max_delay, base_delay * (factor ** attempt))
+            delay = min(max_delay, base_delay * (factor**attempt))
             logging.warning(
                 f"S3 operation failed{f' ({desc})' if desc else ''}: {e}. "
                 f"Retrying in {delay:.1f}s (attempt {attempt + 1}/{attempts})."
@@ -223,7 +223,9 @@ def filter_existing_s3_files(paths, storage_options=None):
             logging.warning(f"Filtered out {missing} missing S3 files (boto3).")
         return existing
     except Exception:
-        logging.warning("S3 existence checks unavailable; proceeding without prefilter.")
+        logging.warning(
+            "S3 existence checks unavailable; proceeding without prefilter."
+        )
         return paths
 
 
@@ -374,9 +376,7 @@ def normalize_float_df(
     if df.is_empty():
         return df
     float_cols = [
-        c
-        for c, dt in zip(df.columns, df.dtypes)
-        if dt in (pl.Float32, pl.Float64)
+        c for c, dt in zip(df.columns, df.dtypes) if dt in (pl.Float32, pl.Float64)
     ]
     if not float_cols:
         return df

@@ -4,7 +4,12 @@ from pydantic import BaseModel, Field, model_validator
 from typing import List, Union, Literal, Optional, Set, Dict, Any
 import logging
 
-from .common import CombinatorialMetricConfig, Side, AggregationMethod, apply_aggregation
+from .common import (
+    CombinatorialMetricConfig,
+    Side,
+    AggregationMethod,
+    apply_aggregation,
+)
 from .utils import apply_alias
 from intraday_analytics.analytics_base import (
     AnalyticSpec,
@@ -32,7 +37,8 @@ class L3MetricConfig(CombinatorialMetricConfig):
     metric_type: Literal["L3_Generic"] = "L3_Generic"
 
     sides: Union[Side, List[Side]] = Field(
-        ..., description="Side of the book.",
+        ...,
+        description="Side of the book.",
         json_schema_extra={
             "long_doc": "Selects book side(s) for L3 metrics.\n"
             "Options: Bid, Ask, or list of both.\n"
@@ -47,7 +53,8 @@ class L3MetricConfig(CombinatorialMetricConfig):
     )
 
     actions: Union[L3Action, List[L3Action]] = Field(
-        ..., description="LOB Action type.",
+        ...,
+        description="LOB Action type.",
         json_schema_extra={
             "long_doc": "Selects which L3 events to include (Insert/Remove/Update etc). "
             "Used in `L3GenericAnalytic.expressions()` to filter `LobAction`.\n"
@@ -63,7 +70,8 @@ class L3MetricConfig(CombinatorialMetricConfig):
     )
 
     measures: Union[L3Measure, List[L3Measure]] = Field(
-        ..., description="Measure to compute (Count or Volume).",
+        ...,
+        description="Measure to compute (Count or Volume).",
         json_schema_extra={
             "long_doc": "Selects whether the metric counts events or sums sizes. "
             "Used in `L3GenericAnalytic.expressions()`.\n"
@@ -168,6 +176,7 @@ class L3AnalyticsConfig(BaseModel):
     timestamps, sizes, or lifecycle attributes, so configuration should match
     the available L3 schema.
     """
+
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(
         None,
@@ -351,10 +360,9 @@ class L3AdvancedAnalytic(AnalyticSpec):
         bid_col = f"{prefix}RemoveCountBid" if prefix else "RemoveCountBid"
         ask_col = f"{prefix}RemoveCountAsk" if prefix else "RemoveCountAsk"
         return base_df.with_columns(
-            (
-                (pl.col(bid_col) + pl.col(ask_col))
-                / (pl.col("ExecCount") + 1e-9)
-            ).alias(col_name)
+            ((pl.col(bid_col) + pl.col(ask_col)) / (pl.col("ExecCount") + 1e-9)).alias(
+                col_name
+            )
         ).drop("ExecCount")
 
     @analytic_expression(
@@ -425,8 +433,7 @@ class L3AdvancedAnalytic(AnalyticSpec):
         ask_col = f"{prefix}InsertVolumeAsk" if prefix else "InsertVolumeAsk"
         return base_df.with_columns(
             (
-                pl.col("FleetingVolume")
-                / (pl.col(bid_col) + pl.col(ask_col) + 1e-9)
+                pl.col("FleetingVolume") / (pl.col(bid_col) + pl.col(ask_col) + 1e-9)
             ).alias(col_name)
         ).drop("FleetingVolume")
 
@@ -485,7 +492,9 @@ class L3AdvancedAnalytic(AnalyticSpec):
             return f"{prefix}{col_name}"
         return col_name
 
-    def _collect_required_outputs(self, advanced_variants: List[Dict[str, Any]]) -> List[str]:
+    def _collect_required_outputs(
+        self, advanced_variants: List[Dict[str, Any]]
+    ) -> List[str]:
         required: Set[str] = set()
         for adv in advanced_variants:
             for name in self.REQUIRED_OUTPUTS.get(adv.get("variant"), []):
@@ -493,7 +502,10 @@ class L3AdvancedAnalytic(AnalyticSpec):
         return list(required)
 
     def _compute_lifetimes(
-        self, l3: pl.LazyFrame, config_dict: Dict[str, Any], market_states: Optional[List[str]] = None
+        self,
+        l3: pl.LazyFrame,
+        config_dict: Dict[str, Any],
+        market_states: Optional[List[str]] = None,
     ):
         if market_states:
             l3 = l3.filter(pl.col("MarketState").is_in(market_states))
@@ -624,7 +636,9 @@ class L3Analytics(BaseAnalytics):
                 advanced_variants.append(variant)
         return advanced_variants
 
-    def _required_intermediates(self, advanced_variants: List[Dict[str, Any]]) -> Set[str]:
+    def _required_intermediates(
+        self, advanced_variants: List[Dict[str, Any]]
+    ) -> Set[str]:
         """Determine required intermediate generic outputs for advanced metrics."""
         if not advanced_variants:
             return set()
@@ -653,10 +667,26 @@ class L3Analytics(BaseAnalytics):
         """Ensure required generic intermediates exist for advanced metrics."""
         requested_aliases = self._requested_aliases()
         required_map = {
-            "InsertVolumeBid": {"sides": "Bid", "actions": "Insert", "measures": "Volume"},
-            "InsertVolumeAsk": {"sides": "Ask", "actions": "Insert", "measures": "Volume"},
-            "RemoveCountBid": {"sides": "Bid", "actions": "Remove", "measures": "Count"},
-            "RemoveCountAsk": {"sides": "Ask", "actions": "Remove", "measures": "Count"},
+            "InsertVolumeBid": {
+                "sides": "Bid",
+                "actions": "Insert",
+                "measures": "Volume",
+            },
+            "InsertVolumeAsk": {
+                "sides": "Ask",
+                "actions": "Insert",
+                "measures": "Volume",
+            },
+            "RemoveCountBid": {
+                "sides": "Bid",
+                "actions": "Remove",
+                "measures": "Count",
+            },
+            "RemoveCountAsk": {
+                "sides": "Ask",
+                "actions": "Remove",
+                "measures": "Count",
+            },
         }
         for name in required_intermediates:
             prefixed_name = self.apply_prefix(name)

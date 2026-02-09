@@ -111,7 +111,9 @@ class TestMultiPassPipeline(unittest.TestCase):
         "intraday_analytics.execution.ProcessInterval", side_effect=SyncProcessInterval
     )
     @patch("intraday_analytics.execution.get_files_for_date_range")
-    @patch("intraday_analytics.execution.as_completed", side_effect=lambda futures: futures)
+    @patch(
+        "intraday_analytics.execution.as_completed", side_effect=lambda futures: futures
+    )
     @patch("intraday_analytics.execution.ProcessPoolExecutor")
     def test_selective_pass_execution(
         self,
@@ -144,7 +146,9 @@ class TestMultiPassPipeline(unittest.TestCase):
             return AnalyticsPipeline(modules, self.config, pass_config, context)
 
         run_metrics_pipeline(
-            config=self.config, get_universe=mock_get_universe, get_pipeline=get_pipeline
+            config=self.config,
+            get_universe=mock_get_universe,
+            get_pipeline=get_pipeline,
         )
 
         # Verify output of the first pass

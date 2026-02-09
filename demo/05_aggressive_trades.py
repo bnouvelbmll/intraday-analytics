@@ -13,7 +13,9 @@ from intraday_analytics.cli import run_cli
 from intraday_analytics.pipeline import AnalyticsPipeline
 from intraday_analytics.dense_analytics import DenseAnalytics
 from intraday_analytics.analytics.trade import TradeAnalytics
-from intraday_analytics.dataset_transforms.aggressive_trades import AggressiveTradesTransform
+from intraday_analytics.dataset_transforms.aggressive_trades import (
+    AggressiveTradesTransform,
+)
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig
 from intraday_analytics.dagster_compat import CustomUniverse
 
@@ -58,7 +60,9 @@ class AggressiveTradesPipeline(AnalyticsPipeline):
     Pipeline that injects aggressive-trades into the shared context.
     """
 
-    def __init__(self, *args, transform: AggressiveTradesTransform, context_key: str, **kwargs):
+    def __init__(
+        self, *args, transform: AggressiveTradesTransform, context_key: str, **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self._transform = transform
         self._context_key = context_key
