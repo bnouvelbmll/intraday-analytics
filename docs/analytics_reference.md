@@ -137,6 +137,55 @@ This shows:
 - a calendar heatmap of total size per day
 - a universe/date heatmap of `size_bytes`
 
+### Metrics and Units
+
+Supported `metric_key` values:
+- `size_bytes` (default): uses materialization metadata `size_bytes`
+- `age_in_days` / `age_days`: derived from `last_modified` metadata when available,
+  otherwise the materialization event timestamp.
+
+Units:
+- `metric_unit="GB"` (default) for `size_bytes`
+- `metric_unit="MB"` or `metric_unit="TB"` as needed
+- use `metric_unit="days"` for `age_in_days`
+
+### Performance Notes
+
+The current implementation reads from Dagster’s event log API and can be slow on
+large histories. You can speed it up by constraining the time window:
+
+```python
+import time
+now = time.time()
+materialization_dashboard(
+    instance,
+    asset_keys,
+    metric_key="size_bytes",
+    after_timestamp=now - 90 * 24 * 3600,  # last 90 days
+)
+```
+
+You can also opt into a DB-direct reader (SQL) for larger installations:
+
+```python
+materialization_dashboard(
+    instance,
+    asset_keys,
+    metric_key="size_bytes",
+    use_db_direct=True,
+)
+```
+
+This uses `SqlEventLogStorage` directly and reads from the index shard.
+
+### Warnings / Caveats
+
+- `age_in_days` depends on `last_modified` being present in metadata. If missing,
+  it falls back to event time.
+- Partition parsing assumes `date|universe` or `key=value|key=value` formats.
+- For very large logs, you may want a DB‑direct path (SQL) to aggregate faster.
+  This is not implemented yet but can be added as an optional backend.
+
 ## execution
 
 Purpose: execution-level metrics derived from trades and L3.
