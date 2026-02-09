@@ -329,8 +329,21 @@ def build_plots(
     if df.empty:
         return {"calendar_count": go.Figure(), "calendar_size": go.Figure(), "heatmap": go.Figure()}
 
-    count_df = df.groupby("date")["universe"].nunique().reset_index(name="count")
-    size_df = df.groupby("date")["metric"].sum().reset_index(name="total")
+    latest = (
+        df.sort_values("timestamp")
+        .groupby(["universe", "date"], as_index=False)
+        .tail(1)
+    )
+    count_df = (
+        latest.groupby("date")["universe"]
+        .nunique()
+        .reset_index(name="count")
+    )
+    size_df = (
+        latest.groupby("date")["metric"]
+        .sum()
+        .reset_index(name="total")
+    )
 
     return {
         "calendar_count": calendar_heatmap(
@@ -340,7 +353,7 @@ def build_plots(
             size_df, value_col="total", title=f"Total {metric_label} by date", unit=metric_unit
         ),
         "heatmap": universe_heatmap(
-            df, value_col="metric", title=f"{metric_label} by universe/date",
+            latest, value_col="metric", title=f"{metric_label} by universe/date",
             exclude_unpopulated=exclude_unpopulated, unit=metric_unit
         ),
     }
