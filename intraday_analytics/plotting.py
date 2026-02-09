@@ -8,6 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import ipywidgets as widgets
 from IPython.display import display, clear_output
+import math
 
 from dagster import AssetKey, DagsterInstance, DagsterEventType, EventRecordsFilter
 from dagster._core.storage.event_log.sql_event_log import SqlEventLogStorage
@@ -179,6 +180,49 @@ def load_materialization_frame(
     return df
 
 
+_MATERIALIZATION_CACHE: dict[tuple, pd.DataFrame] = {}
+
+
+def load_materialization_frame_cached(
+    instance: DagsterInstance,
+    asset_keys: Iterable[AssetKey],
+    *,
+    metric_key: str = "size_bytes",
+    date_dim: str = "date",
+    universe_dim: str = "universe",
+    limit: Optional[int] = None,
+    after_timestamp: Optional[float] = None,
+    before_timestamp: Optional[float] = None,
+    use_db_direct: bool = False,
+    refresh_cache: bool = False,
+) -> pd.DataFrame:
+    key = (
+        tuple(ak.to_string() for ak in asset_keys),
+        metric_key,
+        date_dim,
+        universe_dim,
+        limit,
+        after_timestamp,
+        before_timestamp,
+        use_db_direct,
+    )
+    if not refresh_cache and key in _MATERIALIZATION_CACHE:
+        return _MATERIALIZATION_CACHE[key].copy()
+    df = load_materialization_frame(
+        instance,
+        asset_keys,
+        metric_key=metric_key,
+        date_dim=date_dim,
+        universe_dim=universe_dim,
+        limit=limit,
+        after_timestamp=after_timestamp,
+        before_timestamp=before_timestamp,
+        use_db_direct=use_db_direct,
+    )
+    _MATERIALIZATION_CACHE[key] = df.copy()
+    return df
+
+
 def _sort_universes(df: pd.DataFrame) -> list[str]:
     if df.empty:
         return []
@@ -332,7 +376,7 @@ def materialization_dashboard(
         before_ts: Optional[float],
         use_db: bool,
     ):
-        df = load_materialization_frame(
+        df = load_materialization_frame_cached(
             instance,
             asset_keys,
             metric_key=metric_key_value,
@@ -354,14 +398,11 @@ def materialization_dashboard(
             if inferred_unit == "GB":
                 df["metric"] = df["metric"] / (1024**3)
                 metric_label_local = "size_gb"
-            elif inferred_unit == "MB":
-                df["metric"] = df["metric"] / (1024**2)
-                metric_label_local = "size_mb"
-            elif inferred_unit == "TB":
-                df["metric"] = df["metric"] / (1024**4)
-                metric_label_local = "size_tb"
             else:
                 metric_label_local = metric_label
+        elif metric_key_value in {"age_in_days", "age_days"} and inferred_unit == "log2_days":
+            df["metric"] = df["metric"].apply(lambda v: math.log2(1 + v) if pd.notna(v) else v)
+            metric_label_local = "log2_days"
         else:
             metric_label_local = metric_label
 
@@ -387,7 +428,7 @@ def materialization_dashboard(
         description="Metric",
     )
     unit_dropdown = widgets.Dropdown(
-        options=[("auto", "auto"), ("GB", "GB"), ("MB", "MB"), ("TB", "TB"), ("days", "days")],
+        options=[("auto", "auto"), ("GB", "GB"), ("days", "days"), ("log2_days", "log2_days")],
         value=metric_unit or "auto",
         description="Unit",
     )
@@ -397,7 +438,7 @@ def materialization_dashboard(
             ("Total size (calendar)", "calendar_size"),
             ("Universe/date heatmap", "heatmap"),
         ],
-        value="calendar_count",
+        value="heatmap",
         description="Plot",
     )
     exclude_checkbox = widgets.Checkbox(
@@ -462,7 +503,7 @@ def materialization_dashboard_interactive(
         description="Metric",
     )
     unit_dropdown = widgets.Dropdown(
-        options=[("auto", "auto"), ("GB", "GB"), ("MB", "MB"), ("TB", "TB"), ("days", "days")],
+        options=[("auto", "auto"), ("GB", "GB"), ("days", "days"), ("log2_days", "log2_days")],
         value=metric_unit or "auto",
         description="Unit",
     )
@@ -472,7 +513,7 @@ def materialization_dashboard_interactive(
             ("Total size (calendar)", "calendar_size"),
             ("Universe/date heatmap", "heatmap"),
         ],
-        value="calendar_count",
+        value="heatmap",
         description="Plot",
     )
     exclude_checkbox = widgets.Checkbox(
@@ -505,10 +546,7 @@ def materialization_dashboard_interactive(
         return None, None
 
     def _get_df(dataset, metric_key_value, after_ts, before_ts, use_db):
-        cache_key = (dataset, metric_key_value, after_ts, before_ts, use_db)
-        if cache_key in cache:
-            return cache[cache_key]
-        df = load_materialization_frame(
+        return load_materialization_frame_cached(
             instance,
             dataset_map[dataset],
             metric_key=metric_key_value,
@@ -518,8 +556,6 @@ def materialization_dashboard_interactive(
             before_timestamp=before_ts,
             use_db_direct=use_db,
         )
-        cache[cache_key] = df
-        return df
 
     def _render(_=None):
         dataset = dataset_dropdown.value
@@ -541,12 +577,9 @@ def materialization_dashboard_interactive(
             if inferred_unit == "GB":
                 df["metric"] = df["metric"] / (1024**3)
                 metric_label_local = "size_gb"
-            elif inferred_unit == "MB":
-                df["metric"] = df["metric"] / (1024**2)
-                metric_label_local = "size_mb"
-            elif inferred_unit == "TB":
-                df["metric"] = df["metric"] / (1024**4)
-                metric_label_local = "size_tb"
+        elif metric_key_value in {"age_in_days", "age_days"} and inferred_unit == "log2_days":
+            df["metric"] = df["metric"].apply(lambda v: math.log2(1 + v) if pd.notna(v) else v)
+            metric_label_local = "log2_days"
 
         figs = build_plots(
             df,
