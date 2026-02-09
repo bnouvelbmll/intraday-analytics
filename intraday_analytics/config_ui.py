@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from typing import Any, Optional, Union, get_args, get_origin
+import random
 from enum import Enum
 import inspect
 
@@ -14,8 +15,10 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Checkbox, Footer, Header, Input, Label, Select, Static, TextArea
+from rich.panel import Panel
 
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig
+from intraday_analytics.configuration import AnalyticsConfig, PassConfig, OutputTarget
+from intraday_analytics.execution import _derive_tables_to_load
 from intraday_analytics.schema_utils import get_output_schema, get_full_output_schema
 from intraday_analytics.analytics.l3 import L3AdvancedConfig
 
@@ -174,6 +177,72 @@ def _parse_yaml(text: str) -> Any:
     return yaml.safe_load(text)
 
 
+class RotatingText(Static):
+    def __init__(self, items: list[str], prefix: str = "Metrics: ", sep: str = " • "):
+        super().__init__("")
+        self.items = list(items)
+        self.prefix = prefix
+        self.sep = sep
+        self._offset = 0
+        self._text = ""
+
+    def on_mount(self) -> None:
+        if self.items:
+            random.shuffle(self.items)
+            self._text = self.prefix + self.sep.join(self.items)
+        else:
+            self._text = f"{self.prefix}none"
+        self.set_interval(0.15, self._tick)
+
+    def _tick(self) -> None:
+        width = max(self.size.width, 10)
+        if len(self._text) <= width:
+            self.update(self._text)
+            return
+        gap = "   "
+        scroll = self._text + gap + self._text
+        max_offset = len(self._text) + len(gap)
+        if max_offset <= 0:
+            self.update(self._text)
+            return
+        self._offset = (self._offset + 1) % max_offset
+        window = scroll[self._offset:self._offset + width]
+        self.update(window)
+
+
+class PassSummaryBox(Vertical):
+    DEFAULT_CSS = """
+    PassSummaryBox {
+        border: solid $primary;
+        padding: 0;
+        margin-bottom: 1;
+    }
+    PassSummaryBox > .summary-title {
+        text-style: bold;
+    }
+    .metrics-row {
+        margin-top: 1;
+        height: 1;
+    }
+    .metrics-row > RotatingText {
+        height: 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, title: str, body: str, metrics_list: list[str]):
+        super().__init__()
+        self.border_title = title
+        self._body = body
+        self._metrics_list = metrics_list
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._body)
+        with Horizontal(classes="metrics-row"):
+            yield Label("Analytics: ")
+            yield RotatingText(self._metrics_list, prefix="")
+
+
 class ModelEditor(Screen):
     CSS =  """
     Screen { background: $surface; color: $text; }
@@ -269,6 +338,9 @@ class ModelEditor(Screen):
                     cb = Checkbox(opt, value=opt in current)
                     widget.append(cb)
             else:
+                if len(union_lit) == 1:
+                    self.data[name] = union_lit[0] if value is None else value
+                    return
                 if isinstance(value, list):
                     value = value[0] if value else None
                 widget = Select(
@@ -283,6 +355,9 @@ class ModelEditor(Screen):
                 widget.append(cb)
         elif _is_literal(annotation):
             options = _literal_options(annotation)
+            if len(options) == 1:
+                self.data[name] = options[0] if value is None else value
+                return
             if isinstance(value, list):
                 value = value[0] if value else None
             widget = Select([(o, o) for o in options], value=str(value) if value is not None else options[0])
@@ -294,6 +369,9 @@ class ModelEditor(Screen):
                 widget.append(cb)
         elif _is_enum(annotation):
             options = _enum_options(annotation)
+            if len(options) == 1:
+                self.data[name] = options[0] if value is None else value
+                return
             current = value.value if hasattr(value, "value") else value
             widget = Select([(o, o) for o in options], value=str(current) if current is not None else options[0])
         elif annotation in (int, float, str):
@@ -330,6 +408,21 @@ class ModelEditor(Screen):
                     )
 
     def _should_render_field(self, name: str, annotation) -> bool:
+        field_info = self.model_cls.model_fields.get(name)  # type: ignore[attr-defined]
+        if field_info:
+            extra = getattr(field_info, "json_schema_extra", None) or {}
+            depends_on = extra.get("depends_on") if isinstance(extra, dict) else None
+            if depends_on:
+                for dep_field, dep_values in depends_on.items():
+                    current = self.data.get(dep_field)
+                    if hasattr(current, "value"):
+                        current = current.value
+                    if isinstance(dep_values, (list, tuple, set)):
+                        allowed = list(dep_values)
+                    else:
+                        allowed = [dep_values]
+                    if current not in allowed:
+                        return False
         if self.model_cls is L3AdvancedConfig and name == "fleeting_threshold_ms":
             variant = self.data.get("variant")
             if isinstance(variant, list):
@@ -387,7 +480,7 @@ class ModelEditor(Screen):
             self.app.push_screen(screen)
 
     def _save(self) -> None:
-        raw = {}
+        raw = dict(self.data) if isinstance(self.data, dict) else {}
         for name, (widget, annotation) in self.widgets.items():
             if isinstance(widget, Checkbox):
                 raw[name] = widget.value
@@ -486,22 +579,47 @@ class ConfigEditor(App):
     Vertical { height: auto; }
     Horizontal { height: auto; }
     """
-    BINDINGS = [("ctrl+s", "save", "Save"), ("ctrl+q", "quit", "Quit")]
+    BINDINGS = [
+        ("ctrl+s", "save", "Save"),
+        ("ctrl+q", "quit", "Quit"),
+        ("ctrl+a", "toggle_advanced", "Toggle Advanced Modules"),
+        ("ctrl+b", "edit_passes", "Edit Passes"),
+        ("ctrl+l", "toggle_pass_lock", "Toggle Pass Lock"),
+        ("ctrl+c", "edit_section('Core')", "Core"),
+        ("ctrl+o", "edit_section('Outputs')", "Outputs"),
+        ("ctrl+u", "edit_section('Automation')", "Automation"),
+        ("ctrl+e", "edit_section('PerformanceAndExecutionEnvironment')", "Performance"),
+        ("ctrl+g", "edit_section('Advanced')", "Advanced"),
+    ]
 
     def __init__(self, yaml_path: Path, initial_config: dict):
         super().__init__()
         self.yaml_path = yaml_path
         self.config_data = initial_config
         self.status = Static("")
+        self.summary = Vertical(id="summary")
         self.advanced_modules = False
+        self.pass_readonly = True
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield Label("AnalyticsConfig")
-        yield Checkbox("Show advanced modules (e.g. characteristics)", id="advanced_modules")
-        for section, _ in _iter_global_sections(AnalyticsConfig):
-            yield Button(f"Edit {section}", id=f"edit_section_{section}", variant="primary")
-        yield Button("Edit Passes", id="edit_passes")
+        yield self.summary
+        with Vertical():
+            for section, _ in _iter_global_sections(AnalyticsConfig):
+                label = section
+                if section == "Core":
+                    label = "Edit Core (Ctrl+C)"
+                elif section == "Outputs":
+                    label = "Edit Outputs (Ctrl+O)"
+                elif section == "Automation":
+                    label = "Edit Automation (Ctrl+U)"
+                elif section == "PerformanceAndExecutionEnvironment":
+                    label = "Edit Performance (Ctrl+E)"
+                elif section == "Advanced":
+                    label = "Edit Advanced (Ctrl+G)"
+                yield Button(label, id=f"edit_section_{section}", variant="primary")
+            yield Button("Edit Passes (Ctrl+B)", id="edit_passes")
         yield self.status
         yield Footer()
 
@@ -509,22 +627,9 @@ class ConfigEditor(App):
         button_id = event.button.id or ""
         if button_id.startswith("edit_section_"):
             section = button_id.replace("edit_section_", "", 1)
-            def _on_save(updated):
-                self.config_data.update(updated)
-            screen = ModelEditor(
-                AnalyticsConfig,
-                self.config_data,
-                f"AnalyticsConfig.{section}",
-                _on_save,
-            )
-            screen._section_filter = section
-            self.push_screen(screen)
+            self._open_section_editor(section)
         elif button_id == "edit_passes":
-            self.push_screen(PassListEditor(self.config_data, advanced_modules=self.advanced_modules))
-
-    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        if event.checkbox.id == "advanced_modules":
-            self.advanced_modules = event.checkbox.value
+            self._open_passes_editor()
 
     def action_save(self) -> None:
         try:
@@ -534,6 +639,103 @@ class ConfigEditor(App):
             return
         _save_yaml_user_config(self.yaml_path, model.model_dump())
         self.status.update(f"Saved: {self.yaml_path}")
+
+    def action_toggle_advanced(self) -> None:
+        self.advanced_modules = not self.advanced_modules
+        self._refresh_summary()
+
+    def action_edit_passes(self) -> None:
+        self._open_passes_editor()
+
+    def action_edit_section(self, section: str) -> None:
+        self._open_section_editor(section)
+
+    def on_mount(self) -> None:
+        self._refresh_summary()
+
+    def on_screen_resume(self) -> None:
+        self._refresh_summary()
+
+    def _open_section_editor(self, section: str) -> None:
+        def _on_save(updated):
+            self.config_data.update(updated)
+            self._refresh_summary()
+        screen = ModelEditor(
+            AnalyticsConfig,
+            self.config_data,
+            f"AnalyticsConfig.{section}",
+            _on_save,
+        )
+        screen._section_filter = section
+        self.push_screen(screen)
+
+    def _open_passes_editor(self) -> None:
+        screen = PassListEditor(
+            self.config_data,
+            advanced_modules=self.advanced_modules,
+            pass_readonly=self.pass_readonly,
+            on_readonly_change=self._set_pass_readonly,
+        )
+        self.push_screen(screen)
+
+    def _refresh_summary(self) -> None:
+        if not self.summary.is_attached:
+            return
+        self.summary.remove_children()
+        data = self.config_data or {}
+        dataset = data.get("DATASETNAME", "unknown")
+        passes = data.get("PASSES", []) or []
+        area = data.get("AREA", "unknown")
+        universe = data.get("UNIVERSE") or "default"
+        start_date = data.get("START_DATE") or "default"
+        end_date = data.get("END_DATE") or "default"
+        header = (
+            f"Dataset name: {dataset}\n"
+            f"Area: {area}\n"
+            f"Default universe: {universe}\n"
+            f"Default dates: {start_date} -> {end_date}\n"
+            f"Passes: {len(passes)}\n"
+            f"Pass lock: {'ON' if self.pass_readonly else 'OFF'} (Ctrl+L)"
+        )
+        self.summary.mount(Static(Panel(header, title="Summary", border_style="cyan")))
+        for idx, p in enumerate(passes):
+            name = p.get("name", f"pass{idx+1}")
+            time_bucket = int(p.get("time_bucket_seconds", 60))
+            if p.get("sort_keys"):
+                grouping = p.get("sort_keys")
+            elif "generic" in (p.get("modules") or []):
+                grouping = (p.get("generic_analytics") or {}).get("group_by", ["ListingId", "TimeBucket"])
+            else:
+                grouping = ["ListingId", "TimeBucket"]
+            grouping_label = ",".join(grouping)
+            title = f"{name}"
+            modules = p.get("modules", []) or []
+            modules_str = ", ".join(modules) if modules else "none"
+            metrics = _pass_metric_count(p)
+            input_driver = data.get("PREPARE_DATA_MODE", "unknown")
+            output_target = p.get("output") or data.get("OUTPUT_TARGET")
+            output_driver = _format_output_driver(output_target, data)
+            tables = _tables_for_pass(p, data)
+            tables_str = ", ".join(tables) if tables else "none"
+            body = "\n".join(
+                [
+                    f"Modules: {modules_str}",
+                    f"Metrics: {metrics}",
+                    f"Input driver: {input_driver}",
+                    f"Output driver: {output_driver}",
+                    f"Time bucket: {int(p.get('time_bucket_seconds', 60))}s",
+                    f"Grouping: {grouping_label}",
+                    f"Tables to load: {tables_str}",
+                ]
+            )
+            metrics_list = _pass_metric_list(p)
+            self.summary.mount(PassSummaryBox(title, body, metrics_list))
+
+    def _set_pass_readonly(self, value: bool) -> None:
+        self.pass_readonly = value
+
+    def action_toggle_pass_lock(self) -> None:
+        self.pass_readonly = not self.pass_readonly
 
 
 MODULE_INFO = {
@@ -601,18 +803,57 @@ MODULE_SCHEMA_KEYS = {
 
 
 class PassListEditor(Screen):
-    def __init__(self, config_data: dict, advanced_modules: bool = False):
+    def __init__(
+        self,
+        config_data: dict,
+        advanced_modules: bool = False,
+        pass_readonly: bool = True,
+        on_readonly_change=None,
+    ):
         super().__init__()
         self.config_data = config_data
         self.advanced_modules = advanced_modules
+        self.pass_readonly = pass_readonly
+        self.on_readonly_change = on_readonly_change
         self.status = Static("")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Label("PASSES")
+        yield Label("Pass lock: use Ctrl+L to toggle")
         with Vertical():
             for idx, p in enumerate(self.config_data.get("PASSES", [])):
                 name = p.get("name", f"pass{idx+1}")
+                time_bucket = int(p.get("time_bucket_seconds", 60))
+                if p.get("sort_keys"):
+                    grouping = p.get("sort_keys")
+                elif "generic" in (p.get("modules") or []):
+                    grouping = (p.get("generic_analytics") or {}).get("group_by", ["ListingId", "TimeBucket"])
+                else:
+                    grouping = ["ListingId", "TimeBucket"]
+                grouping_label = ",".join(grouping)
+                title = f"{name}"
+                modules = p.get("modules", []) or []
+                modules_str = ", ".join(modules) if modules else "none"
+                metrics = _pass_metric_count(p)
+                input_driver = self.config_data.get("PREPARE_DATA_MODE", "unknown")
+                output_target = p.get("output") or self.config_data.get("OUTPUT_TARGET")
+                output_driver = _format_output_driver(output_target, self.config_data)
+                tables = _tables_for_pass(p, self.config_data)
+                tables_str = ", ".join(tables) if tables else "none"
+                body = "\n".join(
+                    [
+                        f"Modules: {modules_str}",
+                        f"Metrics: {metrics}",
+                        f"Input driver: {input_driver}",
+                        f"Output driver: {output_driver}",
+                        f"Time bucket: {int(p.get('time_bucket_seconds', 60))}s",
+                        f"Grouping: {grouping_label}",
+                        f"Tables to load: {tables_str}",
+                    ]
+                )
+                metrics_list = _pass_metric_list(p)
+                yield PassSummaryBox(title, body, metrics_list)
                 yield Button(f"Edit {name}", id=f"edit_{idx}")
         with Horizontal():
             yield Button("Add Pass", id="add")
@@ -624,31 +865,68 @@ class PassListEditor(Screen):
         button_id = event.button.id or ""
         if button_id == "back":
             self.app.pop_screen()
+            if hasattr(self.app, "_refresh_summary"):
+                self.app._refresh_summary()
         elif button_id == "add":
-            def _on_save(updated):
-                self.config_data.setdefault("PASSES", []).append(updated)
-            screen = PassEditor({}, "PassConfig", _on_save, advanced_modules=self.advanced_modules)
-            self.app.push_screen(screen)
+            self._open_pass_editor()
         elif button_id.startswith("edit_"):
             idx = int(button_id.split("_", 1)[1])
-            passes = self.config_data.get("PASSES", [])
-            current = passes[idx] if idx < len(passes) else {}
+            self._edit_pass(idx)
 
-            def _on_save(updated):
-                passes[idx] = updated
-                self.config_data["PASSES"] = passes
 
-            screen = PassEditor(current, "PassConfig", _on_save, advanced_modules=self.advanced_modules)
-            self.app.push_screen(screen)
+    def _open_pass_editor(self) -> None:
+        def _on_save(updated):
+            self.config_data.setdefault("PASSES", []).append(updated)
+            if hasattr(self.app, "_refresh_summary"):
+                self.app._refresh_summary()
+        screen = PassEditor(
+            {},
+            "PassConfig",
+            _on_save,
+            advanced_modules=self.advanced_modules,
+            pass_readonly=self.pass_readonly,
+            on_readonly_change=self.on_readonly_change,
+        )
+        self.app.push_screen(screen)
+
+    def _edit_pass(self, idx: int) -> None:
+        passes = self.config_data.get("PASSES", [])
+        current = passes[idx] if idx < len(passes) else {}
+
+        def _on_save(updated):
+            passes[idx] = updated
+            self.config_data["PASSES"] = passes
+            if hasattr(self.app, "_refresh_summary"):
+                self.app._refresh_summary()
+
+        screen = PassEditor(
+            current,
+            "PassConfig",
+            _on_save,
+            advanced_modules=self.advanced_modules,
+            pass_readonly=self.pass_readonly,
+            on_readonly_change=self.on_readonly_change,
+        )
+        self.app.push_screen(screen)
 
 
 class PassEditor(Screen):
-    def __init__(self, data: dict, title: str, on_save, advanced_modules: bool = False):
+    def __init__(
+        self,
+        data: dict,
+        title: str,
+        on_save,
+        advanced_modules: bool = False,
+        pass_readonly: bool = True,
+        on_readonly_change=None,
+    ):
         super().__init__()
         self.data = data
         self.title = title
         self.on_save = on_save
         self.advanced_modules = advanced_modules
+        self.pass_readonly = pass_readonly
+        self.on_readonly_change = on_readonly_change
         self.status = Static("")
         self.widgets: dict[str, Any] = {}
         self._full_schema_counts: Optional[dict[str, int]] = None
@@ -739,6 +1017,23 @@ class PassEditor(Screen):
         if button_id != "save":
             return
 
+        if self.pass_readonly:
+            def _on_confirm():
+                self.pass_readonly = False
+                if self.on_readonly_change:
+                    self.on_readonly_change(False)
+                self._save_pass()
+            self.app.push_screen(
+                ConfirmScreen(
+                    "Passes are in read-only mode. Editing will change the process. Continue?",
+                    on_confirm=_on_confirm,
+                )
+            )
+            return
+
+        self._save_pass()
+
+    def _save_pass(self) -> None:
         try:
             time_bucket = float(self.widgets["time_bucket_seconds"].value)
         except Exception:
@@ -770,6 +1065,8 @@ class PassEditor(Screen):
             self.status.update(str(exc))
             return
         self.on_save(model.model_dump())
+        if hasattr(self.app, "_refresh_summary"):
+            self.app._refresh_summary()
         self.app.pop_screen()
 
     def on_mount(self) -> None:
@@ -965,6 +1262,66 @@ def _generic_metric_count(pass_config: PassConfig) -> int:
     return count
 
 
+def _pass_metric_count(pass_data: dict) -> int:
+    if not isinstance(pass_data, dict):
+        return 0
+    try:
+        pass_cfg = PassConfig.model_validate(pass_data)
+        schema = get_output_schema(pass_cfg)
+    except Exception:
+        return 0
+    total = 0
+    for cols in schema.values():
+        if isinstance(cols, list):
+            total += len(cols)
+    return total
+
+
+def _pass_metric_list(pass_data: dict) -> list[str]:
+    if not isinstance(pass_data, dict):
+        return []
+    try:
+        pass_cfg = PassConfig.model_validate(pass_data)
+        schema = get_output_schema(pass_cfg)
+    except Exception:
+        return []
+    metrics: list[str] = []
+    for cols in schema.values():
+        if isinstance(cols, list):
+            metrics.extend([str(c) for c in cols])
+    return metrics
+
+
+def _format_output_driver(output_target: Any, config_data: dict) -> str:
+    target = output_target or {}
+    if isinstance(target, OutputTarget):
+        target = target.model_dump()
+    if not isinstance(target, dict):
+        target = {}
+    output_type = target.get("type", "parquet")
+    if isinstance(output_type, Enum):
+        output_type = output_type.value
+    if output_type == "sql":
+        table = target.get("sql_table", "unknown_table")
+        conn = target.get("sql_connection", "unknown_connection")
+        return f"sql {table} @ {conn}"
+    template = target.get("path_template") or config_data.get("FINAL_OUTPUT_PATH_TEMPLATE", "")
+    return f"{output_type} {template}".strip()
+
+
+def _tables_for_pass(pass_data: dict, config_data: dict) -> list[str]:
+    try:
+        pass_cfg = PassConfig.model_validate(pass_data)
+    except Exception:
+        return []
+    user_tables = config_data.get("TABLES_TO_LOAD")
+    tables = _derive_tables_to_load(pass_cfg, user_tables)
+    if "generic" in pass_cfg.modules and pass_cfg.generic_analytics.source_pass:
+        if "previous_pass" not in tables:
+            tables.append("previous_pass")
+    return tables
+
+
 class ModuleConfigPicker(Screen):
     def __init__(self, fields: list[str], on_pick, title: str):
         super().__init__()
@@ -990,6 +1347,28 @@ class ModuleConfigPicker(Screen):
             field = button_id.split("_", 1)[1]
             self.app.pop_screen()
             self.on_pick(field)
+
+
+class ConfirmScreen(Screen):
+    def __init__(self, message: str, on_confirm):
+        super().__init__()
+        self.message = message
+        self.on_confirm = on_confirm
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False)
+        yield Label(self.message)
+        with Horizontal():
+            yield Button("Cancel", id="cancel")
+            yield Button("Continue", id="confirm", variant="primary")
+        yield Footer()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm":
+            self.app.pop_screen()
+            self.on_confirm()
+        else:
+            self.app.pop_screen()
 
 
 def main():
