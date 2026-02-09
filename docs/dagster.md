@@ -157,14 +157,16 @@ YAML can be either:
 
 ## Config UI (Terminal/Web)
 
-Launch a text UI editor for YAML configs:
+Launch a schema-driven UI editor for YAML configs:
 
 ```bash
 python -m intraday_analytics.config_ui demo/01_ohlcv_bars.py
 python -m intraday_analytics.config_ui --web demo/01_ohlcv_bars.py
 ```
 
-This creates or edits `demo/01_ohlcv_bars.yaml`.
+This creates or edits `demo/01_ohlcv_bars.yaml`. The UI mirrors the
+`AnalyticsConfig` / `PassConfig` Pydantic schema and constrains enums and
+types where possible.
 
 ## DB Sync and UI Cache
 
