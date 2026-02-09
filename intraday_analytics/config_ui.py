@@ -131,7 +131,8 @@ class ModelEditor(Screen):
             widget = Select([(o, o) for o in options], value=str(value) if value is not None else options[0])
         elif _is_enum(annotation):
             options = _enum_options(annotation)
-            widget = Select([(o, o) for o in options], value=str(value) if value is not None else options[0])
+            current = value.value if hasattr(value, "value") else value
+            widget = Select([(o, o) for o in options], value=str(current) if current is not None else options[0])
         elif annotation in (int, float, str):
             widget = Input(value="" if value is None else str(value))
         elif _is_basemodel(annotation):
