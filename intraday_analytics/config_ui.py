@@ -999,13 +999,29 @@ class PassEditor(Screen):
         yield Label(self.title)
         with VerticalScroll():
             yield Label("Pass type")
+            default_pass_type = self.data.get("_pass_type")
+            if default_pass_type is None:
+                modules = self.data.get("modules", [])
+                tiers = {
+                    MODULE_INFO.get(name if name != "trades" else "trade", {}).get(
+                        "tier"
+                    )
+                    for name in modules
+                    if MODULE_INFO.get(name if name != "trades" else "trade")
+                }
+                if tiers and tiers <= {"post"}:
+                    default_pass_type = "post"
+                elif tiers and tiers <= {"pre"}:
+                    default_pass_type = "pre"
+                else:
+                    default_pass_type = "core"
             pass_type = Select(
                 [
                     ("Preprocessing", "pre"),
                     ("Core", "core"),
                     ("Postprocessing", "post"),
                 ],
-                value=self.data.get("_pass_type", "core"),
+                value=default_pass_type,
             )
             pass_type.id = "pass_type"
             self.widgets["pass_type"] = pass_type

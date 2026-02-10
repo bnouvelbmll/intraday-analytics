@@ -50,6 +50,9 @@ def test_reaggregate_module_aggregates_by_group():
     volumes = result["TradeTotalVolume"].to_list()
     assert volumes == [30, 20]
 
+    notionals = result["TradeNotionalEUR"].to_list()
+    assert notionals == [3200.0, 1950.0]
+
     prices = result["MidPrice"].to_list()
     expected_t0 = (100.0 * 1000.0 + 110.0 * 2200.0) / (1000.0 + 2200.0)
     expected_t1 = (105.0 * 525.0 + 95.0 * 1425.0) / (525.0 + 1425.0)
