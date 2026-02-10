@@ -526,6 +526,7 @@ def _apply_docs(module: str, col: str):
         else:
             data.setdefault("openModeSuffix", "")
         template = doc.get("template", "")
+        description_template = doc.get("description") or ""
         unit_template = doc.get("unit") or ""
         group_template = doc.get("group") or ""
         role_template = doc.get("group_role") or ""
@@ -534,6 +535,10 @@ def _apply_docs(module: str, col: str):
             definition = template.format(**data)
         except Exception:
             definition = template
+        try:
+            description = description_template.format(**data) if description_template else ""
+        except Exception:
+            description = description_template
         try:
             unit = unit_template.format(**data) if unit_template else ""
         except Exception:
@@ -554,6 +559,7 @@ def _apply_docs(module: str, col: str):
             group_semantics = semantics_template
         return {
             "definition": definition,
+            "description": description,
             "unit": unit,
             "group": group,
             "group_role": group_role,
@@ -561,6 +567,7 @@ def _apply_docs(module: str, col: str):
         }
     return {
         "definition": "",
+        "description": "",
         "unit": "",
         "group": "",
         "group_role": "",

@@ -19,6 +19,7 @@ grouped output explicit and uniform across modules.
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type
 from abc import ABC, abstractmethod
+import inspect
 
 import polars as pl
 from pydantic import BaseModel
@@ -48,6 +49,7 @@ class AnalyticDoc:
     group: str | None = None
     group_role: str | None = None
     group_semantics: str | None = None
+    description: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -58,6 +60,7 @@ class AnalyticDoc:
             "group": self.group,
             "group_role": self.group_role,
             "group_semantics": self.group_semantics,
+            "description": self.description,
         }
 
 
@@ -124,18 +127,22 @@ def analytic_expression(
     def _decorator(fn):
         setattr(fn, "_analytic_expression_name", name)
         if pattern:
-            doc = (fn.__doc__ or "").strip()
+            doc = inspect.cleandoc(fn.__doc__ or "")
             if doc:
+                parts = doc.split("\n\n", 1)
+                template = parts[0].strip().replace("\n", " ")
+                description = parts[1].strip() if len(parts) > 1 else None
                 setattr(
                     fn,
                     "_analytic_doc",
                     AnalyticDoc(
                         pattern=pattern,
-                        template=doc,
+                        template=template,
                         unit=unit,
                         group=group,
                         group_role=group_role,
                         group_semantics=group_semantics,
+                        description=description,
                     ),
                 )
         return fn

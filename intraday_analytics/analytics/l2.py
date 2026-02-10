@@ -436,7 +436,18 @@ class L2LastLiquidityAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_price(self, side: str, level: int):
-        """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
+        """
+        {side} {measure} at book level {level} (last snapshot in TimeBucket).
+
+        Why:
+            To capture the exact price at a specific depth level at the end of the interval.
+
+        Interest:
+            Essential for reconstructing the order book shape and calculating spreads or depth-weighted prices.
+
+        Usage:
+            Used in market impact models, spread analysis, and as a reference price for execution quality.
+        """
         return _liquidity_raw(side, level, "Price")
 
     @analytic_expression(
@@ -445,7 +456,18 @@ class L2LastLiquidityAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_cumnotional(self, side: str, level: int):
-        """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
+        """
+        {side} {measure} at book level {level} (last snapshot in TimeBucket).
+
+        Why:
+            To measure the total monetary value of liquidity available up to a certain depth.
+
+        Interest:
+            Provides a better estimate of liquidity than share quantity alone, especially for comparing across instruments with different price levels.
+
+        Usage:
+            Used for sizing orders relative to available liquidity and estimating potential market impact in currency terms.
+        """
         return _liquidity_raw(side, level, "CumNotional")
 
     @analytic_expression(
@@ -454,7 +476,18 @@ class L2LastLiquidityAnalytic(AnalyticSpec):
         unit="Shares",
     )
     def _expression_quantity(self, side: str, level: int):
-        """{side} {measure} at book level {level} (last snapshot in TimeBucket)."""
+        """
+        {side} {measure} at book level {level} (last snapshot in TimeBucket).
+
+        Why:
+            To measure the volume of shares available at a specific price level.
+
+        Interest:
+            Indicates the immediate liquidity available at a specific price point.
+
+        Usage:
+            Used to detect liquidity walls or gaps in the order book.
+        """
         return _liquidity_raw(side, level, "Quantity")
 
     @analytic_expression(

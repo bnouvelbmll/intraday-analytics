@@ -567,7 +567,18 @@ class TradeGenericAnalytic(AnalyticSpec):
         unit="Shares",
     )
     def _expression_volume(self, cond):
-        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        """
+        Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Why:
+            To measure the total number of shares traded.
+
+        Interest:
+            Volume is the most fundamental measure of market activity and liquidity.
+
+        Usage:
+            Used in almost all market analysis, from VWAP calculations to momentum indicators.
+        """
         return self._filtered_zero(cond, pl.col("Size")).sum()
 
     @analytic_expression(
@@ -576,7 +587,18 @@ class TradeGenericAnalytic(AnalyticSpec):
         unit="Trades",
     )
     def _expression_count(self, cond):
-        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        """
+        Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Why:
+            To count the number of individual trade executions.
+
+        Interest:
+            Trade count (frequency) complements volume. High count with low volume suggests retail activity; low count with high volume suggests institutional blocks.
+
+        Usage:
+            Used to analyze trading intensity and participant mix.
+        """
         return self._filtered_zero(cond, 1).sum()
 
     @analytic_expression(
@@ -585,7 +607,18 @@ class TradeGenericAnalytic(AnalyticSpec):
         unit="EUR",
     )
     def _expression_notional(self, cond):
-        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        """
+        Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Why:
+            To measure the total monetary value traded.
+
+        Interest:
+            Allows comparison of activity across instruments with different price levels.
+
+        Usage:
+            Used for dollar-volume weighting and liquidity assessment.
+        """
         return self._filtered_zero(cond, pl.col("TradeNotionalEUR")).sum()
 
     @analytic_expression(
@@ -594,7 +627,18 @@ class TradeGenericAnalytic(AnalyticSpec):
         unit="EUR",
     )
     def _expression_notional_eur(self, cond):
-        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        """
+        Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Why:
+            To measure the total monetary value traded in EUR.
+
+        Interest:
+            Standardized currency metric for European markets.
+
+        Usage:
+            Used for cross-market comparisons in a common currency.
+        """
         return self._filtered_zero(cond, pl.col("TradeNotionalEUR")).sum()
 
     @analytic_expression(
@@ -603,11 +647,34 @@ class TradeGenericAnalytic(AnalyticSpec):
         unit="USD",
     )
     def _expression_notional_usd(self, cond):
-        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        """
+        Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Why:
+            To measure the total monetary value traded in USD.
+
+        Interest:
+            Standardized currency metric for global comparisons.
+
+        Usage:
+            Used for cross-market comparisons in a common currency.
+        """
         return self._filtered_zero(cond, pl.col("TradeNotionalUSD")).sum()
 
     @analytic_expression("RetailCount")
     def _expression_retail_count(self, cond):
+        """
+        Count of retail trades within the TimeBucket.
+
+        Why:
+            To specifically track activity identified as retail.
+
+        Interest:
+            Retail flow often has different characteristics (smaller size, less informed) than institutional flow.
+
+        Usage:
+            Used to estimate retail participation rates.
+        """
         return self._filtered_zero(
             cond,
             pl.when(pl.col("BMLLParticipantType") == "RETAIL").then(1).otherwise(0),
@@ -615,12 +682,36 @@ class TradeGenericAnalytic(AnalyticSpec):
 
     @analytic_expression("BlockCount")
     def _expression_block_count(self, cond):
+        """
+        Count of block trades within the TimeBucket.
+
+        Why:
+            To track large-scale institutional executions.
+
+        Interest:
+            Block trades represent significant liquidity events and often carry information content.
+
+        Usage:
+            Used to identify institutional activity and potential price turning points.
+        """
         return self._filtered_zero(
             cond, pl.when(pl.col("IsBlock") == "Y").then(1).otherwise(0)
         ).sum()
 
     @analytic_expression("AuctionNotional")
     def _expression_auction_notional(self, cond):
+        """
+        Notional value traded in auctions within the TimeBucket.
+
+        Why:
+            To separate continuous trading volume from auction volume.
+
+        Interest:
+            Auctions (open/close) are critical liquidity events. Monitoring their size helps understand daily liquidity profiles.
+
+        Usage:
+            Used to analyze the "smile" of liquidity distribution throughout the day.
+        """
         return self._filtered_zero(
             cond,
             pl.when(pl.col("Classification").str.contains("AUCTION"))
@@ -630,6 +721,18 @@ class TradeGenericAnalytic(AnalyticSpec):
 
     @analytic_expression("OTCVolume")
     def _expression_otc_volume(self, cond):
+        """
+        Volume of OTC trades reported within the TimeBucket.
+
+        Why:
+            To capture off-book liquidity.
+
+        Interest:
+            Significant volume often happens off-exchange. Ignoring OTC misses a large part of the market picture.
+
+        Usage:
+            Used to estimate total market size and dark liquidity.
+        """
         return self._filtered_zero(
             cond,
             pl.when(pl.col("Classification").str.contains("OTC"))
@@ -643,7 +746,18 @@ class TradeGenericAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_vwap(self, cond):
-        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        """
+        Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Why:
+            To calculate the Volume Weighted Average Price.
+
+        Interest:
+            VWAP is the standard benchmark for execution quality. It represents the "fair" price for the volume traded.
+
+        Usage:
+            Used to benchmark execution algorithms and assess price trends.
+        """
         num = self._filtered_zero(cond, pl.col("LocalPrice") * pl.col("Size")).sum()
         den = self._filtered_zero(cond, pl.col("Size")).sum()
         return num / den
@@ -654,7 +768,18 @@ class TradeGenericAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_avg_price(self, cond):
-        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        """
+        Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Why:
+            To calculate the simple average trade price.
+
+        Interest:
+            Unlike VWAP, this treats every trade equally regardless of size. Useful for spotting small-trade price deviations.
+
+        Usage:
+            Used in comparison with VWAP to detect size-dependent pricing.
+        """
         return self._filtered(cond, pl.col("LocalPrice")).mean()
 
     @analytic_expression(
@@ -663,7 +788,18 @@ class TradeGenericAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_median_price(self, cond):
-        """Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        """
+        Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Why:
+            To find the median trade price.
+
+        Interest:
+            Robust to outliers (extreme prices) compared to the mean.
+
+        Usage:
+            Used as a robust central tendency measure for price.
+        """
         return self._filtered(cond, pl.col("LocalPrice")).median()
 
     @analytic_expression(
@@ -681,7 +817,18 @@ class TradeGenericAnalytic(AnalyticSpec):
         variant: Dict[str, Any],
         prefix: str,
     ):
-        """Trade {ohlc} for {side} trades within the TimeBucket (LIT_CONTINUOUS)."""
+        """
+        Trade {ohlc} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Why:
+            To construct standard Open-High-Low-Close bars from trade data.
+
+        Interest:
+            The foundation of technical analysis. Captures the price range and direction within the interval.
+
+        Usage:
+            Used for charting, volatility calculation, and technical indicators.
+        """
         side = variant["sides"]
         base_prefix = (
             f"Trade{side}"
@@ -735,6 +882,16 @@ class TradeDiscrepancyAnalytic(AnalyticSpec):
             pattern=r"^DiscrepancyTo(?P<reference>.+?)(?P<side>Bid|Ask)?(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
             template="Price difference between LocalPrice and {reference} expressed in basis points for {side_or_total} trades; aggregated by {agg_or_mean} within the TimeBucket.",
             unit="BPS",
+            description="""
+Why:
+    To measure how far trade prices deviate from a reference benchmark (like the mid-price or primary market best bid/ask).
+
+Interest:
+    Large discrepancies indicate high transaction costs, poor execution quality, or market fragmentation.
+
+Usage:
+    Used for Best Execution analysis and to monitor price efficiency across venues.
+""",
         )
     ]
     ConfigModel = TradeDiscrepancyConfig
@@ -807,7 +964,18 @@ class TradeFlagAnalytic(AnalyticSpec):
         unit="Shares",
     )
     def _expression_volume(self, cond):
-        """Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket."""
+        """
+        Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.
+
+        Why:
+            To measure the volume of trades that meet specific criteria (e.g., negotiated, odd-lot).
+
+        Interest:
+            Different trade types have different market impacts. For example, negotiated trades often have less immediate price impact than auto-matched trades.
+
+        Usage:
+            Used to segment market activity by execution mechanism.
+        """
         return pl.when(cond).then(pl.col("Size")).otherwise(0).sum()
 
     @analytic_expression(
@@ -816,7 +984,18 @@ class TradeFlagAnalytic(AnalyticSpec):
         unit="Trades",
     )
     def _expression_count(self, cond):
-        """Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket."""
+        """
+        Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.
+
+        Why:
+            To count the number of trades meeting specific criteria.
+
+        Interest:
+            High counts of specific trade types (like odd lots) can indicate retail participation or specific algorithmic strategies.
+
+        Usage:
+            Used for granular market structure analysis.
+        """
         return pl.when(cond).then(1).otherwise(0).sum()
 
     @analytic_expression(
@@ -825,7 +1004,18 @@ class TradeFlagAnalytic(AnalyticSpec):
         unit="EUR",
     )
     def _expression_avg_notional(self, cond):
-        """Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket."""
+        """
+        Trades with {flag} filter; {measure} over {side_or_total} trades in the TimeBucket.
+
+        Why:
+            To calculate the average size (in currency) of specific trade types.
+
+        Interest:
+            Helps characterize the participants using these trade types (e.g., large average notional for blocks vs small for odd lots).
+
+        Usage:
+            Used to profile market participants and execution channels.
+        """
         num = pl.when(cond).then(pl.col("TradeNotionalEUR")).otherwise(0).sum()
         den = pl.when(cond).then(1).otherwise(0).sum()
         return num / den
@@ -891,11 +1081,31 @@ class TradeChangeAnalytic(AnalyticSpec):
             pattern=r"^PricePoint(?P<scope>AtPrimary|AtVenue)?$",
             template="Mean of PricePoint{scope_or_empty} over trades in the TimeBucket.",
             unit="Probability",
+            description="""
+Why:
+    To measure where trades occur relative to the bid-ask spread.
+
+Interest:
+    A value of 0 means trading at the bid, 1 means at the ask, and 0.5 means at the mid. Values outside [0, 1] indicate trading through the spread.
+
+Usage:
+    Used to assess aggressor behavior and execution quality.
+""",
         ),
         AnalyticDoc(
             pattern=r"^(?P<measure>PreTradeElapsedTimeChg|PostTradeElapsedTimeChg)(?P<scope>AtPrimary|AtVenue)?$",
             template="Mean of {measure}{scope_or_empty} over trades in the TimeBucket.",
             unit="Nanoseconds",
+            description="""
+Why:
+    To measure the time elapsed since the last price change before or after a trade.
+
+Interest:
+    Short elapsed times suggest high-frequency activity or rapid price discovery. Long times suggest stable prices.
+
+Usage:
+    Used to analyze market speed and price stability around trades.
+""",
         ),
     ]
     ConfigModel = TradeChangeConfig
@@ -936,7 +1146,18 @@ class TradeImpactAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_effective_spread(self, config: TradeImpactConfig):
-        """Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration."""
+        """
+        Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration.
+
+        Why:
+            To measure the cost of trading relative to the "fair" mid-price at the time of trade.
+
+        Interest:
+            Effective spread captures the immediate cost paid by the aggressor, including both the quoted spread and any price improvement or impact.
+
+        Usage:
+            The primary metric for execution cost analysis (TCA).
+        """
         price = pl.col("LocalPrice")
         current_mid = pl.col(config.reference_price_col)
         return 2 * (price - current_mid).abs()
@@ -947,7 +1168,18 @@ class TradeImpactAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_realized_spread(self, config: TradeImpactConfig):
-        """Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration."""
+        """
+        Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration.
+
+        Why:
+            To measure the profit of the liquidity provider (market maker) after a certain time horizon.
+
+        Interest:
+            Realized spread accounts for adverse selection. If the price moves against the market maker after the trade, the realized spread is lower than the effective spread.
+
+        Usage:
+            Used to assess market maker profitability and order flow toxicity.
+        """
         side_sign = pl.when(pl.col("AggressorSide") == 1).then(1).otherwise(-1)
         price = pl.col("LocalPrice")
         future_mid = pl.col("PostTradeMid")
@@ -959,7 +1191,18 @@ class TradeImpactAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_price_impact(self, config: TradeImpactConfig):
-        """Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration."""
+        """
+        Mean {metric} at horizon {horizon} per TimeBucket, using reference price from configuration.
+
+        Why:
+            To measure how much the price moved in the direction of the trade after execution.
+
+        Interest:
+            Price impact reflects the information content of the trade and the market's resilience. High impact means the trade moved the market significantly.
+
+        Usage:
+            Used to estimate market depth and the cost of large orders.
+        """
         side_sign = pl.when(pl.col("AggressorSide") == 1).then(1).otherwise(-1)
         future_mid = pl.col("PostTradeMid")
         current_mid = pl.col(config.reference_price_col)

@@ -83,6 +83,7 @@ def metric_doc(
     group: str | None = None,
     group_role: str | None = None,
     group_semantics: str | None = None,
+    description: str | None = None,
 ):
     def _decorator(fn):
         _register_metric_doc(
@@ -94,6 +95,7 @@ def metric_doc(
                 "group": group,
                 "group_role": group_role,
                 "group_semantics": group_semantics,
+                "description": description,
             }
         )
         return fn

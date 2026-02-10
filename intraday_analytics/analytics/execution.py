@@ -235,7 +235,18 @@ class L3ExecutionAnalytic(AnalyticSpec):
         unit="Shares",
     )
     def _expression_executed_volume(self, cond):
-        """Sum of executed volume from L3 executions on {side} side per TimeBucket."""
+        """
+        Sum of executed volume from L3 executions on {side} side per TimeBucket.
+
+        Why:
+            To measure the volume executed against resting orders on a specific side.
+
+        Interest:
+            ExecutedVolumeBid represents selling pressure (aggressor hitting the bid), while ExecutedVolumeAsk represents buying pressure (aggressor lifting the ask).
+
+        Usage:
+            Used to calculate order flow imbalance and directional volume.
+        """
         return pl.when(cond).then(pl.col("ExecutionSize")).otherwise(0).sum()
 
     @analytic_expression(
@@ -244,7 +255,18 @@ class L3ExecutionAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_vwap(self, cond):
-        """VWAP of executions on {side} side per TimeBucket."""
+        """
+        VWAP of executions on {side} side per TimeBucket.
+
+        Why:
+            To calculate the average price of executions on a specific side.
+
+        Interest:
+            Comparing Bid VWAP and Ask VWAP gives insight into the effective spread and price levels where trading is occurring.
+
+        Usage:
+            Used for execution quality analysis and spread estimation.
+        """
         num = (
             pl.when(cond)
             .then(pl.col("ExecutionPrice") * pl.col("ExecutionSize"))
@@ -290,7 +312,18 @@ class TradeBreakdownAnalytic(AnalyticSpec):
         unit="Shares",
     )
     def _expression_volume(self, cond):
-        """{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket."""
+        """
+        {trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket.
+
+        Why:
+            To decompose volume by venue type (Lit/Dark) and aggressor direction.
+
+        Interest:
+            Lit volume contributes to price discovery, while Dark volume provides liquidity without pre-trade transparency. Aggressor side reveals the direction of flow.
+
+        Usage:
+            Used to analyze market structure, dark pool participation, and directional flow.
+        """
         return pl.when(cond).then(pl.col("Size")).otherwise(0).sum()
 
     @analytic_expression(
@@ -299,7 +332,18 @@ class TradeBreakdownAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_vwap(self, cond):
-        """{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket."""
+        """
+        {trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket.
+
+        Why:
+            To calculate the average execution price for specific trade segments.
+
+        Interest:
+            Comparing Lit vs. Dark VWAP can reveal price improvement opportunities in dark pools.
+
+        Usage:
+            Used for venue performance analysis and execution routing decisions.
+        """
         num = (
             pl.when(cond).then(pl.col("LocalPrice") * pl.col("Size")).otherwise(0).sum()
         )
@@ -312,7 +356,18 @@ class TradeBreakdownAnalytic(AnalyticSpec):
         unit="XLOC",
     )
     def _expression_vwpp(self, cond):
-        """{trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket."""
+        """
+        {trade_type} trade {measure} for {agg_side} aggressor side per TimeBucket.
+
+        Why:
+            To measure where trades occur relative to the spread (Volume Weighted Price Placement).
+
+        Interest:
+            VWPP close to 0 means trading at the bid, 1 at the ask. It indicates the aggressiveness of the execution.
+
+        Usage:
+            Used to assess execution quality and spread capture.
+        """
         val = (pl.col("PricePoint").clip(0, 1) * 2 - 1) * pl.col("Size")
         num = pl.when(cond).then(val).otherwise(0).sum()
         den = pl.when(cond).then(pl.col("Size")).otherwise(0).sum()
@@ -363,7 +418,18 @@ class ExecutionDerivedAnalytic(AnalyticSpec):
     def _expression_trade_imbalance(
         self, df: pl.LazyFrame, prefix: str
     ) -> pl.LazyFrame:
-        """Normalized trade volume imbalance between buy and sell aggressor sides per TimeBucket."""
+        """
+        Normalized trade volume imbalance between buy and sell aggressor sides per TimeBucket.
+
+        Why:
+            To measure the net direction of trading flow.
+
+        Interest:
+            A positive imbalance indicates more buying pressure (aggressors lifting the ask), while negative indicates selling pressure (aggressors hitting the bid).
+
+        Usage:
+            Used as a momentum signal and to predict short-term price movements.
+        """
         cols = df.collect_schema().names()
         ask_col = f"{prefix}ExecutedVolumeAsk" if prefix else "ExecutedVolumeAsk"
         bid_col = f"{prefix}ExecutedVolumeBid" if prefix else "ExecutedVolumeBid"

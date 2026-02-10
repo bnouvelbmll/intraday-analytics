@@ -155,10 +155,14 @@ def format_explain_markdown(payload: dict[str, Any]) -> str:
 
     metric_doc = payload.get("metric_doc") or {}
     definition = metric_doc.get("definition") or ""
+    description = metric_doc.get("description") or ""
     unit = metric_doc.get("unit") or ""
     if definition:
-        lines.append("\n## Metric Description")
+        lines.append("\n## Metric Definition")
         lines.append(definition)
+    if description:
+        lines.append("\n## Detailed Description")
+        lines.append(description)
     if unit:
         lines.append(f"\nUnit: `{unit}`")
 

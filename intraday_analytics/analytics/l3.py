@@ -236,16 +236,46 @@ class L3GenericAnalytic(AnalyticSpec):
             pattern=r"^(?P<action>Insert|Remove|Update|UpdateInserted|UpdateRemoved)(?P<measure>Count)(?P<side>Bid|Ask)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
             template="{measure} of {action} L3 events on {side} side; aggregated by {agg_or_sum} within TimeBucket.",
             unit="Orders",
+            description="""
+Why:
+    To quantify the frequency of order book activities (inserts, cancels, updates) on a specific side.
+
+Interest:
+    High counts indicate high algorithmic activity or volatility. Comparing counts across sides reveals pressure.
+
+Usage:
+    Used in HFT analysis, toxicity detection, and regime classification.
+""",
         ),
         AnalyticDoc(
             pattern=r"^(?P<action>Insert|Remove|Update|UpdateInserted|UpdateRemoved)(?P<measure>Volume)(?P<side>Bid|Ask)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)?$",
             template="{measure} of {action} L3 events on {side} side; aggregated by {agg_or_sum} within TimeBucket.",
             unit="Shares",
+            description="""
+Why:
+    To measure the volume of liquidity being added, removed, or modified.
+
+Interest:
+    Volume metrics weight activity by size, distinguishing between small retail orders and large institutional flows.
+
+Usage:
+    Used to estimate liquidity supply/demand imbalances and potential price impact.
+""",
         ),
         AnalyticDoc(
             pattern=r"^_count$",
             template="Count of L3 events in the TimeBucket.",
             unit="Orders",
+            description="""
+Why:
+    To provide a raw count of all L3 messages processed in the interval.
+
+Interest:
+    Serves as a baseline for system load or overall market activity.
+
+Usage:
+    Used for data quality checks and normalization.
+""",
         ),
     ]
     ConfigModel = L3MetricConfig
@@ -327,7 +357,18 @@ class L3AdvancedAnalytic(AnalyticSpec):
     def _expression_arrival_flow_imbalance(
         self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
     ) -> pl.LazyFrame:
-        """Normalized difference between bid-side and ask-side insert volume per TimeBucket."""
+        """
+        Normalized difference between bid-side and ask-side insert volume per TimeBucket.
+
+        Why:
+            To measure the net pressure of new liquidity entering the book.
+
+        Interest:
+            A positive imbalance suggests stronger buying interest (more bids inserted), while negative suggests selling pressure.
+
+        Usage:
+            Used as a predictive signal for short-term price direction.
+        """
         col_name = self._output_name(adv, "ArrivalFlowImbalance", prefix)
         bid_col = f"{prefix}InsertVolumeBid" if prefix else "InsertVolumeBid"
         ask_col = f"{prefix}InsertVolumeAsk" if prefix else "InsertVolumeAsk"
@@ -346,7 +387,18 @@ class L3AdvancedAnalytic(AnalyticSpec):
     def _expression_cancel_to_trade_ratio(
         self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
     ) -> pl.LazyFrame:
-        """Ratio of cancellations to executions per TimeBucket."""
+        """
+        Ratio of cancellations to executions per TimeBucket.
+
+        Why:
+            To assess the efficiency of liquidity provision and detect potential spoofing or layering.
+
+        Interest:
+            High ratios indicate that most liquidity is withdrawn before execution, which can be a sign of manipulative behavior or high uncertainty.
+
+        Usage:
+            Used in market surveillance and toxicity analysis.
+        """
         gcols = ["ListingId", "TimeBucket"]
         exec_counts = (
             l3.filter(pl.col("ExecutionSize") > 0)
@@ -373,7 +425,18 @@ class L3AdvancedAnalytic(AnalyticSpec):
     def _expression_avg_queue_position(
         self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
     ) -> pl.LazyFrame:
-        """Mean SizeAhead for executions within the TimeBucket."""
+        """
+        Mean SizeAhead for executions within the TimeBucket.
+
+        Why:
+            To estimate where trades are occurring relative to the queue priority.
+
+        Interest:
+            Lower values suggest trades are happening at the front of the queue (aggressive or small orders), while higher values imply deeper liquidity consumption.
+
+        Usage:
+            Used to analyze execution quality and queue dynamics.
+        """
         gcols = ["ListingId", "TimeBucket"]
         queue_pos = (
             l3.filter(pl.col("ExecutionSize") > 0)
@@ -393,7 +456,18 @@ class L3AdvancedAnalytic(AnalyticSpec):
     def _expression_avg_resting_time(
         self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
     ) -> pl.LazyFrame:
-        """Mean lifetime (ns) of orders from insert to end within the TimeBucket."""
+        """
+        Mean lifetime (ns) of orders from insert to end within the TimeBucket.
+
+        Why:
+            To measure the stability of the order book.
+
+        Interest:
+            Short resting times indicate high-frequency activity or fleeting liquidity. Long resting times suggest more patient, institutional liquidity.
+
+        Usage:
+            Used to classify market regimes and participant behavior.
+        """
         gcols = ["ListingId", "TimeBucket"]
         resting_metrics = (
             self._compute_lifetimes(l3, adv, adv.get("market_states"))
@@ -413,7 +487,18 @@ class L3AdvancedAnalytic(AnalyticSpec):
     def _expression_fleeting_liquidity_ratio(
         self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
     ) -> pl.LazyFrame:
-        """Share of inserted volume that is cancelled within the fleeting threshold in the TimeBucket."""
+        """
+        Share of inserted volume that is cancelled within the fleeting threshold in the TimeBucket.
+
+        Why:
+            To identify liquidity that is not intended to be executed (e.g., for probing or layering).
+
+        Interest:
+            High ratios suggest the presence of HFT strategies that cancel orders quickly to avoid adverse selection or to manipulate perception of depth.
+
+        Usage:
+            Used in toxicity metrics and to filter "real" liquidity.
+        """
         gcols = ["ListingId", "TimeBucket"]
         threshold_ms = adv.get("fleeting_threshold_ms", 100)
         threshold_ns = threshold_ms * 1_000_000
@@ -445,7 +530,18 @@ class L3AdvancedAnalytic(AnalyticSpec):
     def _expression_avg_replacement_latency(
         self, base_df: pl.LazyFrame, l3: pl.LazyFrame, adv: Dict[str, Any], prefix: str
     ) -> pl.LazyFrame:
-        """Mean latency (ns) between an execution and the next insert on the same side within the TimeBucket."""
+        """
+        Mean latency (ns) between an execution and the next insert on the same side within the TimeBucket.
+
+        Why:
+            To measure the speed at which liquidity providers replenish the book after a trade.
+
+        Interest:
+            Lower latency indicates highly responsive market makers. High latency suggests a slower or less competitive market.
+
+        Usage:
+            Used to assess market quality and maker efficiency.
+        """
         gcols = ["ListingId", "TimeBucket"]
         latency = self._compute_replacement_latency(l3, adv.get("market_states"))
         col_name = self._output_name(adv, "AvgReplacementLatency", prefix)
