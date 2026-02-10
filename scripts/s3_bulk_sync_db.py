@@ -48,7 +48,7 @@ from intraday_analytics.dagster_compat import (
 
 def _date_range_default():
     today = dt.date.today()
-    end = today - dt.timedelta(days=1)
+    end = today - dt.timedelta(days=0)
     start = end - dt.timedelta(days=30)
     return start.isoformat(), end.isoformat()
 
