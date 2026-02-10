@@ -4,6 +4,11 @@
 
 This document outlines the data processing pipeline for the `s3_shredding` mode, which is designed to handle large datasets from S3 that cannot fit into a single machine's memory.
 
+For configuration and execution, prefer the CLI:
+```bash
+beaf pipeline run --pipeline demo/01_ohlcv_bars.py
+```
+
 The core problem is to efficiently process terabytes of financial data without running out of memory. The solution is a multi-stage process that involves:
 1.  **Strategic Planning:** Intelligently dividing the workload into memory-manageable batches *before* reading any data.
 2.  **Parallel Execution:** Shredding the raw S3 data into smaller, organized local files in parallel.

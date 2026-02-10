@@ -55,6 +55,11 @@ config = AnalyticsConfig(
 
 The `generic` analytics module (`GenericAnalytics`) is designed specifically for Pass 2+ operations. It does not load raw data tables (like `trades` or `l2`) directly. Instead, it consumes the output of a previous pass.
 
+## Tips
+
+- Use `beaf pipeline config <pipeline.py>` for a guided editor that reflects pass type, module dependencies, and advanced options.
+- Output targets can be set globally or per-pass (Parquet/Delta/SQL).
+
 ### Key Features
 
 *   **Source Pass**: Specifies which previous pass to use as input (`source_pass`).

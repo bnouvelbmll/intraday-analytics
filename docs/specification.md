@@ -14,7 +14,7 @@ The system follows a pipeline architecture where data flows through a series of 
 2.  **Batching**: Grouping of symbols/instruments to manage memory usage during processing.
 3.  **Pipeline Execution**: Sequential execution of analytics modules within a "Pass".
 4.  **Multi-Pass Orchestration**: Chaining multiple passes where the output of Pass $N$ becomes the input for Pass $N+1$.
-5.  **Output**: Writing results to partitioned Parquet files.
+5.  **Output**: Writing results to Parquet, Delta Lake, or SQL targets.
 
 ## 3. Functional Requirements
 
@@ -27,6 +27,7 @@ The system follows a pipeline architecture where data flows through a series of 
 ### 3.2 Configuration
 *   **Declarative Configuration**: The entire pipeline execution, including date ranges, selected modules, and specific metrics, must be defined via a structured configuration object (e.g., JSON/YAML or Pydantic models).
 *   **Validation**: Configuration must be validated at runtime before execution starts.
+*   **Schema UI**: A schema-driven UI should be available to edit configs safely.
 
 ### 3.3 Pipeline & Execution
 *   **Multi-Pass Support**: The system must support defining multiple sequential "Passes".
@@ -59,6 +60,11 @@ The framework must support pluggable analytics modules inheriting from a common 
 *   **Forward Filling**: Optional forward filling of metrics across time buckets for continuous time series.
 *   **Naming Convention**: All output columns must follow **PascalCase** (e.g., `TradeTotalVolume`, `Sma14`).
 
+### 3.6 Orchestration & Remote Execution
+*   **Dagster Integration**: Assets and schedules can be generated programmatically, with optional auto-materialization.
+*   **BMLL Jobs**: Pipelines can run on BMLL instance jobs with bootstraps and log collection.
+*   **CLI Control**: A single CLI should expose analytics listing, pipeline runs, remote jobs, and Dagster helpers.
+
 ## 4. Non-Functional Requirements
 
 ### 4.1 Performance
@@ -89,4 +95,3 @@ The framework must support pluggable analytics modules inheriting from a common 
 *   `AnalyticsConfig`: Global settings (dates, paths, resources).
 *   `PassConfig`: Settings for a specific pass (modules, bucket size).
 *   `MetricConfig`: Definition of a specific metric calculation.
-

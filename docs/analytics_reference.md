@@ -184,6 +184,28 @@ materialization_dashboard(
 )
 ```
 
+## Schema Preview (CLI)
+
+Use the CLI to list available analytics for a pipeline configuration:
+
+```bash
+beaf analytics list
+beaf analytics list --pipeline demo/01_ohlcv_bars.py
+```
+
+Explain a specific analytic column (module config + relevant docs):
+
+```bash
+beaf analytics explain --pipeline demo/01_ohlcv_bars.py --column TradeTotalVolume
+```
+
+For configuration details and long-form docs on each option, use the schema-driven
+config UI:
+
+```bash
+beaf pipeline config demo/01_ohlcv_bars.py
+```
+
 You can also opt into a DB-direct reader (SQL) for larger installations:
 
 ```python

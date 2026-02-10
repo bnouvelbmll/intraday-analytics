@@ -2,7 +2,6 @@
 Example 6: L3 and trade characteristics (notebook-style demo)
 
 # --- Configuration ---
-CONFIG_YAML_PRECEDENCE = "yaml_overrides"
 This demo runs the l3_characteristics and trade_characteristics modules on
 a single MIC/date pair using 1-hour time buckets.
 """
@@ -49,5 +48,4 @@ if __name__ == "__main__":
         USER_CONFIG,
         get_universe,
         config_file=__file__,
-        config_precedence=CONFIG_YAML_PRECEDENCE,
     )

@@ -54,3 +54,13 @@ We delete the intermediate "shredded" batch files immediately after they are pro
 -   **Location:** `intraday_analytics.execution.process_batch_task`
 -   **Mechanism:** `os.remove(path)` is called on the input batch files as soon as the pipeline finishes for that batch.
 -   **Why it works:** This keeps the disk usage footprint low (bounded by ~1 day of data), preventing the local disk from filling up during long backtests.
+
+## 5. Execution Placement
+
+If memory is constrained on the local machine, use a BMLL instance job:
+
+```bash
+beaf job run --pipeline demo/01_ohlcv_bars.py --instance_size 128
+```
+
+You can also tune `MEMORY_PER_WORKER` in `AnalyticsConfig`.

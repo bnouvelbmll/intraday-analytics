@@ -114,7 +114,4 @@ if __name__ == "__main__":
         get_universe,
         get_pipeline=get_pipeline,
         config_file=__file__,
-        config_precedence=CONFIG_YAML_PRECEDENCE,
     )
-# --- Configuration ---
-CONFIG_YAML_PRECEDENCE = "yaml_overrides"

@@ -8,6 +8,7 @@ import os
 import time
 from hashlib import sha1
 from typing import Callable, Optional, Sequence
+from pathlib import Path
 
 from intraday_analytics.tables import ALL_TABLES
 from intraday_analytics.utils import filter_existing_s3_files
@@ -340,6 +341,7 @@ def build_assets(
         def _make_asset(
             module, asset_name, asset_group, config_override, deps, key_prefix
         ):
+            tags = _bmll_job_tags(config_model)
             @asset(
                 name=asset_name,
                 partitions_def=partitions_def,
@@ -347,6 +349,7 @@ def build_assets(
                 key_prefix=key_prefix,
                 deps=deps,
                 io_manager_key=io_manager_key,
+                tags=tags,
                 **auto_kwargs,
             )
             def _new_asset(context=None):
@@ -447,6 +450,156 @@ def build_assets(
     return assets
 
 
+def build_assets_for_module(
+    module,
+    *,
+    partitions_def=None,
+    universe_dim: str = "universe",
+    date_dim: str = "date",
+    split_passes: bool = False,
+    input_asset_keys: Sequence | None = None,
+):
+    """
+    Build Dagster assets for a single module object.
+    """
+    try:
+        from dagster import asset
+    except Exception as exc:
+        raise ImportError("Dagster is required to build datasets.") from exc
+
+    name = Path(getattr(module, "__file__", "pipeline")).stem
+    pkg_name = module.__name__.split(".")[0]
+    asset_base = f"{pkg_name}{name}" if name and name[0].isdigit() else name
+    package_root = module.__name__.split(".")[0]
+    precedence = getattr(module, "CONFIG_YAML_PRECEDENCE", "yaml_overrides")
+    base_config = resolve_user_config(
+        module.USER_CONFIG, getattr(module, "__file__", None), precedence
+    )
+    config_model = (
+        AnalyticsConfig(**base_config)
+        if isinstance(base_config, dict)
+        else AnalyticsConfig()
+    )
+    auto_kwargs = _auto_materialize_kwargs(config_model)
+    output_target = config_model.OUTPUT_TARGET
+    io_manager_key = getattr(output_target, "io_manager_key", None)
+    passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
+    last_pass_key = None
+
+    universes = getattr(module, "UNIVERSES", None) or default_universes()
+    default_universe_spec = _first_universe_spec(universes) or "default"
+
+    def _make_asset(module, asset_name, asset_group, config_override, deps, key_prefix):
+        tags = _bmll_job_tags(config_model)
+        @asset(
+            name=asset_name,
+            partitions_def=partitions_def,
+            group_name=asset_group,
+            key_prefix=key_prefix,
+            deps=deps,
+            io_manager_key=io_manager_key,
+            tags=tags,
+            **auto_kwargs,
+        )
+        def _new_asset(context=None):
+            base_config = config_override
+            default_get_universe = module.get_universe
+            get_pipeline = getattr(module, "get_pipeline", None)
+            if context and getattr(context, "partition_key", None):
+                keys = getattr(context.partition_key, "keys_by_dimension", None)
+                if keys and universe_dim in keys and date_dim in keys:
+                    partition = PartitionRun(
+                        universe=parse_universe_spec(keys[universe_dim]),
+                        dates=parse_date_key(keys[date_dim]),
+                    )
+                else:
+                    partition = PartitionRun(
+                        universe=parse_universe_spec(default_universe_spec),
+                        dates=DatePartition(
+                            start_date=base_config["START_DATE"],
+                            end_date=base_config["END_DATE"],
+                        ),
+                    )
+            else:
+                partition = PartitionRun(
+                    universe=parse_universe_spec(default_universe_spec),
+                    dates=DatePartition(
+                        start_date=base_config["START_DATE"],
+                        end_date=base_config["END_DATE"],
+                    ),
+                )
+
+            run_partition(
+                base_config=base_config,
+                default_get_universe=default_get_universe,
+                partition=partition,
+                get_pipeline=get_pipeline,
+            )
+            if io_manager_key:
+                try:
+                    from intraday_analytics.process import get_final_output_path
+                except Exception:
+                    return None
+                if split_passes and passes:
+                    pass_names = [
+                        p.get("name", "pass") for p in base_config.get("PASSES", [])
+                    ]
+                    outputs = {}
+                    for pass_name in pass_names:
+                        outputs[pass_name] = get_final_output_path(
+                            dt.date.fromisoformat(partition.dates.start_date),
+                            dt.date.fromisoformat(partition.dates.end_date),
+                            AnalyticsConfig(**base_config),
+                            pass_name,
+                            output_target,
+                        )
+                    return outputs
+                return get_final_output_path(
+                    dt.date.fromisoformat(partition.dates.start_date),
+                    dt.date.fromisoformat(partition.dates.end_date),
+                    AnalyticsConfig(**base_config),
+                    base_config.get("PASSES", [{}])[-1].get("name", asset_name),
+                    output_target,
+                )
+
+        return _new_asset
+
+    assets = []
+    if split_passes and passes:
+        for pass_config in passes:
+            pass_name = _sanitize_name(pass_config.get("name", "pass"))
+            asset_name = pass_name
+            per_pass_config = {**base_config, "PASSES": [pass_config]}
+            deps = _filter_input_deps(input_asset_keys, pass_config)
+            if last_pass_key is not None:
+                deps.append(last_pass_key)
+            assets.append(
+                _make_asset(
+                    module,
+                    asset_name,
+                    asset_base,
+                    per_pass_config,
+                    deps,
+                    [package_root, asset_base],
+                )
+            )
+            last_pass_key = assets[-1].key
+    else:
+        deps = list(input_asset_keys or [])
+        assets.append(
+            _make_asset(
+                module,
+                asset_base,
+                asset_base,
+                base_config,
+                deps,
+                [package_root],
+            )
+        )
+
+    return assets
+
+
 def _auto_materialize_kwargs(config: AnalyticsConfig) -> dict:
     if not config.AUTO_MATERIALIZE_ENABLED:
         return {}
@@ -474,6 +627,24 @@ def _auto_materialize_kwargs(config: AnalyticsConfig) -> dict:
             return {"auto_materialize_policy": AutoMaterializePolicy.eager()}
         except Exception:
             return {}
+
+
+def _bmll_job_tags(config: AnalyticsConfig) -> dict[str, str]:
+    tags: dict[str, str] = {}
+    job_cfg = getattr(config, "BMLL_JOBS", None)
+    if not job_cfg:
+        return tags
+    if job_cfg.default_instance_size:
+        tags["bmll/instance_size"] = str(job_cfg.default_instance_size)
+    if job_cfg.default_conda_env:
+        tags["bmll/conda_env"] = str(job_cfg.default_conda_env)
+    if job_cfg.max_runtime_hours:
+        tags["bmll/max_runtime_hours"] = str(job_cfg.max_runtime_hours)
+    if job_cfg.max_concurrent_instances:
+        tags["bmll/max_concurrent_instances"] = str(job_cfg.max_concurrent_instances)
+    if job_cfg.log_path:
+        tags["bmll/log_path"] = str(job_cfg.log_path)
+    return tags
 
 
 def _first_universe_spec(universes: Sequence) -> Optional[str]:

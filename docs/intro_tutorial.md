@@ -56,6 +56,11 @@ Notes:
 - ListingId should be numeric in the raw tables and universe for best compatibility.
 - You can switch bucket semantics per pass using `time_bucket_anchor` and `time_bucket_closed`.
 
+CLI shortcut:
+```bash
+beaf pipeline run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01
+```
+
 ## 3) Multi-pass example (trade -> generic)
 
 Pass 1 computes trade metrics. Pass 2 re-aggregates them (e.g., per InstrumentId) or resamples.
@@ -101,7 +106,7 @@ config.PASSES[1].generic_analytics.talib_indicators = [
 - See docs/analytics_reference.md for what each module computes.
 - See docs/multi_pass_analytics.md for chaining passes.
 - See docs/shredding_and_batching.md for data preparation modes.
- - Enumerate all potential pass1 metric columns:
-   - `python -m intraday_analytics.schema_utils`
-   - `python -m intraday_analytics.schema_utils --config /path/to/config.json`
-   - `python -m intraday_analytics.schema_utils --levels 5 --impact-horizons 1s,5s --json`
+- Enumerate potential metric columns (schema preview):
+  - `beaf analytics list`
+  - `beaf analytics list --pipeline demo/01_ohlcv_bars.py`
+  - `beaf analytics list --levels 5 --impact-horizons 1s,5s --json`

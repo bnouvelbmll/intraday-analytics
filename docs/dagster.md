@@ -4,6 +4,14 @@ This project includes a lightweight Dagster compatibility layer in
 `intraday_analytics/dagster_compat.py`. It provides a partition model
 and a `run_partition` helper that can be wrapped by Dagster assets/jobs.
 
+## What's new (highlights)
+
+- New `beaf` CLI (`beaf pipeline run`, `beaf pipeline config`, `beaf job run`, `beaf dagster run`).
+- BMLL instance jobs for remote execution (with automatic bootstrap).
+- Optional Dagster run launcher backed by BMLL instances.
+- Per-run tags for instance size/conda env/concurrency.
+- YAML + schema-driven config UI for any demo or pipeline.
+
 ## Concepts
 
 - **Universe partition**: a selector that resolves to a `get_universe` function.
@@ -26,6 +34,14 @@ New universe helpers:
 - `CartProdUniverse(left, right)`
 - `build_universe_partitions(universes)`
 - `default_universes()`
+
+## How Dagster Works Here (Short Version)
+
+- `build_assets(pkg=...)` discovers pipeline modules and exposes them as Dagster assets.
+- Each asset runs `run_partition(...)` under the hood.
+- Partitions are typically `(universe x date)`, with partition keys like `mic=XLON`.
+- Schedules come from `AnalyticsConfig.SCHEDULES` (cron + timezone + optional partitions).
+- Optional: `BMLLRunLauncher` runs each Dagster run on a BMLL EC2 instance.
 
 ## Example: Single MIC, Single Day
 
@@ -147,10 +163,6 @@ universe frames at runtime.
 Every `demo/*.py` and `main.py` can now read an optional YAML file with the same
 base name. The merge precedence is controlled inside the Python module using:
 
-```python
-CONFIG_YAML_PRECEDENCE = "yaml_overrides"  # or "python_overrides"
-```
-
 YAML can be either:
 - A flat dict of config keys
 - Or wrapped as `USER_CONFIG: {...}`
@@ -160,8 +172,8 @@ YAML can be either:
 Launch a schema-driven UI editor for YAML configs:
 
 ```bash
-python -m intraday_analytics.config_ui demo/01_ohlcv_bars.py
-python -m intraday_analytics.config_ui --web demo/01_ohlcv_bars.py
+beaf pipeline config demo/01_ohlcv_bars.py
+beaf pipeline config --web demo/01_ohlcv_bars.py
 ```
 
 This creates or edits `demo/01_ohlcv_bars.yaml`. The UI mirrors the
@@ -186,13 +198,13 @@ per partition.
 ## Demo Discovery
 
 If you want to expose all demo scripts as Dagster assets, use
-`build_demo_assets`:
+`build_assets`:
 
 ```python
 from dagster import Definitions
-from intraday_analytics.dagster_compat import build_demo_assets
+from intraday_analytics.dagster_compat import build_assets
 
-defs = Definitions(assets=build_demo_assets())
+defs = Definitions(assets=build_assets(pkg="demo"))
 ```
 
 ## Schedules
@@ -218,13 +230,102 @@ USER_CONFIG:
 To register schedules in Dagster, include them in your Definitions:
 ```python
 from dagster import Definitions
-from intraday_analytics.dagster_compat import build_demo_assets, build_demo_schedules
+from intraday_analytics.dagster_compat import build_assets, build_schedules
 
 defs = Definitions(
-    assets=build_demo_assets(split_passes=True),
-    schedules=build_demo_schedules(split_passes=True),
+    assets=build_assets(pkg="demo", split_passes=True),
+    schedules=build_schedules(pkg="demo", split_passes=True),
 )
 ```
+
+## New CLI: beaf
+
+The `beaf` CLI provides a consistent interface for analytics, config, jobs, and Dagster:
+
+```bash
+beaf analytics list
+beaf pipeline config demo/01_ohlcv_bars.py
+beaf pipeline run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01
+```
+
+### Remote BMLL Jobs
+
+Run a pipeline on a dedicated BMLL instance:
+
+```bash
+beaf job run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01 --instance_size 64
+```
+
+Install a cron-triggered job:
+
+```bash
+beaf job install --pipeline demo/01_ohlcv_bars.py --cron "0 6 ? * MON-FRI *"
+```
+
+Jobs default their logs under:
+`/home/bmll/user/intraday-metrics/_bmll_jobs/<job_id>/logs`
+
+Cron notes:
+- Dagster uses 5-field cron (`min hour dom mon dow`).
+- BMLL/AWS uses 6-field cron (`min hour dom mon dow year`) with `?` for dom/dow.
+- We accept Dagster cron in config and convert automatically for BMLL jobs.
+
+### Dagster Run (CLI)
+
+Run a pipeline directly via Dagster helpers:
+
+```bash
+beaf dagster run --pipeline demo/01_ohlcv_bars.py \
+  --job demo_ohlcv_1min__job \
+  --partition "date=2026-02-01,universe=mic=XLON"
+```
+
+If no partition is provided, defaults come from `START_DATE` and the first `UNIVERSE`.
+
+### Dagster Schedule Install
+
+Update the pipeline YAML to enable schedules and auto-materialization:
+
+```bash
+beaf dagster install --pipeline demo/01_ohlcv_bars.py \
+  --cron "0 2 * * *" --timezone "Europe/London" --auto_materialize_latest_days 7
+```
+
+Remove the schedule (and optionally disable auto-materialization):
+
+```bash
+beaf dagster uninstall --pipeline demo/01_ohlcv_bars.py
+```
+
+## Dagster Run Launcher (BMLL Instances)
+
+To run Dagster jobs on BMLL EC2 instances, configure the run launcher:
+
+```yaml
+run_launcher:
+  module: intraday_analytics.dagster_bmll
+  class: BMLLRunLauncher
+```
+
+Default instance settings come from `AnalyticsConfig.BMLL_JOBS`. You can override
+them per-run using Dagster run tags:
+
+- `bmll/instance_size`
+- `bmll/conda_env`
+- `bmll/max_runtime_hours`
+- `bmll/max_concurrent_instances`
+- `bmll/log_path`
+
+Disable by removing the launcher configuration.
+
+## Enable / Disable Dagster Integration
+
+Enable:
+- Define `Definitions` with `build_assets(...)` (and optionally `build_schedules(...)`).
+- Start Dagster with that code location.
+
+Disable:
+- Don’t register the assets/schedules, or remove the `run_launcher` block from `dagster.yaml`.
 
 ## Dagster UI Partitions
 

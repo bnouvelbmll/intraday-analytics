@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import List, Dict, Optional, Literal
+from typing import List, Dict, Optional, Literal, Union
 from enum import Enum
 from .dense_analytics import DenseAnalyticsConfig
 from .analytics.l2 import L2AnalyticsConfig
@@ -184,6 +184,90 @@ class ScheduleConfig(BaseModel):
     )
 
 
+class BMLLJobConfig(BaseModel):
+    """
+    Defaults for submitting analytics runs via BMLL compute instance jobs.
+
+    Controls instance size, bootstraps, and script locations for remote execution.
+    """
+
+    enabled: bool = Field(
+        False,
+        description="Enable BMLL job submissions from the CLI.",
+        json_schema_extra={"section": "Automation"},
+    )
+    default_instance_size: int = Field(
+        16,
+        description="Default EC2 instance size for BMLL jobs (GB).",
+        json_schema_extra={"section": "Automation"},
+    )
+    max_concurrent_instances: Optional[int] = Field(
+        None,
+        description="Optional cap on concurrent BMLL job runs.",
+        json_schema_extra={"section": "Automation"},
+    )
+    default_conda_env: Literal["py311-stable", "py311-latest"] = Field(
+        "py311-stable",
+        description="Default conda environment for BMLL jobs.",
+        json_schema_extra={"section": "Automation"},
+    )
+    max_runtime_hours: int = Field(
+        1,
+        description="Maximum runtime hours for BMLL instance jobs.",
+        json_schema_extra={"section": "Automation"},
+    )
+    default_bootstrap: Optional[str] = Field(
+        None,
+        description="Path to a bootstrap script (defaults to auto-generated).",
+        json_schema_extra={"section": "Automation"},
+    )
+    default_bootstrap_args: List[Union[str, int]] = Field(
+        default_factory=list,
+        description="Arguments to pass to the bootstrap script.",
+        json_schema_extra={"section": "Automation"},
+    )
+    jobs_dir: str = Field(
+        "/home/bmll/user/intraday-metrics/_bmll_jobs",
+        description="Directory where job scripts are staged.",
+        json_schema_extra={"section": "Automation"},
+    )
+    project_root: str = Field(
+        "/home/bmll/user/intraday-metrics",
+        description="Project root used in the bootstrap for PYTHONPATH and installs.",
+        json_schema_extra={"section": "Automation"},
+    )
+    pythonpath_prefixes: List[str] = Field(
+        default_factory=list,
+        description="Extra PYTHONPATH entries exported by the bootstrap script.",
+        json_schema_extra={"section": "Automation"},
+    )
+    delete_job_after: bool = Field(
+        True,
+        description="Delete one-off jobs after execution completes.",
+        json_schema_extra={"section": "Automation"},
+    )
+    log_area: Literal["user", "organisation"] = Field(
+        "user",
+        description="Area for job logs.",
+        json_schema_extra={"section": "Automation"},
+    )
+    log_path: str = Field(
+        "job_run_logs",
+        description="Path for job logs within the area (overridden per job by default).",
+        json_schema_extra={"section": "Automation"},
+    )
+    cron_format: Literal["dagster", "bmll"] = Field(
+        "dagster",
+        description="Cron format for job schedules (dagster=5-field, bmll=AWS 6-field).",
+        json_schema_extra={"section": "Automation"},
+    )
+    visibility: Literal["private", "public"] = Field(
+        "private",
+        description="Visibility of submitted jobs.",
+        json_schema_extra={"section": "Automation"},
+    )
+
+
 class AnalyticsConfig(BaseModel):
     """
     Top-level configuration for the analytics pipeline.
@@ -239,6 +323,11 @@ class AnalyticsConfig(BaseModel):
     SCHEDULES: List[ScheduleConfig] = Field(
         default_factory=list,
         description="Optional schedules for asset materialization.",
+        json_schema_extra={"section": "Automation"},
+    )
+    BMLL_JOBS: BMLLJobConfig = Field(
+        default_factory=BMLLJobConfig,
+        description="Defaults for running scripts on BMLL compute instances.",
         json_schema_extra={"section": "Automation"},
     )
 

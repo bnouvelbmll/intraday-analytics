@@ -10,6 +10,13 @@ The pipeline is designed around a few core principles:
 2.  **Performance**: The pipeline leverages modern, high-performance libraries like Polars and uses process-based parallelism to scale computations across multiple CPU cores.
 3.  **Memory Safety**: By processing data in batches and using spawned processes for heavy lifting, the pipeline ensures that memory is reliably reclaimed, preventing common issues in long-running data processing tasks.
 
+## New Capabilities (High Level)
+
+- **Schema-driven config UI** (`beaf pipeline config`) edits YAML configs safely.
+- **Remote execution** on BMLL EC2 instances (`beaf job run` / `beaf job install`).
+- **Dagster integration** via `build_assets(...)` and optional BMLL-backed run launcher.
+- **Flexible outputs** to Parquet/Delta/SQL with optional dedupe on partition keys.
+
 ## Data Flow
 
 The pipeline executes in the following stages:
@@ -39,6 +46,12 @@ The pipeline executes in the following stages:
 
 5.  **Cleanup**:
     *   The temporary directory and all intermediate files are deleted.
+
+## Control Plane (CLI + Dagster)
+
+- `beaf pipeline run` drives local runs.
+- `beaf job run` submits the same pipeline to a BMLL instance (with bootstrap).
+- Dagster assets can call `run_partition(...)` and can be scheduled via config.
 
 ## Key Components
 

@@ -86,8 +86,6 @@ USER_CONFIG = {
 CONFIG = AnalyticsConfig(**USER_CONFIG)
 
 # --- Configuration ---
-CONFIG_YAML_PRECEDENCE = "yaml_overrides"
-
 
 whitelist = [
     "AQXE",
@@ -278,7 +276,6 @@ if __name__ == "__main__":
             get_universe,
             get_pipeline=get_pipeline,
             config_file=__file__,
-            config_precedence=CONFIG_YAML_PRECEDENCE,
         )
     except Exception as e:
         logging.error(f"Pipeline failed: {e}", exc_info=True)

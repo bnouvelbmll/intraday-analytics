@@ -12,9 +12,6 @@ import polars as pl
 from intraday_analytics.cli import run_cli
 from intraday_analytics.dagster_compat import CustomUniverse
 
-# --- Configuration ---
-CONFIG_YAML_PRECEDENCE = "yaml_overrides"
-
 # This configuration defines the parameters for the analytics pipeline.
 # You can customize the date range, universe, dataset name, and the analytics to be computed.
 USER_CONFIG = {
@@ -67,5 +64,4 @@ if __name__ == "__main__":
         USER_CONFIG,
         get_universe,
         config_file=__file__,
-        config_precedence=CONFIG_YAML_PRECEDENCE,
     )

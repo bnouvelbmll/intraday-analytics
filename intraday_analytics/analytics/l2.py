@@ -665,14 +665,14 @@ class L2LastOHLCAnalytic(AnalyticSpec):
 
     @analytic_expression(
         "OHLC",
-        pattern=r"^(?P<source>Bid|Ask|Mid|WeightedMid)(?P<ohlc>Open|High|Low|Close)$",
+        pattern=r"^(?P<source>Bid|Ask|Mid|WeightedMid)(?P<ohlc>Open|High|Low|Close)(?P<openMode>C)?$",
         unit="XLOC",
         group="L2OHLC{source}",
         group_role="{ohlc}",
         group_semantics="ohlc_bar,ffill_non_naive",
     )
     def _expression_ohlc(self):
-        """L2 {ohlc} for {source} price within the TimeBucket."""
+        """L2 {ohlc} for {source} price within the TimeBucket{openModeSuffix}."""
         return None
 
     def expressions(
@@ -684,8 +684,21 @@ class L2LastOHLCAnalytic(AnalyticSpec):
             return []
 
         expressions = []
+        open_mode = variant.get("open_mode", "")
+        open_mode_key = str(open_mode) if open_mode else ""
+        open_mode_name = {
+            "event": "",
+            "prev_close": "C",
+        }.get(
+            open_mode_key,
+            open_mode_key.replace("_", " ").title().replace(" ", ""),
+        )
         for ohlc in ["Open", "High", "Low", "Close"]:
-            variant_with_ohlc = {**variant, "ohlc": ohlc}
+            variant_with_ohlc = {
+                **variant,
+                "ohlc": ohlc,
+                "openMode": open_mode_name,
+            }
             default_name = f"{source}{ohlc}"
             if ohlc == "Open":
                 expr = p.first()

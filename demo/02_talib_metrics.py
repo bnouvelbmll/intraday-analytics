@@ -23,8 +23,6 @@ from intraday_analytics.dense_analytics import DenseAnalytics
 from intraday_analytics.dagster_compat import CustomUniverse
 
 # --- Configuration ---
-CONFIG_YAML_PRECEDENCE = "yaml_overrides"
-
 USER_CONFIG = {
     "START_DATE": "2025-11-01",
     "END_DATE": "2025-11-07",
@@ -175,5 +173,4 @@ if __name__ == "__main__":
         get_universe,
         get_pipeline=get_pipeline,
         config_file=__file__,
-        config_precedence=CONFIG_YAML_PRECEDENCE,
     )

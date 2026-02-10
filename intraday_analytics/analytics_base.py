@@ -308,8 +308,21 @@ class BaseAnalytics(ABC):
     def _ohlc_names(self, req: Any, variant: Dict[str, Any]) -> dict[str, str]:
         names = {}
         source = variant["source"]
+        open_mode = variant.get("open_mode", "")
+        open_mode_key = str(open_mode) if open_mode else ""
+        open_mode_name = {
+            "event": "",
+            "prev_close": "C",
+        }.get(
+            open_mode_key,
+            open_mode_key.replace("_", " ").title().replace(" ", ""),
+        )
         for ohlc in ["Open", "High", "Low", "Close"]:
-            variant_with_ohlc = {**variant, "ohlc": ohlc}
+            variant_with_ohlc = {
+                **variant,
+                "ohlc": ohlc,
+                "openMode": open_mode_name,
+            }
             default_name = f"{source}{ohlc}"
             alias = (
                 req.output_name_pattern.format(**variant_with_ohlc)

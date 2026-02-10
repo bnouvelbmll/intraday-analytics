@@ -83,13 +83,13 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
                 source=["Mid", "Bid", "Ask", "WeightedMid"],
                 open_mode="event",
                 aggregations=["First", "Last", "Min", "Max", "Mean"],
-                output_name_pattern="{source}{ohlc}_{open_mode}",
+                output_name_pattern="{source}{ohlc}{openMode}",
             ),
             L2OHLCConfig(
                 source=["Mid", "Bid", "Ask", "WeightedMid"],
                 open_mode="prev_close",
                 aggregations=["First", "Last", "Min", "Max", "Mean"],
-                output_name_pattern="{source}{ohlc}_{open_mode}",
+                output_name_pattern="{source}{ohlc}{openMode}",
             ),
         ],
     )
@@ -459,11 +459,13 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
     return output_columns
 
 
-def _filter_schema_for_pass1(config: AnalyticsConfig, schema: Dict[str, List[str]]):
-    if not config.PASSES:
-        return schema
-
-    pass1 = config.PASSES[0]
+def _filter_schema_for_pass1(config: AnalyticsConfig | PassConfig, schema: Dict[str, List[str]]):
+    if isinstance(config, PassConfig):
+        pass1 = config
+    else:
+        if not config.PASSES:
+            return schema
+        pass1 = config.PASSES[0]
     if not pass1.modules:
         return schema
 
@@ -519,6 +521,10 @@ def _apply_docs(module: str, col: str):
         data.setdefault("agg_or_sum", data.get("agg") or "Sum")
         data.setdefault("agg_or_mean", data.get("agg") or "Mean")
         data.setdefault("scope_or_empty", data.get("scope") or "")
+        if data.get("openMode") == "C":
+            data.setdefault("openModeSuffix", " (prev close fill)")
+        else:
+            data.setdefault("openModeSuffix", "")
         template = doc.get("template", "")
         unit_template = doc.get("unit") or ""
         group_template = doc.get("group") or ""
@@ -614,14 +620,20 @@ def _apply_hints(
     for module, cols in schema.items():
         rows = []
         for c in cols:
-            override = _apply_overrides(module, c, weight_col)
-            hint = override if override else _default_hint_for_column(c, weight_col)
+            if isinstance(c, dict):
+                base = dict(c)
+                col_name = base.get("column")
+            else:
+                base = {"column": c}
+                col_name = c
+            override = _apply_overrides(module, col_name, weight_col)
+            hint = override if override else _default_hint_for_column(col_name, weight_col)
             rows.append(
                 {
-                    "column": c,
+                    **base,
                     "default_agg": hint["default_agg"],
                     "weight_col": hint["weight_col"],
-                    **_apply_docs(module, c),
+                    **_apply_docs(module, col_name),
                 }
             )
         hinted[module] = rows
@@ -682,6 +694,7 @@ def _print_schema(
 def main():
     import argparse
     import json
+    import sys
 
     parser = argparse.ArgumentParser(
         description="Enumerate metric column names for pass1 modules."
@@ -731,6 +744,21 @@ def main():
         action="store_true",
         help="Include join keys/state columns in output.",
     )
+    parser.add_argument(
+        "--plain",
+        action="store_true",
+        help="Disable interactive terminal UI output.",
+    )
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Force interactive Textual UI even if stdout is not a TTY.",
+    )
+    parser.add_argument(
+        "--debug-ui",
+        action="store_true",
+        help="Print UI import errors instead of silently falling back.",
+    )
     args = parser.parse_args()
 
     if args.full:
@@ -744,12 +772,239 @@ def main():
         horizons = [h.strip() for h in args.impact_horizons.split(",") if h.strip()]
         config = _build_full_config(levels=args.levels, impact_horizons=horizons)
 
-    schema = get_output_schema(config)
-    schema = _filter_schema_for_pass1(config, schema)
+    if isinstance(config, AnalyticsConfig) and config.PASSES:
+        schema = {}
+        for pass_cfg in config.PASSES:
+            pass_schema = get_output_schema(pass_cfg)
+            pass_schema = _filter_schema_for_pass1(pass_cfg, pass_schema)
+            for module, cols in pass_schema.items():
+                rows = schema.setdefault(module, [])
+                for col in cols:
+                    rows.append({"column": col, "pass": pass_cfg.name})
+    else:
+        schema = get_output_schema(config)
+        schema = _filter_schema_for_pass1(config, schema)
     if not args.no_hints:
         weight_col = None if args.no_notional_weight else args.weight_col
         schema = _apply_hints(schema, weight_col=weight_col)
-    _print_schema(schema, as_json=args.json, omit_keys=not args.include_keys)
+    if args.json:
+        _print_schema(schema, as_json=True, omit_keys=not args.include_keys)
+        return
+
+    if (not args.plain) and (args.ui or sys.stdout.isatty()):
+        try:
+            from textual.app import App, ComposeResult
+            from textual.containers import Vertical, VerticalScroll
+            from textual.widgets import DataTable, Header, Footer, Static
+            from intraday_analytics.analytics_explain import explain_column, format_explain_markdown
+        except Exception as exc:
+            if args.debug_ui:
+                print(f"[schema_utils] UI init failed: {exc}")
+            _print_schema(schema, as_json=False, omit_keys=not args.include_keys)
+            return
+
+        rows = []
+        key_cols = {
+            "ListingId",
+            "TimeBucket",
+            "InstrumentId",
+            "ListingId_right",
+            "TimeBucketInt_right",
+            "TimeBucketInt",
+        }
+        state_cols = {"MIC", "MarketState", "Ticker", "CurrencyCode"}
+        for module, cols in schema.items():
+            for col in cols:
+                if isinstance(col, dict):
+                    row = {"module": module, **col}
+                else:
+                    row = {"module": module, "column": col}
+                if not args.include_keys and row.get("column") in (key_cols | state_cols):
+                    continue
+                docs = _apply_docs(str(module), str(row.get("column", "")))
+                row.setdefault("unit", docs.get("unit", ""))
+                row.setdefault("definition", docs.get("definition", ""))
+                rows.append(row)
+
+        class SchemaBrowser(App):
+            CSS = """
+            Screen { background: $surface; color: $text; }
+            #metrics { height: 2fr; }
+            #details { height: 1fr; }
+            """
+
+            BINDINGS = [
+                ("q", "quit", "Quit"),
+                ("ctrl+m", "sort_module", "Sort Module"),
+                ("ctrl+n", "sort_name", "Sort Name"),
+            ]
+
+            def compose(self) -> ComposeResult:
+                yield Header(show_clock=False)
+                with Vertical():
+                    self.table = DataTable(id="metrics")
+                    yield self.table
+                    with VerticalScroll(id="details"):
+                        self.details = Static("")
+                        yield self.details
+                yield Footer()
+
+            def on_mount(self) -> None:
+                self.table.add_columns(
+                    "#",
+                    "module",
+                    "pass",
+                    "column",
+                    "default_agg",
+                    "weight_col",
+                    "unit",
+                    "description",
+                )
+                self._row_map = {}
+                import hashlib
+                from rich.text import Text
+
+                palette = [
+                    "cyan",
+                    "magenta",
+                    "green",
+                    "yellow",
+                    "bright_cyan",
+                    "bright_magenta",
+                    "bright_green",
+                    "bright_yellow",
+                    "blue",
+                    "bright_blue",
+                ]
+
+                def _color_for_module(name: str) -> str:
+                    digest = hashlib.md5(name.encode("utf-8")).hexdigest()
+                    idx = int(digest[:2], 16) % len(palette)
+                    return palette[idx]
+                for idx, row in enumerate(rows, start=1):
+                    mod = str(row.get("module", ""))
+                    self.table.add_row(
+                        str(idx),
+                        Text(mod, style=_color_for_module(mod)),
+                        str(row.get("pass", "")),
+                        str(row.get("column", "")),
+                        str(row.get("default_agg", "")),
+                        str(row.get("weight_col", "")),
+                        str(row.get("unit", "")),
+                        str(row.get("definition", "")),
+                        key=f"{row.get('column','')}::{idx}",
+                    )
+                    self._row_map[f"{row.get('column','')}::{idx}"] = row
+                if rows:
+                    self.table.focus()
+                    self.table.cursor_type = "row"
+                    self._update_details(rows[0].get("column", ""))
+                self._rows = rows
+                self._sort_mode = "module"
+
+            def action_sort_module(self) -> None:
+                self._sort_mode = "module"
+                self._refresh_rows()
+
+            def action_sort_name(self) -> None:
+                self._sort_mode = "column"
+                self._refresh_rows()
+
+            def _refresh_rows(self) -> None:
+                rows = list(self._rows)
+                if self._sort_mode == "module":
+                    rows.sort(key=lambda r: (str(r.get("module", "")), str(r.get("column", ""))))
+                else:
+                    rows.sort(key=lambda r: (str(r.get("column", "")), str(r.get("module", ""))))
+                self.table.clear()
+                self.table.add_columns(
+                    "#",
+                    "module",
+                    "pass",
+                    "column",
+                    "default_agg",
+                    "weight_col",
+                    "unit",
+                    "description",
+                )
+                self._row_map = {}
+                import hashlib
+                from rich.text import Text
+
+                palette = [
+                    "cyan",
+                    "magenta",
+                    "green",
+                    "yellow",
+                    "bright_cyan",
+                    "bright_magenta",
+                    "bright_green",
+                    "bright_yellow",
+                    "blue",
+                    "bright_blue",
+                ]
+
+                def _color_for_module(name: str) -> str:
+                    digest = hashlib.md5(name.encode("utf-8")).hexdigest()
+                    idx = int(digest[:2], 16) % len(palette)
+                    return palette[idx]
+
+                for idx, row in enumerate(rows, start=1):
+                    mod = str(row.get("module", ""))
+                    self.table.add_row(
+                        str(idx),
+                        Text(mod, style=_color_for_module(mod)),
+                        str(row.get("pass", "")),
+                        str(row.get("column", "")),
+                        str(row.get("default_agg", "")),
+                        str(row.get("weight_col", "")),
+                        str(row.get("unit", "")),
+                        str(row.get("definition", "")),
+                        key=f"{row.get('column','')}::{idx}",
+                    )
+                    self._row_map[f"{row.get('column','')}::{idx}"] = row
+                if rows:
+                    self.table.focus()
+                    self.table.cursor_type = "row"
+                    self._update_details(rows[0].get("column", ""), rows[0])
+
+            def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+                key = event.row_key.value if event.row_key else None
+                if key:
+                    row = self._row_map.get(key, {})
+                    column = row.get("column") or key.split("::", 1)[0]
+                    self._update_details(column, row)
+
+            def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+                key = event.row_key.value if event.row_key else None
+                if key:
+                    row = self._row_map.get(key, {})
+                    column = row.get("column") or key.split("::", 1)[0]
+                    self._update_details(column, row)
+
+            def _update_details(self, column: str, row: dict | None = None) -> None:
+                details = explain_column(
+                    args.config or "",
+                    column,
+                    config_dict=config.model_dump(),
+                    module_hint=(row or {}).get("module"),
+                    pass_name=(row or {}).get("pass"),
+                )
+                if not details.get("found", True):
+                    details["message"] = (
+                        details.get("message")
+                        or "Column not found in configured passes (likely a key/state column)."
+                    )
+                try:
+                    from rich.markdown import Markdown
+                    self.details.update(Markdown(format_explain_markdown(details)))
+                except Exception:
+                    self.details.update(json.dumps(details, indent=2))
+
+        SchemaBrowser().run()
+        return
+
+    _print_schema(schema, as_json=False, omit_keys=not args.include_keys)
 
 
 if __name__ == "__main__":

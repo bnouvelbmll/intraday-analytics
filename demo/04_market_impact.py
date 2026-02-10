@@ -14,8 +14,6 @@ from intraday_analytics.cli import run_cli
 from intraday_analytics.dagster_compat import CustomUniverse
 
 # --- Configuration ---
-CONFIG_YAML_PRECEDENCE = "yaml_overrides"
-
 USER_CONFIG = {
     "START_DATE": "2025-11-01",
     "END_DATE": "2025-12-31",
@@ -62,5 +60,4 @@ if __name__ == "__main__":
         USER_CONFIG,
         get_universe,
         config_file=__file__,
-        config_precedence=CONFIG_YAML_PRECEDENCE,
     )
