@@ -15,6 +15,7 @@ from .analytics.trade import (
 from .analytics.execution import ExecutionAnalytics
 from .analytics.iceberg import IcebergAnalytics
 from .analytics.common import METRIC_HINTS, METRIC_DOCS
+from .analytics.hinting import apply_overrides, default_hint_for_column
 from .dense_analytics import DenseAnalytics
 from .analytics.l2 import (
     L2AnalyticsConfig,
@@ -489,21 +490,6 @@ def _filter_schema_for_pass1(config: AnalyticsConfig | PassConfig, schema: Dict[
     return {k: schema[k] for k in keys if k in schema}
 
 
-def _apply_overrides(module: str, col: str, weight_col: str | None):
-    import re
-
-    for hint in METRIC_HINTS:
-        if hint.get("module") != module:
-            continue
-        pattern = hint.get("pattern")
-        if pattern and re.search(pattern, col):
-            return {
-                "default_agg": hint.get("default_agg"),
-                "weight_col": hint.get("weight_col") or weight_col,
-            }
-    return None
-
-
 def _apply_docs(module: str, col: str):
     import re
 
@@ -575,50 +561,6 @@ def _apply_docs(module: str, col: str):
     }
 
 
-def _default_hint_for_column(col: str, weight_col: str | None):
-    col_lower = col.lower()
-    if col in {"ListingId", "TimeBucket", "Ticker", "CurrencyCode"}:
-        return {"default_agg": "Last", "weight_col": None}
-    if col == "MIC":
-        return {"default_agg": "Last", "weight_col": None}
-    if col == "MarketState":
-        return {"default_agg": "Last", "weight_col": None}
-    if (
-        col.endswith("_right")
-        or col.endswith("TimeBucketInt")
-        or col.endswith("TimeBucketInt_right")
-    ):
-        return {"default_agg": "Last", "weight_col": None}
-
-    stat_markers = ["avg", "mean", "median", "std", "vwap"]
-    notional_markers = [
-        "avgprice",
-        "medianprice",
-        "priceimpact",
-        "realizedspread",
-        "effectivespread",
-        "price",
-        "mid",
-        "spread",
-        "imbalance",
-        "ratio",
-    ]
-
-    if any(m in col_lower for m in stat_markers + notional_markers):
-        if weight_col:
-            return {"default_agg": "NotionalWeighted", "weight_col": weight_col}
-        return {"default_agg": "Mean", "weight_col": None}
-
-    sum_markers = ["count", "volume", "notional", "size", "executedvolume"]
-    if any(m in col_lower for m in sum_markers):
-        return {"default_agg": "Sum", "weight_col": None}
-
-    if weight_col:
-        return {"default_agg": "NotionalWeighted", "weight_col": weight_col}
-
-    return {"default_agg": "Mean", "weight_col": None}
-
-
 def _apply_hints(
     schema: Dict[str, List[str]],
     weight_col: str | None,
@@ -633,8 +575,8 @@ def _apply_hints(
             else:
                 base = {"column": c}
                 col_name = c
-            override = _apply_overrides(module, col_name, weight_col)
-            hint = override if override else _default_hint_for_column(col_name, weight_col)
+            override = apply_overrides(module, col_name, weight_col)
+            hint = override if override else default_hint_for_column(col_name, weight_col)
             rows.append(
                 {
                     **base,

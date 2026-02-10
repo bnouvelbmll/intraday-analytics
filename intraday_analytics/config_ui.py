@@ -824,6 +824,11 @@ MODULE_INFO = {
         "columns": ["Custom"],
         "tier": "post",
     },
+    "reaggregate": {
+        "desc": "Postprocessing: reaggregate previous pass by a group map.",
+        "columns": ["IndexAggregation"],
+        "tier": "post",
+    },
     "characteristics": {
         "desc": "Advanced/internal: characteristics over L3/trades.",
         "columns": ["L3Characteristics", "TradeCharacteristics"],
@@ -839,6 +844,7 @@ PASS_MODULE_FIELD_MAP = {
     "execution": ["execution_analytics"],
     "cbbo": ["cbbo_analytics"],
     "generic": ["generic_analytics"],
+    "reaggregate": ["reaggregate_analytics"],
     "characteristics": [
         "l3_characteristics_analytics",
         "trade_characteristics_analytics",

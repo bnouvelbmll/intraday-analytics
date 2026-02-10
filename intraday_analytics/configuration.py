@@ -7,6 +7,7 @@ from .analytics.l3 import L3AnalyticsConfig
 from .analytics.trade import TradeAnalyticsConfig
 from .analytics.execution import ExecutionAnalyticsConfig
 from .analytics.generic import GenericAnalyticsConfig
+from .analytics.reaggregate import ReaggregateAnalyticsConfig
 from .analytics.iceberg import IcebergAnalyticsConfig
 from .analytics.cbbo import CBBOAnalyticsConfig
 from .analytics.l3_characteristics import L3CharacteristicsConfig
@@ -135,6 +136,9 @@ class PassConfig(BaseModel):
     )
     generic_analytics: GenericAnalyticsConfig = Field(
         default_factory=GenericAnalyticsConfig
+    )
+    reaggregate_analytics: ReaggregateAnalyticsConfig = Field(
+        default_factory=ReaggregateAnalyticsConfig
     )
 
     @model_validator(mode="after")
