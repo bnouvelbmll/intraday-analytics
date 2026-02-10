@@ -40,6 +40,7 @@ class OutputTarget(BaseModel):
     path_template: Optional[str] = Field(
         "s3://{bucket}/{prefix}/data/{datasetname}/{pass}/{universe}/{start_date}_{end_date}.parquet",
         description="Path template for parquet/delta outputs (supports {bucket}, {prefix}, {datasetname}, {universe}, {start_date}, {end_date}).",
+        json_schema_extra={"depends_on": {"type": ["parquet", "delta"]}},
     )
     io_manager_key: Optional[str] = Field(
         None,
@@ -377,7 +378,10 @@ class AnalyticsConfig(BaseModel):
     AREA: str = Field(
         "user",
         description="Bucket to use to store the data on S3.",
-        json_schema_extra={"section": "Outputs"},
+        json_schema_extra={
+            "section": "Outputs",
+            "depends_on": {"OUTPUT_TARGET.type": ["parquet", "delta"]},
+        },
     )
 
     # --- Execution ---

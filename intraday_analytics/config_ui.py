@@ -449,7 +449,16 @@ class ModelEditor(Screen):
             depends_on = extra.get("depends_on") if isinstance(extra, dict) else None
             if depends_on:
                 for dep_field, dep_values in depends_on.items():
-                    current = self.data.get(dep_field)
+                    current = None
+                    if "." in dep_field:
+                        root, leaf = dep_field.split(".", 1)
+                        current = self.data.get(root)
+                        if isinstance(current, BaseModel):
+                            current = current.model_dump()
+                        if isinstance(current, dict):
+                            current = current.get(leaf)
+                    else:
+                        current = self.data.get(dep_field)
                     if hasattr(current, "value"):
                         current = current.value
                     if isinstance(dep_values, (list, tuple, set)):
