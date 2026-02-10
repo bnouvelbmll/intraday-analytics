@@ -72,9 +72,11 @@ class TestEndToEnd(unittest.TestCase):
                     modules=["dense", "trade"],
                 )
             ],
-            FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(
-                self.temp_dir, "final_{datasetname}_{start_date}_{end_date}.parquet"
-            ),
+            OUTPUT_TARGET={
+                "path_template": os.path.join(
+                    self.temp_dir, "final_{datasetname}_{start_date}_{end_date}.parquet"
+                )
+            },
             CLEAN_UP_TEMP_DIR=False,
             BATCH_FREQ=None,
         )

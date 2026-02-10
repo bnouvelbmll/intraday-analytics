@@ -63,7 +63,7 @@ To run the pipeline, execute the `main.py` script:
 python3 main.py
 ```
 
-The script will process the data for the configured date range and universe, writing the final aggregated output to the S3 location specified by the `FINAL_OUTPUT_PATH_TEMPLATE` in the configuration.
+The script will process the data for the configured date range and universe, writing the final aggregated output to the S3 location specified by `OUTPUT_TARGET.path_template` in the configuration.
 
 ## Dagster Compatibility
 

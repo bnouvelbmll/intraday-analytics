@@ -111,10 +111,12 @@ class TestEagerExecution(unittest.TestCase):
                     modules=["trade"],
                 )
             ],
-            FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(
-                self.temp_dir,
-                f"final_{eager_execution}_{{datasetname}}_{{start_date}}_{{end_date}}.parquet",
-            ),
+            OUTPUT_TARGET={
+                "path_template": os.path.join(
+                    self.temp_dir,
+                    f"final_{eager_execution}_{{datasetname}}_{{start_date}}_{{end_date}}.parquet",
+                )
+            },
             TABLES_TO_LOAD=["trades"],
             EAGER_EXECUTION=eager_execution,
             CLEAN_UP_TEMP_DIR=False,

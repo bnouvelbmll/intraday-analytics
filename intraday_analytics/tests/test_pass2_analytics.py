@@ -140,6 +140,12 @@ class TestPass2Analytics(unittest.TestCase):
             TABLES_TO_LOAD=["trades"],
             CLEAN_UP_TEMP_DIR=False,
             BATCH_FREQ=None,
+            OUTPUT_TARGET={
+                "path_template": os.path.join(
+                    self.temp_dir,
+                    "final_{datasetname}_{start_date}_{end_date}.parquet",
+                )
+            },
         )
 
     def tearDown(self):

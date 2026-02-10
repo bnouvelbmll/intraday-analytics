@@ -18,6 +18,9 @@ def get_final_output_path(start_date, end_date, config, pass_name, output_target
     """Constructs the final output path for a given date range and pass."""
     import bmll2
 
+    if output_target is None:
+        output_target = config.OUTPUT_TARGET
+
     dataset_name = config.DATASETNAME
     output_bucket = bmll2.storage_paths()[config.AREA]["bucket"]
     output_prefix = bmll2.storage_paths()[config.AREA]["prefix"]
@@ -25,9 +28,7 @@ def get_final_output_path(start_date, end_date, config, pass_name, output_target
     # Append pass_name to the datasetname to distinguish pass outputs
     final_dataset_name = f"{dataset_name}_{pass_name}"
 
-    template = config.FINAL_OUTPUT_PATH_TEMPLATE
-    if output_target is not None and getattr(output_target, "path_template", None):
-        template = output_target.path_template
+    template = getattr(output_target, "path_template", None) or ""
 
     universe = config.UNIVERSE or "all"
 

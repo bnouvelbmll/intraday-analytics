@@ -57,6 +57,9 @@ def fixture_files(_sd, _ed, _mics, table_name, exclude_weekends=True):
 
 
 def _run_with_fixtures(config: AnalyticsConfig, get_pipeline=None):
+    config.OUTPUT_TARGET.path_template = os.path.join(
+        config.TEMP_DIR, "final_{pass}_{start_date}_{end_date}.parquet"
+    )
     with patch(
         "intraday_analytics.execution.ProcessInterval", SyncProcessInterval
     ), patch(

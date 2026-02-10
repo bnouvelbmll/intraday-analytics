@@ -75,9 +75,12 @@ class TestMultiPassPipeline(unittest.TestCase):
                     modules=["aggregation"],
                 ),
             ],
-            FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(
-                self.temp_dir, "final_{datasetname}_{start_date}_{end_date}.parquet"
-            ),
+            OUTPUT_TARGET={
+                "path_template": os.path.join(
+                    self.temp_dir,
+                    "final_{datasetname}_{start_date}_{end_date}.parquet",
+                )
+            },
             TABLES_TO_LOAD=["trades"],
             CLEAN_UP_TEMP_DIR=False,
         )

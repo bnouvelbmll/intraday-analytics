@@ -74,8 +74,8 @@ USER_CONFIG = {
     "CLEAN_UP_TEMP_DIR": True,
     "EAGER_EXECUTION": True,
     # --- Output Configuration ---
-    # To customize the final output path, add "FINAL_OUTPUT_PATH_TEMPLATE" here.
-    # Example: "FINAL_OUTPUT_PATH_TEMPLATE": "s3://custom-bucket/analytics/{datasetname}/{start_date}_{end_date}.parquet"
+    # To customize output paths, set OUTPUT_TARGET.path_template in the config.
+    # Example: "OUTPUT_TARGET": {"path_template": "s3://custom-bucket/analytics/{datasetname}/{start_date}_{end_date}.parquet"}
     "S3_STORAGE_OPTIONS": {"region": "us-east-1"},  # Example S3 storage options
     # "LOGGING_LEVEL": "debug",
     "EAGER_EXECUTION": True,

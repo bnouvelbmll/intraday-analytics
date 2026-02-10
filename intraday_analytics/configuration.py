@@ -38,7 +38,7 @@ class OutputType(str, Enum):
 class OutputTarget(BaseModel):
     type: OutputType = OutputType.PARQUET
     path_template: Optional[str] = Field(
-        None,
+        "s3://{bucket}/{prefix}/data/{datasetname}/{pass}/{universe}/{start_date}_{end_date}.parquet",
         description="Path template for parquet/delta outputs (supports {bucket}, {prefix}, {datasetname}, {universe}, {start_date}, {end_date}).",
     )
     io_manager_key: Optional[str] = Field(
@@ -441,11 +441,6 @@ class AnalyticsConfig(BaseModel):
     )
 
     # --- Output ---
-    FINAL_OUTPUT_PATH_TEMPLATE: str = Field(
-        "s3://{bucket}/{prefix}/data/{datasetname}/{pass}/{universe}/{start_date}_{end_date}.parquet",
-        description="Template for output file paths.",
-        json_schema_extra={"section": "Outputs"},
-    )
     OUTPUT_TARGET: OutputTarget = Field(
         default_factory=OutputTarget,
         description="Default output target configuration.",

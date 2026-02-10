@@ -54,7 +54,7 @@ class TestConfigPropagation(unittest.TestCase):
             BATCHING_STRATEGY="heuristic",
             MAX_ROWS_PER_TABLE={"trades": 1000},
             CLEAN_UP_TEMP_DIR=False,
-            FINAL_OUTPUT_PATH_TEMPLATE=os.path.join(self.temp_dir, "final.parquet"),
+            OUTPUT_TARGET={"path_template": os.path.join(self.temp_dir, "final.parquet")},
             TABLES_TO_LOAD=[self.custom_table_name],  # <--- The custom config
             NUM_WORKERS=1,
         )

@@ -284,6 +284,7 @@ class ModelEditor(Screen):
         self.title = title
         self.on_save = on_save
         self.widgets: dict[str, Any] = {}
+        self._widget_names: dict[str, str] = {}
         self.status = Static("")
         self._skip_fields = {"PASSES"} if model_cls is AnalyticsConfig else set()
         self._section_filter: Optional[str] = None
@@ -414,6 +415,9 @@ class ModelEditor(Screen):
             widget = TextArea(text=_yaml_from_value(value), language="yaml")
             widget.styles.height = 5
 
+        if getattr(widget, "id", None) is None:
+            widget.id = f"field_{name}"
+        self._widget_names[widget.id] = name
         self.widgets[name] = (widget, annotation)
         with Vertical(classes="field-box"):
             yield Label(f"--")
@@ -514,6 +518,16 @@ class ModelEditor(Screen):
                 on_save=_on_save,
             )
             self.app.push_screen(screen)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        widget_id = event.select.id
+        if not widget_id:
+            return
+        field_name = self._widget_names.get(widget_id)
+        if not field_name:
+            return
+        self.data[field_name] = event.value
+        self.refresh(recompose=True)
 
     def _save(self) -> None:
         raw = dict(self.data) if isinstance(self.data, dict) else {}
@@ -1419,9 +1433,7 @@ def _format_output_driver(output_target: Any, config_data: dict) -> str:
         table = target.get("sql_table", "unknown_table")
         conn = target.get("sql_connection", "unknown_connection")
         return f"sql {table} @ {conn}"
-    template = target.get("path_template") or config_data.get(
-        "FINAL_OUTPUT_PATH_TEMPLATE", ""
-    )
+    template = target.get("path_template", "")
     return f"{output_type} {template}".strip()
 
 
