@@ -117,6 +117,141 @@ def _write_beaf_run_script(job_config: BMLLJobConfig, args: list[str]) -> str:
     return str(script_path)
 
 
+def _write_dagster_scheduler_script(
+    job_config: BMLLJobConfig,
+    *,
+    pipeline: Optional[str],
+    workspace: Optional[str],
+    dagster_home: Optional[str],
+    runtime_hours: int,
+) -> str:
+    jobs_dir = Path(job_config.jobs_dir)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    script_path = jobs_dir / f"beaf_dagster_scheduler_{stamp}.sh"
+    cmd = ["dagster-daemon", "run"]
+    if workspace:
+        cmd.extend(["-w", workspace])
+    elif pipeline:
+        cmd.extend(["-f", pipeline])
+    else:
+        raise ValueError("pipeline or workspace is required for dagster scheduler.")
+    timeout_seconds = int(max(runtime_hours, 1) * 3600)
+    cmd = ["timeout", str(timeout_seconds)] + cmd
+    env_lines = []
+    if dagster_home:
+        env_lines.append(f"export DAGSTER_HOME=\"{dagster_home}\"")
+    script_path.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                *env_lines,
+                " ".join(cmd),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(script_path, 0o755)
+    return str(script_path)
+
+
+def _write_scheduler_metadata(job_config: BMLLJobConfig, name: str, payload: dict) -> str:
+    jobs_dir = Path(job_config.jobs_dir)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = jobs_dir / f"dagster_scheduler_{name}.json"
+    meta_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    return str(meta_path)
+
+
+def _load_scheduler_metadata(job_config: BMLLJobConfig, name: str) -> Optional[dict]:
+    jobs_dir = Path(job_config.jobs_dir)
+    meta_path = jobs_dir / f"dagster_scheduler_{name}.json"
+    if not meta_path.exists():
+        return None
+    return _load_yaml_config(str(meta_path))
+
+
+def dagster_scheduler_install(
+    *,
+    pipeline: Optional[str] = None,
+    workspace: Optional[str] = None,
+    name: Optional[str] = None,
+    interval_hours: int = 6,
+    instance_size: Optional[int] = 16,
+    conda_env: Optional[str] = None,
+    dagster_home: Optional[str] = None,
+    max_runtime_hours: int = 1,
+    cron_timezone: Optional[str] = None,
+):
+    """
+    Install a cron-triggered BMLL job that runs the Dagster daemon periodically.
+    """
+    job_config = _load_bmll_job_config(pipeline or workspace)
+    scheduler_name = name or "dagster_scheduler"
+    cron = f"0 */{interval_hours} * * *"
+    script_path = _write_dagster_scheduler_script(
+        job_config,
+        pipeline=pipeline,
+        workspace=workspace,
+        dagster_home=dagster_home,
+        runtime_hours=max_runtime_hours,
+    )
+    job = submit_instance_job(
+        script_path,
+        name=scheduler_name,
+        instance_size=instance_size or job_config.default_instance_size,
+        conda_env=conda_env,
+        cron=cron,
+        cron_timezone=cron_timezone,
+        max_runtime_hours=max_runtime_hours,
+        delete_after=False,
+        config=job_config,
+    )
+    payload = {
+        "job_id": getattr(job, "id", None),
+        "name": scheduler_name,
+        "cron": cron,
+        "cron_timezone": cron_timezone,
+        "pipeline": pipeline,
+        "workspace": workspace,
+        "instance_size": instance_size,
+        "conda_env": conda_env,
+        "dagster_home": dagster_home,
+        "max_runtime_hours": max_runtime_hours,
+    }
+    _write_scheduler_metadata(job_config, scheduler_name, payload)
+    return job
+
+
+def dagster_scheduler_uninstall(
+    *,
+    name: Optional[str] = None,
+    pipeline: Optional[str] = None,
+    workspace: Optional[str] = None,
+):
+    job_config = _load_bmll_job_config(pipeline or workspace)
+    scheduler_name = name or "dagster_scheduler"
+    meta = _load_scheduler_metadata(job_config, scheduler_name) or {}
+    job_id = meta.get("job_id")
+    try:
+        from bmll import compute
+
+        job = None
+        if job_id and hasattr(compute, "get_job"):
+            job = compute.get_job(job_id)
+        if job is None and hasattr(compute, "get_jobs"):
+            jobs = compute.get_jobs()
+            for candidate in jobs:
+                if getattr(candidate, "name", None) == scheduler_name:
+                    job = candidate
+                    break
+        if job is not None and hasattr(job, "delete"):
+            job.delete()
+    except Exception:
+        pass
+
+
 def bmll_job_run(
     *,
     config_file: Optional[str] = None,

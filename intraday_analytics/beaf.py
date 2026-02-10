@@ -3,7 +3,13 @@ from __future__ import annotations
 import fire
 import sys
 
-from intraday_analytics.cli import bmll_job_install, bmll_job_run, run_cli
+from intraday_analytics.cli import (
+    bmll_job_install,
+    bmll_job_run,
+    dagster_scheduler_install,
+    dagster_scheduler_uninstall,
+    run_cli,
+)
 from intraday_analytics import schema_utils
 from intraday_analytics import config_ui
 from intraday_analytics.analytics_explain import main as analytics_explain_main
@@ -161,13 +167,46 @@ def _dagster_run(
     raise SystemExit("Provide either run_id+instance_ref_file or pipeline.")
 
 
+def _dagster_ui(
+    *,
+    pipeline: str | None = None,
+    workspace: str | None = None,
+    host: str = "0.0.0.0",
+    port: int = 3000,
+    dagster_home: str | None = None,
+):
+    import os
+    import subprocess
+
+    if not pipeline and not workspace:
+        raise SystemExit("Provide --pipeline or --workspace.")
+    cmd = ["dagster-webserver", "-h", host, "-p", str(port)]
+    if workspace:
+        cmd.extend(["-w", workspace])
+    else:
+        cmd.extend(["-f", pipeline])
+    env = os.environ.copy()
+    if dagster_home:
+        env["DAGSTER_HOME"] = dagster_home
+    return subprocess.call(cmd, env=env)
+
+
 def main():
     fire.Fire(
         {
             "analytics": {"list": _schema_utils, "explain": _analytics_explain},
             "pipeline": {"run": _pipeline_run, "config": _config_ui},
             "job": {"run": _job_run, "install": bmll_job_install},
-            "dagster": {"run": _dagster_run, "install": _dagster_install, "uninstall": _dagster_uninstall},
+            "dagster": {
+                "run": _dagster_run,
+                "install": _dagster_install,
+                "uninstall": _dagster_uninstall,
+                "scheduler": {
+                    "install": dagster_scheduler_install,
+                    "uninstall": dagster_scheduler_uninstall,
+                },
+                "ui": _dagster_ui,
+            },
         }
     )
 
