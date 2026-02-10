@@ -285,6 +285,7 @@ class ModelEditor(Screen):
         self.on_save = on_save
         self.widgets: dict[str, Any] = {}
         self._widget_names: dict[str, str] = {}
+        self._suppress_select_events = False
         self.status = Static("")
         self._skip_fields = {"PASSES"} if model_cls is AnalyticsConfig else set()
         self._section_filter: Optional[str] = None
@@ -527,7 +528,19 @@ class ModelEditor(Screen):
         if not field_name:
             return
         self.data[field_name] = event.value
-        self.refresh(recompose=True)
+        if self._suppress_select_events:
+            return
+        self._suppress_select_events = True
+
+        def _recompose():
+            self.refresh(recompose=True)
+
+            def _clear():
+                self._suppress_select_events = False
+
+            self.call_after_refresh(_clear)
+
+        self.call_after_refresh(_recompose)
 
     def _save(self) -> None:
         raw = dict(self.data) if isinstance(self.data, dict) else {}
