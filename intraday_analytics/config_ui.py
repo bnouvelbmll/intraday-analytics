@@ -177,6 +177,23 @@ def _is_list_of_basemodel(annotation) -> Optional[type[BaseModel]]:
     return None
 
 
+def _is_list_of_str(annotation) -> bool:
+    origin = get_origin(annotation)
+    if origin is list:
+        args = get_args(annotation)
+        return bool(args and args[0] is str)
+    if origin is not None and origin.__name__ == "List":
+        args = get_args(annotation)
+        return bool(args and args[0] is str)
+    return False
+
+
+def _field_uses_columns(name: str) -> bool:
+    if "columns" in name:
+        return True
+    return name in {"group_by", "group_cols", "sort_keys", "symbol_cols"}
+
+
 def _field_short_doc(field) -> Optional[str]:
     if field is None:
         return None
@@ -297,6 +314,8 @@ class ModelEditor(Screen):
         self._allowed_fields: Optional[set[str]] = None
         self._field_docs: dict[str, str] = {}
         self._model_doc: Optional[str] = None
+        self._column_pick_map: dict[str, str] = {}
+        self._schema_columns: Optional[list[str]] = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -423,6 +442,10 @@ class ModelEditor(Screen):
                 [(o, o) for o in options],
                 value=str(current) if current is not None else options[0],
             )
+        elif _is_list_of_str(annotation) and _field_uses_columns(name):
+            widget = TextArea(text=_yaml_from_value(value), language="yaml")
+            widget.styles.height = 4
+            self._column_pick_map[f"pick_{name}"] = name
         elif annotation in (int, float, str):
             widget = Input(value="" if value is None else str(value))
         elif _is_list_of_basemodel(annotation) is not None:
@@ -445,6 +468,9 @@ class ModelEditor(Screen):
                     yield cb
             else:
                 yield widget
+            pick_id = f"pick_{name}"
+            if pick_id in self._column_pick_map:
+                yield Button("Pick columns", id=pick_id)
             if field_info := self.model_cls.model_fields.get(name):  # type: ignore[attr-defined]
                 short_doc = _field_short_doc(field_info)
                 long_doc = _field_long_doc(field_info)
@@ -508,6 +534,25 @@ class ModelEditor(Screen):
             doc = self._field_docs.get(field_name)
             if doc:
                 self.status.update(doc)
+        elif button_id.startswith("pick_"):
+            field_name = button_id.split("_", 1)[1]
+            widget, _ = self.widgets.get(field_name, (None, None))
+            current = self.data.get(field_name, [])
+            if isinstance(widget, TextArea):
+                try:
+                    current = _parse_yaml(widget.text) or []
+                except Exception:
+                    current = []
+
+            def _on_pick(selected: list[str]):
+                if isinstance(widget, TextArea):
+                    widget.text = yaml.safe_dump(selected, sort_keys=False)
+                self.data[field_name] = selected
+
+            columns = self._get_schema_columns()
+            self.app.push_screen(
+                ColumnPicker(columns, current or [], _on_pick, f"Pick columns: {field_name}")
+            )
         elif button_id.startswith("edit_"):
             field_name = button_id.split("_", 1)[1]
             widget, annotation = self.widgets[field_name]
@@ -548,6 +593,29 @@ class ModelEditor(Screen):
                 on_save=_on_save,
             )
             self.app.push_screen(screen)
+
+    def _get_schema_columns(self) -> list[str]:
+        if self._schema_columns is not None:
+            return self._schema_columns
+        config = None
+        try:
+            app_cfg = getattr(self.app, "config_data", None)
+            if app_cfg:
+                config = AnalyticsConfig.model_validate(app_cfg)
+        except Exception:
+            config = None
+        if config is None:
+            config = AnalyticsConfig()
+        try:
+            schema = get_output_schema(config)
+        except Exception:
+            schema = get_full_output_schema()
+        cols: list[str] = []
+        for values in schema.values():
+            if isinstance(values, list):
+                cols.extend(values)
+        self._schema_columns = sorted(set(cols))
+        return self._schema_columns
 
     def on_select_changed(self, event: Select.Changed) -> None:
         widget_id = event.select.id
@@ -674,6 +742,40 @@ class ListEditor(Screen):
             self.app.push_screen(
                 ListEditor(self.model_cls, self.items, self.title, self.on_save)
             )
+
+
+class ColumnPicker(Screen):
+    def __init__(self, columns: list[str], selected: list[str], on_save, title: str):
+        super().__init__()
+        self.columns = columns
+        self.selected = set(selected or [])
+        self.on_save = on_save
+        self.title = title
+        self._checkboxes: list[Checkbox] = []
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False)
+        yield Label(self.title)
+        with VerticalScroll():
+            if not self.columns:
+                yield Label("No schema columns available.")
+            for col in self.columns:
+                cb = Checkbox(col, value=col in self.selected)
+                self._checkboxes.append(cb)
+                yield cb
+        with Horizontal():
+            yield Button("Use selected", id="save", variant="primary")
+            yield Button("Cancel", id="cancel")
+        yield Footer()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel":
+            self.app.pop_screen()
+            return
+        if event.button.id == "save":
+            picked = [cb.label for cb in self._checkboxes if cb.value]
+            self.on_save(picked)
+            self.app.pop_screen()
 
 
 class ConfigEditor(App):
@@ -1114,15 +1216,24 @@ class PassEditor(Screen):
             self.widgets["time_bucket_seconds"] = tbs
             yield tbs
 
+            dense_cfg = self.data.get("dense_analytics", {})
+            dense_enabled = True
+            if isinstance(dense_cfg, dict):
+                dense_enabled = dense_cfg.get("ENABLED", True)
+            else:
+                dense_enabled = getattr(dense_cfg, "ENABLED", True)
+            dense_label = (
+                "Dense output (enabled)" if dense_enabled else "Dense output (disabled)"
+            )
+            yield Label(dense_label)
+            yield Button("Edit dense output", id="edit_dense")
+
             yield Label("Modules (purpose and key outputs)")
             self.widgets["modules"] = []
             self.widgets["module_edit_buttons"] = {}
             modules_box = Vertical(id="modules_box")
             self.widgets["modules_box"] = modules_box
             yield modules_box
-
-            yield Label("Dense output")
-            yield Button("Edit dense output", id="edit_dense")
 
             yield Label("Advanced options")
             yield Button("Edit full PassConfig", id="edit_full")
