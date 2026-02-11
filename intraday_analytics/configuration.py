@@ -73,7 +73,6 @@ class OutputTarget(BaseModel):
     io_manager_key: Optional[str] = Field(
         None,
         description="Dagster IO manager key to use when running in Dagster.",
-        json_schema_extra={"depends_on": {"type": ["parquet", "delta"]}},
     )
     delta_mode: Literal["append", "overwrite"] = Field(
         "append",

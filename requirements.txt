@@ -5,7 +5,7 @@ viztracer
 joblib
 pydantic==2.7.1
 TA-lib
-textual
+textual>=7.5
 textual-web
 plotly
 ipywidgets

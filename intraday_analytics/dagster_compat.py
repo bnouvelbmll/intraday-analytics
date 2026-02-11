@@ -796,6 +796,95 @@ def build_schedules(
     return schedules
 
 
+def build_schedules_for_module(
+    module,
+    *,
+    partitions_def=None,
+    universe_dim: str = "universe",
+    date_dim: str = "date",
+    split_passes: bool = False,
+):
+    """
+    Build Dagster schedules for a single module based on AnalyticsConfig.SCHEDULES.
+    """
+    try:
+        from dagster import (
+            AssetSelection,
+            MultiPartitionKey,
+            RunRequest,
+            define_asset_job,
+            schedule,
+        )
+    except Exception as exc:
+        raise ImportError("Dagster is required to build schedules.") from exc
+
+    name = module.__name__.split(".")[-1]
+    asset_base = f"{module.__name__.split('.')[0]}{name}" if name and name[0].isdigit() else name
+    precedence = getattr(module, "CONFIG_YAML_PRECEDENCE", "yaml_overrides")
+    base_config = resolve_user_config(
+        module.USER_CONFIG, getattr(module, "__file__", None), precedence
+    )
+    config_model = (
+        AnalyticsConfig(**base_config)
+        if isinstance(base_config, dict)
+        else AnalyticsConfig()
+    )
+    if not config_model.SCHEDULES:
+        return []
+
+    universes = getattr(module, "UNIVERSES", None) or default_universes()
+    default_universe = _first_universe_spec(universes)
+
+    selection = AssetSelection.groups(asset_base)
+    job = define_asset_job(
+        name=f"{asset_base}__job",
+        selection=selection,
+        partitions_def=partitions_def,
+    )
+
+    schedules = []
+    for schedule_cfg in config_model.SCHEDULES:
+        if not schedule_cfg.enabled:
+            continue
+        schedule_name = f"{asset_base}__{schedule_cfg.name}"
+        partition_specs = _schedule_partitions(
+            schedule_cfg,
+            default_universe=default_universe,
+            universe_dim=universe_dim,
+            date_dim=date_dim,
+        )
+
+        @schedule(
+            name=schedule_name,
+            cron_schedule=schedule_cfg.cron,
+            job=job,
+            execution_timezone=schedule_cfg.timezone,
+        )
+        def _schedule_fn(
+            context,
+            _specs=partition_specs,
+            _timezone=schedule_cfg.timezone,
+            _name=schedule_name,
+        ):
+            for spec in _specs:
+                date_value = _resolve_schedule_date(
+                    spec.get(date_dim), context, _timezone
+                )
+                universe_value = spec.get(universe_dim)
+                if universe_value is None or date_value is None:
+                    continue
+                key_map = {universe_dim: universe_value, date_dim: date_value}
+                partition_key = MultiPartitionKey(key_map)
+                yield RunRequest(
+                    partition_key=partition_key,
+                    run_key=f"{_name}:{partition_key}",
+                )
+
+        schedules.append(_schedule_fn)
+
+    return schedules
+
+
 def build_materialization_checks(
     pkg: str = "demo",
     universe_dim: str = "universe",
@@ -897,6 +986,76 @@ def build_materialization_checks(
 
     return checks
 
+
+def build_materialization_checks_for_module(
+    module,
+    *,
+    universe_dim: str = "universe",
+    date_dim: str = "date",
+    check_mode: str = "head",
+    split_passes: bool = False,
+):
+    """
+    Create Dagster asset checks for a single module.
+    """
+    try:
+        from dagster import AssetCheckResult, AssetKey, asset_check
+    except Exception as exc:
+        raise ImportError("Dagster is required to build  asset checks.") from exc
+
+    from intraday_analytics.process import get_final_s3_path
+
+    name = module.__name__.split(".")[-1]
+    asset_base = f"{module.__name__.split('.')[0]}{name}" if name and name[0].isdigit() else name
+    precedence = getattr(module, "CONFIG_YAML_PRECEDENCE", "yaml_overrides")
+    base_config = resolve_user_config(
+        module.USER_CONFIG, getattr(module, "__file__", None), precedence
+    )
+    config_model = (
+        AnalyticsConfig(**base_config)
+        if isinstance(base_config, dict)
+        else AnalyticsConfig()
+    )
+    passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
+
+    checks = []
+    if split_passes and passes:
+        for idx, pass_cfg in enumerate(passes):
+            pass_label = pass_cfg.get("name", f"pass{idx+1}")
+            asset_key = AssetKey([module.__name__.split(".")[0], asset_base, pass_label])
+
+            @asset_check(
+                name=f"{asset_base}__{pass_label}__check",
+                asset=asset_key,
+            )
+            def _check(context, _pass_label=pass_label):
+                path = get_final_s3_path(
+                    parse_date_key(context.partition_key.keys_by_dimension[date_dim]).start_date,
+                    parse_date_key(context.partition_key.keys_by_dimension[date_dim]).end_date,
+                    config_model,
+                    _pass_label,
+                )
+                exists = check_s3_url_exists(path, check_mode=check_mode)
+                return AssetCheckResult(passed=exists, metadata={"path": path})
+
+            checks.append(_check)
+    else:
+        asset_key = AssetKey([module.__name__.split(".")[0], asset_base])
+
+        @asset_check(name=f"{asset_base}__check", asset=asset_key)
+        def _check(context):
+            path = get_final_s3_path(
+                parse_date_key(context.partition_key.keys_by_dimension[date_dim]).start_date,
+                parse_date_key(context.partition_key.keys_by_dimension[date_dim]).end_date,
+                config_model,
+                asset_base,
+            )
+            exists = check_s3_url_exists(path, check_mode=check_mode)
+            return AssetCheckResult(passed=exists, metadata={"path": path})
+
+        checks.append(_check)
+
+    return checks
 
 def build_input_source_assets(
     *,
