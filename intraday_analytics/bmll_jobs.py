@@ -115,6 +115,51 @@ def _validate_bmll_cron(expr: str) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _expand_cron_without_slash(expr: str) -> list[str]:
+    """
+    Expand simple cron expressions that use step syntax (e.g. "*/6") into
+    multiple cron expressions without "/" which BMLL cron does not accept.
+    Only supports step values on minute or hour fields when other fields
+    are wildcards or compatible with the BMLL format.
+    """
+    parts = [p for p in expr.strip().split() if p]
+    if len(parts) != 6:
+        return [expr]
+    minute, hour, dom, month, dow, year = parts
+
+    def _expand_step(field: str, lo: int, hi: int) -> list[str] | None:
+        if field.startswith("*/"):
+            try:
+                step = int(field.split("/", 1)[1])
+            except Exception:
+                return None
+            if step <= 0:
+                return None
+            return [str(v) for v in range(lo, hi + 1, step)]
+        return None
+
+    minute_vals = _expand_step(minute, 0, 59)
+    hour_vals = _expand_step(hour, 0, 23)
+
+    if minute_vals and hour_vals:
+        # Too many triggers; not supported for now.
+        return [expr]
+
+    if minute_vals:
+        return [
+            f\"{m} {hour} {dom} {month} {dow} {year}\"
+            for m in minute_vals
+        ]
+
+    if hour_vals:
+        return [
+            f\"{minute} {h} {dom} {month} {dow} {year}\"
+            for h in hour_vals
+        ]
+
+    return [expr]
+
+
 def ensure_default_bootstrap(config: BMLLJobConfig) -> tuple[str, str, list[Any]]:
     if config.default_bootstrap:
         area, rel_path = _relativize_to_area(Path(config.default_bootstrap))
@@ -228,12 +273,23 @@ def submit_instance_job(
         cron_expr = cron
         if config.cron_format == "dagster":
             cron_expr = convert_dagster_cron_to_bmll(cron)
-        ok, reason = _validate_bmll_cron(cron_expr)
-        if not ok:
-            raise ValueError(f"Invalid BMLL cron expression '{cron_expr}': {reason}")
-        trigger = CronTrigger(cron_expr)
+        expanded = _expand_cron_without_slash(cron_expr)
+        triggers = []
         name_suffix = f"_{cron_timezone}" if cron_timezone else ""
-        triggers = [JobTrigger(name=f"{name or 'bmll_job'}_cron{name_suffix}", trigger=trigger)]
+        for idx, expr in enumerate(expanded):
+            ok, reason = _validate_bmll_cron(expr)
+            if not ok:
+                raise ValueError(
+                    f"Invalid BMLL cron expression '{expr}': {reason}"
+                )
+            trigger = CronTrigger(expr)
+            suffix = f\"_{idx}\" if len(expanded) > 1 else \"\"
+            triggers.append(
+                JobTrigger(
+                    name=f\"{name or 'bmll_job'}_cron{name_suffix}{suffix}\",
+                    trigger=trigger,
+                )
+            )
 
     payload = dict(
         compute_type="instance",

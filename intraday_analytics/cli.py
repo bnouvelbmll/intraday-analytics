@@ -226,7 +226,7 @@ def dagster_scheduler_install(
     pipeline: Optional[str] = None,
     workspace: Optional[str] = None,
     name: Optional[str] = None,
-    interval_hours: int = 24,
+    interval_hours: int = 4,
     instance_size: Optional[int] = 16,
     conda_env: Optional[str] = None,
     dagster_home: Optional[str] = None,
@@ -239,10 +239,11 @@ def dagster_scheduler_install(
     """
     job_config = _load_bmll_job_config(pipeline or workspace)
     scheduler_name = name or "dagster_scheduler"
-    if interval_hours==24:
-        cron = f"0 0 * * ? *"        
+    dow = getattr(job_config, "scheduler_days", "MON-SAT") or "MON-SAT"
+    if interval_hours == 24:
+        cron = f"0 0 ? * {dow} *"
     else:
-        cron = f"0 */{interval_hours} * * ? *"
+        cron = f"0 */{interval_hours} ? * {dow} *"
     script_path = _write_dagster_scheduler_script(
         job_config,
         pipeline=pipeline,

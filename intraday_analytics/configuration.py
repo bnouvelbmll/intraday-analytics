@@ -321,6 +321,11 @@ class BMLLJobConfig(BaseModel):
         description="Cron format for job schedules (dagster=5-field, bmll=AWS 6-field).",
         json_schema_extra={"section": "Automation"},
     )
+    scheduler_days: str = Field(
+        "MON-SAT",
+        description="Default day-of-week for scheduler cron (e.g. MON-FRI, MON-SAT).",
+        json_schema_extra={"section": "Advanced"},
+    )
     visibility: Literal["private", "public"] = Field(
         "private",
         description="Visibility of submitted jobs.",
