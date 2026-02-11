@@ -71,11 +71,47 @@ def resolve_user_config(
     return {**user_config, **yaml_config}
 
 
+def _deep_merge(a: dict, b: dict) -> dict:
+    out = dict(a)
+    for key, value in b.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
 def _load_bmll_job_config(config_file: Optional[str]) -> BMLLJobConfig:
     if not config_file:
         return BMLLJobConfig()
-    yaml_data = _load_yaml_config(config_file)
-    user_config = _extract_user_config(yaml_data)
+    path = Path(config_file)
+    user_config: dict = {}
+
+    if path.suffix == ".py":
+        yaml_path = path.with_suffix(".yaml")
+        if yaml_path.exists():
+            yaml_data = _load_yaml_config(str(yaml_path))
+            user_config = _extract_user_config(yaml_data)
+    elif path.suffix == ".yaml":
+        yaml_data = _load_yaml_config(str(path))
+        # Detect dagster demo definitions.yaml format
+        if isinstance(yaml_data, dict) and "DEMO_PIPELINE" in yaml_data:
+            demo_pipeline = yaml_data.get("DEMO_PIPELINE")
+            overrides = yaml_data.get("PIPELINE_OVERRIDES", {}) or {}
+            demo_path = Path(demo_pipeline) if demo_pipeline else None
+            if demo_path and not demo_path.is_absolute():
+                demo_path = (path.parent / demo_path).resolve()
+            if demo_path and demo_path.exists():
+                demo_yaml = demo_path.with_suffix(".yaml")
+                demo_data = _load_yaml_config(str(demo_yaml)) if demo_yaml.exists() else {}
+                user_config = _extract_user_config(demo_data)
+                stem = demo_path.stem
+                override_cfg = overrides.get(str(demo_pipeline)) or overrides.get(stem) or {}
+                if override_cfg:
+                    user_config = _deep_merge(user_config, override_cfg)
+        else:
+            user_config = _extract_user_config(yaml_data)
+
     if not user_config:
         return BMLLJobConfig()
     try:
