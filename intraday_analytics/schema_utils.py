@@ -457,9 +457,9 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
         cbbo_analytics.l2 = l2_dummy
         cbbo_analytics.cbbo = cbbo_dummy
         cbbo_df = cbbo_analytics.compute()
-        output_columns["cbbo"] = cbbo_df.collect_schema().names()
+        output_columns["cbbo_analytics"] = cbbo_df.collect_schema().names()
     except Exception as e:
-        output_columns["cbbo_error"] = [str(e)]
+        output_columns["cbbo_analytics_error"] = [str(e)]
 
     # --- Alpha101 ---
     try:
@@ -512,7 +512,7 @@ def _filter_schema_for_pass1(config: AnalyticsConfig | PassConfig, schema: Dict[
         "l3": ["l3"],
         "execution": ["execution"],
         "iceberg": ["iceberg"],
-        "cbbo": ["cbbo"],
+        "cbbo_analytics": ["cbbo_analytics"],
     }
 
     keys = []

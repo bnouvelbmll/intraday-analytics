@@ -1,7 +1,7 @@
 import logging
 import polars as pl
 from intraday_analytics.analytics_base import BaseAnalytics, BaseTWAnalytics
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Union, Literal, Dict, Any
 
 from .common import CombinatorialMetricConfig, Side, AggregationMethod
@@ -238,6 +238,18 @@ class L2AnalyticsConfig(BaseModel):
     reflect the depth available in the input order book and the desired
     granularity of output columns.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "l2",
+                "tier": "core",
+                "desc": "Core: L2 snapshot metrics (spreads, depth, imbalances).",
+                "outputs": ["Bid/Ask", "Spread", "Depth", "Imbalance"],
+                "schema_keys": ["l2_last", "l2_tw"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

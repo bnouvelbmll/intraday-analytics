@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 import polars as pl
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from intraday_analytics.analytics_base import BaseAnalytics
 from intraday_analytics.analytics_registry import register_analytics
@@ -39,6 +39,18 @@ class ReaggregateAnalyticsConfig(BaseModel):
           group_column: IndexId
           group_by: [IndexId, TimeBucket]
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "reaggregate",
+                "tier": "post",
+                "desc": "Postprocessing: reaggregate previous pass by a group map.",
+                "outputs": ["IndexAggregation"],
+                "schema_keys": ["reaggregate"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

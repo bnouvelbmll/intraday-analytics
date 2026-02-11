@@ -1,6 +1,6 @@
 import polars as pl
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Optional, Union, Literal
 from intraday_analytics.analytics_base import BaseAnalytics
 from intraday_analytics.analytics_registry import register_analytics
@@ -95,6 +95,18 @@ class GenericAnalyticsConfig(BaseModel):
     provides a flexible way to derive secondary metrics without modifying core
     analytics modules.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "generic",
+                "tier": "post",
+                "desc": "Postprocessing: generic expressions and derived metrics.",
+                "outputs": ["Custom"],
+                "schema_keys": ["generic"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

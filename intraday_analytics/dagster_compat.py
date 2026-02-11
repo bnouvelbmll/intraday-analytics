@@ -2141,6 +2141,6 @@ def _module_requires_map() -> dict[str, list[str]]:
         "generic": GenericAnalytics.REQUIRES,
         "l3_characteristics": L3CharacteristicsAnalytics.REQUIRES,
         "trade_characteristics": TradeCharacteristicsAnalytics.REQUIRES,
-        "cbbo": CBBOAnalytics.REQUIRES,
+        "cbbo_analytics": CBBOAnalytics.REQUIRES,
         "iceberg": IcebergAnalytics.REQUIRES,
     }

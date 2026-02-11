@@ -1,6 +1,6 @@
 import polars as pl
 from intraday_analytics.analytics_base import BaseAnalytics
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 from typing import List, Union, Literal, Optional, Set, Dict, Any
 import logging
 
@@ -176,6 +176,18 @@ class L3AnalyticsConfig(BaseModel):
     timestamps, sizes, or lifecycle attributes, so configuration should match
     the available L3 schema.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "l3",
+                "tier": "core",
+                "desc": "Core: L3 event metrics (counts, volumes, flows).",
+                "outputs": ["OrderCount", "Volume", "Flow"],
+                "schema_keys": ["l3"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

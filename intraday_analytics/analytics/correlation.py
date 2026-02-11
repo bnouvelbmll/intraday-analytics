@@ -4,7 +4,7 @@ from typing import List, Optional, Literal
 
 import pandas as pd
 import polars as pl
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from intraday_analytics.analytics_base import BaseAnalytics
 from intraday_analytics.analytics_registry import register_analytics
@@ -14,6 +14,18 @@ class CorrelationAnalyticsConfig(BaseModel):
     """
     Correlation matrix analytics on a prior pass output.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "correlation",
+                "tier": "post",
+                "desc": "Postprocessing: correlation matrices (rows or matrix).",
+                "outputs": ["MetricX", "MetricY", "Corr"],
+                "schema_keys": ["correlation"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

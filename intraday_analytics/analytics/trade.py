@@ -1,6 +1,6 @@
 import polars as pl
 from intraday_analytics.analytics_base import BaseAnalytics
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 from typing import List, Union, Literal, Optional, Dict, Any
 
 from .common import (
@@ -372,6 +372,18 @@ class TradeAnalyticsConfig(BaseModel):
     Many metrics require specific trade fields (e.g., notional, reference
     prices), so configuration should match the available input schema.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "trade",
+                "tier": "core",
+                "desc": "Core: trade aggregates (OHLC, volume, VWAP, etc.).",
+                "outputs": ["Volume", "VWAP", "OHLC", "Notional"],
+                "schema_keys": ["trade"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

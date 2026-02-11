@@ -25,7 +25,7 @@ MODULE_CONFIG_MAP: dict[str, tuple[str, type[BaseModel]]] = {
     "l2": ("l2_analytics", L2AnalyticsConfig),
     "l3": ("l3_analytics", L3AnalyticsConfig),
     "execution": ("execution_analytics", ExecutionAnalyticsConfig),
-    "cbbo": ("cbbo_analytics", CBBOAnalyticsConfig),
+    "cbbo_analytics": ("cbbo_analytics", CBBOAnalyticsConfig),
     "iceberg": ("iceberg_analytics", IcebergAnalyticsConfig),
     "generic": ("generic_analytics", GenericAnalyticsConfig),
     "dense": ("dense_analytics", DenseAnalyticsConfig),

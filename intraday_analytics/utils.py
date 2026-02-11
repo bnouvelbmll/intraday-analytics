@@ -514,7 +514,7 @@ def get_s3_files(config, date, ref):
     return s3_files
 
 
-def cache_universe(cache_dir_path_from_config: str):
+def cache_universe(cache_dir_path_from_config: str | None):
     """
     A decorator to cache the result of a function that returns a universe DataFrame.
 
@@ -532,12 +532,18 @@ def cache_universe(cache_dir_path_from_config: str):
         def wrapper(date, *args, **kwargs):
             import bmll2  # Moved import inside function
             from .api_stats import api_call
+            import tempfile
 
             # Ensure the date is in a consistent format for the filename
             iso_date = pd.Timestamp(date).date().isoformat()
 
             # Construct the cache path
-            cache_dir = os.path.join(cache_dir_path_from_config, "universe_cache")
+            base_dir = cache_dir_path_from_config
+            if not base_dir:
+                base_dir = os.environ.get("INTRADAY_ANALYTICS_TEMP_DIR")
+            if not base_dir:
+                base_dir = tempfile.mkdtemp(prefix="ian3_")
+            cache_dir = os.path.join(base_dir, "universe_cache")
             os.makedirs(cache_dir, exist_ok=True)
             universe_path = os.path.join(cache_dir, f"universe-{iso_date}.parquet")
 

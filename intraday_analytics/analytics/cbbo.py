@@ -1,5 +1,5 @@
 import polars as pl
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Literal, Optional, Dict, Any
 
 from intraday_analytics.analytics_base import (
@@ -26,6 +26,18 @@ class CBBOAnalyticsConfig(BaseModel):
     computes time-at-best and quantity-at-best metrics, and aggregates these
     within TimeBuckets using the specified aggregation methods.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "cbbo_analytics",
+                "tier": "core",
+                "desc": "Core: CBBO-derived metrics.",
+                "outputs": ["CBBO", "Mid", "Spread"],
+                "schema_keys": ["cbbo_analytics"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(
@@ -81,7 +93,7 @@ class CBBOAnalyticsConfig(BaseModel):
 
 
 class CBBOAnalytic(AnalyticSpec):
-    MODULE = "cbbo"
+    MODULE = "cbbo_analytics"
     ConfigModel = CBBOAnalyticsConfig
 
     @analytic_expression(
@@ -184,7 +196,7 @@ class CBBOAnalytic(AnalyticSpec):
         return [expr.alias(apply_metric_prefix(ctx, measure))]
 
 
-@register_analytics("cbbo", config_attr="cbbo_analytics", needs_ref=True)
+@register_analytics("cbbo_analytics", config_attr="cbbo_analytics", needs_ref=True)
 class CBBOAnalytics(BaseAnalytics):
     """
     Computes CBBO alignment metrics by joining L2 with millisecond CBBO via InstrumentId.
@@ -195,7 +207,7 @@ class CBBOAnalytics(BaseAnalytics):
     def __init__(self, ref: pl.DataFrame, config: CBBOAnalyticsConfig):
         self.ref = ref
         self.config = config
-        super().__init__("cbbo", {}, metric_prefix=config.metric_prefix)
+        super().__init__("cbbo_analytics", {}, metric_prefix=config.metric_prefix)
 
     def compute(self) -> pl.LazyFrame:
         if self.ref is None:

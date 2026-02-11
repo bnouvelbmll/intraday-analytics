@@ -13,7 +13,7 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 import polars as pl
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from intraday_analytics.analytics_base import BaseAnalytics
 from intraday_analytics.analytics_registry import register_analytics
@@ -38,6 +38,18 @@ class Alpha101AnalyticsConfig(BaseModel):
     Kakushadze (2016) and adapts them to intraday buckets. Window lengths
     are interpreted in bucket counts and can be scaled with `window_multiplier`.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "alpha101",
+                "tier": "post",
+                "desc": "Postprocessing: subset of 101 formulaic alphas (adapted).",
+                "outputs": ["Alpha001", "Alpha101"],
+                "schema_keys": ["alpha101"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

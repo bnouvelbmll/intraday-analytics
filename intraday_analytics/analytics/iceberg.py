@@ -1,5 +1,5 @@
 import polars as pl
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Union, Literal, Dict, Any, Optional
 
 from intraday_analytics.analytics_base import BaseAnalytics
@@ -76,6 +76,18 @@ class IcebergAnalyticsConfig(BaseModel):
     resulting metrics within TimeBuckets. Configuration should be tuned to the
     timing and size characteristics of the venue to avoid over- or under-matching.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "iceberg",
+                "tier": "pre",
+                "desc": "Preprocessing: detect iceberg executions; run before trade analytics.",
+                "outputs": ["IcebergExecution"],
+                "schema_keys": ["iceberg"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

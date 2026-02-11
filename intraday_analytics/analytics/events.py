@@ -4,7 +4,7 @@ from typing import List, Optional, Literal
 
 import pandas as pd
 import polars as pl
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from intraday_analytics.analytics_base import BaseAnalytics
 from intraday_analytics.analytics_registry import register_analytics
@@ -17,6 +17,18 @@ class EventAnalyticsConfig(BaseModel):
     Emits sparse rows when local minima/maxima are detected on an indicator.
     Intended to run as a dedicated pass (sparse output).
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "events",
+                "tier": "post",
+                "desc": "Postprocessing: event rows (local min/max on SMA/EWMA).",
+                "outputs": ["EventType", "IndicatorValue"],
+                "schema_keys": ["events"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

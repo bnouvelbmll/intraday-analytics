@@ -54,10 +54,38 @@ def _analytics_explain(*args):
     sys.argv = ["analytics_explain", *args]
     return analytics_explain_main()
 
+def _load_pipeline_module(path_or_name: str):
+    from pathlib import Path
+    import importlib.util
+    import importlib
+
+    path = Path(path_or_name)
+    if path.exists():
+        spec = importlib.util.spec_from_file_location(path.stem, path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Unable to load pipeline: {path_or_name}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # type: ignore[attr-defined]
+        return module
+    return importlib.import_module(path_or_name)
+
+
 def _pipeline_run(*, pipeline: str | None = None, **kwargs):
-    if pipeline and "config_file" not in kwargs:
-        kwargs["config_file"] = pipeline
-    return run_cli(**kwargs)
+    if not pipeline:
+        raise SystemExit("Provide --pipeline <path_or_module>")
+    module = _load_pipeline_module(pipeline)
+    if not hasattr(module, "USER_CONFIG"):
+        raise SystemExit("Pipeline module must define USER_CONFIG.")
+    if not hasattr(module, "get_universe"):
+        raise SystemExit("Pipeline module must define get_universe(date).")
+    config_file = getattr(module, "__file__", None) or pipeline
+    kwargs.setdefault("config_file", config_file)
+    return run_cli(
+        module.USER_CONFIG,
+        module.get_universe,
+        get_pipeline=getattr(module, "get_pipeline", None),
+        **kwargs,
+    )
 
 
 def _job_run(*, pipeline: str | None = None, **kwargs):

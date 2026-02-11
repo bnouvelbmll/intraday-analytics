@@ -957,98 +957,57 @@ class ConfigEditor(App):
         self.pass_readonly = not self.pass_readonly
 
 
-MODULE_INFO = {
-    "iceberg": {
-        "desc": "Preprocessing: detect iceberg executions; run before trade analytics.",
-        "columns": ["IcebergExecution"],
-        "tier": "pre",
-    },
-    "trade": {
-        "desc": "Core: trade aggregates (OHLC, volume, VWAP, etc.).",
-        "columns": ["Volume", "VWAP", "OHLC", "Notional"],
-        "tier": "core",
-    },
-    "l2": {
-        "desc": "Core: L2 snapshot metrics (spreads, depth, imbalances).",
-        "columns": ["Bid/Ask", "Spread", "Depth", "Imbalance"],
-        "tier": "core",
-    },
-    "l3": {
-        "desc": "Core: L3 event metrics (counts, volumes, flows).",
-        "columns": ["OrderCount", "Volume", "Flow"],
-        "tier": "core",
-    },
-    "execution": {
-        "desc": "Core: execution analytics (slippage, costs).",
-        "columns": ["ExecutionCost", "Slippage"],
-        "tier": "core",
-    },
-    "cbbo": {
-        "desc": "Core: CBBO-derived metrics.",
-        "columns": ["CBBO", "Mid", "Spread"],
-        "tier": "core",
-    },
-    "generic": {
-        "desc": "Postprocessing: generic expressions and derived metrics.",
-        "columns": ["Custom"],
-        "tier": "post",
-    },
-    "reaggregate": {
-        "desc": "Postprocessing: reaggregate previous pass by a group map.",
-        "columns": ["IndexAggregation"],
-        "tier": "post",
-    },
-    "alpha101": {
-        "desc": "Postprocessing: subset of 101 formulaic alphas (adapted).",
-        "columns": ["Alpha001", "Alpha101"],
-        "tier": "post",
-    },
-    "events": {
-        "desc": "Postprocessing: event rows (local min/max on SMA/EWMA).",
-        "columns": ["EventType", "IndicatorValue"],
-        "tier": "post",
-    },
-    "correlation": {
-        "desc": "Postprocessing: correlation matrices (rows or matrix).",
-        "columns": ["MetricX", "MetricY", "Corr"],
-        "tier": "post",
-    },
-    "characteristics": {
-        "desc": "Advanced/internal: characteristics over L3/trades.",
-        "columns": ["L3Characteristics", "TradeCharacteristics"],
-        "tier": "advanced",
-    },
-}
+_MODULE_META_CACHE: Optional[tuple[dict, dict, dict]] = None
 
-PASS_MODULE_FIELD_MAP = {
-    "iceberg": ["iceberg_analytics"],
-    "trade": ["trade_analytics"],
-    "l2": ["l2_analytics"],
-    "l3": ["l3_analytics"],
-    "execution": ["execution_analytics"],
-    "cbbo": ["cbbo_analytics"],
-    "generic": ["generic_analytics"],
-    "reaggregate": ["reaggregate_analytics"],
-    "alpha101": ["alpha101_analytics"],
-    "events": ["event_analytics"],
-    "correlation": ["correlation_analytics"],
-    "characteristics": [
-        "l3_characteristics_analytics",
-        "trade_characteristics_analytics",
-    ],
-}
 
-MODULE_SCHEMA_KEYS = {
-    "l2": ["l2_last", "l2_tw"],
-    "trade": ["trade"],
-    "l3": ["l3"],
-    "execution": ["execution"],
-    "iceberg": ["iceberg"],
-    "cbbo": ["cbbo"],
-    "alpha101": ["alpha101"],
-    "events": ["events"],
-    "correlation": ["correlation"],
-}
+def _module_meta() -> tuple[dict, dict, dict]:
+    global _MODULE_META_CACHE
+    if _MODULE_META_CACHE is not None:
+        return _MODULE_META_CACHE
+
+    module_info: dict[str, dict] = {}
+    field_map: dict[str, list[str]] = {}
+    schema_keys: dict[str, list[str]] = {}
+
+    for field_name, field in PassConfig.model_fields.items():  # type: ignore[attr-defined]
+        annotation = _unwrap_optional(field.annotation)
+        if not _is_basemodel(annotation):
+            continue
+        ui = (
+            getattr(annotation, "model_config", {})
+            .get("json_schema_extra", {})
+            .get("ui")
+        )
+        if not isinstance(ui, dict):
+            continue
+        module_name = ui.get("module")
+        if not module_name:
+            continue
+        meta = module_info.setdefault(
+            module_name,
+            {
+                "desc": "",
+                "columns": [],
+                "tier": "core",
+            },
+        )
+        if ui.get("desc") and not meta["desc"]:
+            meta["desc"] = ui["desc"]
+        outputs = ui.get("outputs")
+        if outputs and not meta["columns"]:
+            meta["columns"] = list(outputs)
+        if ui.get("tier"):
+            meta["tier"] = ui["tier"]
+        field_map.setdefault(module_name, []).append(field_name)
+        keys = ui.get("schema_keys") or []
+        if module_name not in schema_keys:
+            schema_keys[module_name] = []
+        for key in keys:
+            if key not in schema_keys[module_name]:
+                schema_keys[module_name].append(key)
+
+    _MODULE_META_CACHE = (module_info, field_map, schema_keys)
+    return _MODULE_META_CACHE
 
 
 class PassListEditor(Screen):
@@ -1192,12 +1151,13 @@ class PassEditor(Screen):
             default_pass_type = self.data.get("_pass_type")
             if default_pass_type is None:
                 modules = self.data.get("modules", [])
+                module_info, _, _ = _module_meta()
                 tiers = {
-                    MODULE_INFO.get(name if name != "trades" else "trade", {}).get(
+                    module_info.get(name if name != "trades" else "trade", {}).get(
                         "tier"
                     )
                     for name in modules
-                    if MODULE_INFO.get(name if name != "trades" else "trade")
+                    if module_info.get(name if name != "trades" else "trade")
                 }
                 if tiers and tiers <= {"post"}:
                     default_pass_type = "post"
@@ -1278,8 +1238,9 @@ class PassEditor(Screen):
                 "generic_analytics",
                 "quality_checks",
             }
+            _, field_map, _ = _module_meta()
             for mod in selected_modules:
-                allowed.update(PASS_MODULE_FIELD_MAP.get(mod, []))
+                allowed.update(field_map.get(mod, []))
             screen = ModelEditor(
                 PassConfig, self.data, "PassConfig (Advanced)", _on_save
             )
@@ -1305,7 +1266,8 @@ class PassEditor(Screen):
             module_key = self._module_edit_map.get(button_id)
             if not module_key:
                 return
-            fields = PASS_MODULE_FIELD_MAP.get(module_key, [])
+            _, field_map, _ = _module_meta()
+            fields = field_map.get(module_key, [])
             if not fields:
                 return
             if len(fields) == 1:
@@ -1351,15 +1313,17 @@ class PassEditor(Screen):
         pass_type = self.widgets["pass_type"].value
         # enforce pass type constraints
         if pass_type == "pre":
+            module_info, _, _ = _module_meta()
             selected_modules = [
-                m for m in selected_modules if MODULE_INFO[m]["tier"] == "pre"
+                m for m in selected_modules if module_info[m]["tier"] == "pre"
             ]
         elif pass_type == "core":
+            module_info, _, _ = _module_meta()
             selected_modules = [
                 m
                 for m in selected_modules
-                if MODULE_INFO[m]["tier"] == "core"
-                or MODULE_INFO[m]["tier"] == "advanced"
+                if module_info[m]["tier"] == "core"
+                or module_info[m]["tier"] == "advanced"
             ]
         else:
             # postprocessing = free
@@ -1424,8 +1388,9 @@ class PassEditor(Screen):
         )
 
         current_counts, full_counts = self._module_schema_counts()
+        module_info, _, _ = _module_meta()
 
-        for key, meta in MODULE_INFO.items():
+        for key, meta in module_info.items():
             if meta["tier"] == "advanced" and not self.advanced_modules:
                 continue
             if pass_type == "pre" and meta["tier"] != "pre":
@@ -1555,7 +1520,7 @@ def _module_metric_count(data: dict, module_key: str) -> Optional[int]:
         if not isinstance(cfg, dict):
             return None
         return len(cfg.get("metrics", []))
-    if module_key == "cbbo":
+    if module_key == "cbbo_analytics":
         cfg = data.get("cbbo_analytics", {}) or {}
         if not isinstance(cfg, dict):
             return None
@@ -1570,7 +1535,8 @@ def _module_metric_count(data: dict, module_key: str) -> Optional[int]:
 
 def _counts_from_schema(schema: dict) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for module, keys in MODULE_SCHEMA_KEYS.items():
+    _, _, schema_keys = _module_meta()
+    for module, keys in schema_keys.items():
         total = 0
         for key in keys:
             cols = schema.get(key, [])

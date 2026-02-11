@@ -1,6 +1,6 @@
 import polars as pl
 from intraday_analytics.analytics_base import BaseAnalytics
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Union, Literal, Dict, Any, Optional
 
 from .common import CombinatorialMetricConfig, Side
@@ -156,6 +156,18 @@ class ExecutionAnalyticsConfig(BaseModel):
     within TimeBuckets. Derived metrics combine previously computed execution
     components into higher-level summaries.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "execution",
+                "tier": "core",
+                "desc": "Core: execution analytics (slippage, costs).",
+                "outputs": ["ExecutionCost", "Slippage"],
+                "schema_keys": ["execution"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = Field(

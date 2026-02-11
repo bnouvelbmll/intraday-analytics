@@ -2,7 +2,7 @@ import polars as pl
 import pandas as pd
 import datetime as dt
 import logging
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List
 import polars as pl
 
@@ -24,6 +24,18 @@ class DenseAnalyticsConfig(BaseModel):
     downstream analytics can align to. Use this to control bucket size, anchor,
     and optional symbol column overrides.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "dense",
+                "tier": "core",
+                "desc": "Core: dense time grid generation.",
+                "outputs": ["TimeBucket"],
+                "schema_keys": ["dense"],
+            }
+        }
+    )
 
     ENABLED: bool = True
     metric_prefix: Optional[str] = None
