@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import shutil
 import time
+import logging
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -13,6 +15,7 @@ from intraday_analytics.configuration import BMLLJobConfig
 
 USER_ROOT = Path("/home/bmll/user")
 ORG_ROOT = Path("/home/bmll/organisation")
+logger = logging.getLogger(__name__)
 
 
 def _ensure_dir(path: Path) -> None:
@@ -61,6 +64,55 @@ def convert_dagster_cron_to_bmll(expr: str) -> str:
     elif dom != "*" and dow == "*":
         dow = "?"
     return " ".join([minute, hour, dom, month, dow, year])
+
+
+def _validate_bmll_cron(expr: str) -> tuple[bool, str]:
+    parts = [p for p in expr.strip().split() if p]
+    if len(parts) != 6:
+        return False, f"Expected 6 fields, got {len(parts)}"
+
+    def _match(pattern: str, value: str) -> bool:
+        return re.fullmatch(pattern, value) is not None
+
+    def _num_or_star(value: str, lo: int, hi: int) -> bool:
+        if value == "*":
+            return True
+        if _match(r"\*/\d+", value):
+            step = int(value.split("/", 1)[1])
+            return step > 0
+        if _match(r"\d+", value):
+            num = int(value)
+            return lo <= num <= hi
+        if _match(r"\d+-\d+", value):
+            a, b = [int(x) for x in value.split("-", 1)]
+            return lo <= a <= hi and lo <= b <= hi and a <= b
+        if _match(r"\d+(,\d+)+", value):
+            nums = [int(x) for x in value.split(",")]
+            return all(lo <= n <= hi for n in nums)
+        return False
+
+    minute, hour, dom, month, dow, year = parts
+    if not _num_or_star(minute, 0, 59):
+        return False, f"Invalid minute field: {minute}"
+    if not _num_or_star(hour, 0, 23):
+        return False, f"Invalid hour field: {hour}"
+    if dom not in {"*", "?"} and not _num_or_star(dom, 1, 31):
+        return False, f"Invalid day-of-month field: {dom}"
+    if not _num_or_star(month, 1, 12):
+        return False, f"Invalid month field: {month}"
+    if dow in {"*", "?"}:
+        pass
+    elif _match(r"(SUN|MON|TUE|WED|THU|FRI|SAT)(-(SUN|MON|TUE|WED|THU|FRI|SAT))?", dow):
+        pass
+    elif _match(r"(SUN|MON|TUE|WED|THU|FRI|SAT)(,(SUN|MON|TUE|WED|THU|FRI|SAT))+", dow):
+        pass
+    elif not _num_or_star(dow, 1, 7):
+        return False, f"Invalid day-of-week field: {dow}"
+    if year != "*" and not _num_or_star(year, 1970, 2199):
+        return False, f"Invalid year field: {year}"
+    if dom != "?" and dow != "?":
+        return False, "Day-of-month and day-of-week cannot both be specified; use '?' for one."
+    return True, "ok"
 
 
 def ensure_default_bootstrap(config: BMLLJobConfig) -> tuple[str, str, list[Any]]:
@@ -152,11 +204,14 @@ def submit_instance_job(
         cron_expr = cron
         if config.cron_format == "dagster":
             cron_expr = convert_dagster_cron_to_bmll(cron)
+        ok, reason = _validate_bmll_cron(cron_expr)
+        if not ok:
+            raise ValueError(f"Invalid BMLL cron expression '{cron_expr}': {reason}")
         trigger = CronTrigger(cron_expr)
         name_suffix = f"_{cron_timezone}" if cron_timezone else ""
         triggers = [JobTrigger(name=f"{name or 'bmll_job'}_cron{name_suffix}", trigger=trigger)]
 
-    job = create_job(
+    payload = dict(
         compute_type="instance",
         name=name,
         instance_size=instance_size or config.default_instance_size,
@@ -171,6 +226,16 @@ def submit_instance_job(
         triggers=triggers,
         **(script_parameters or {}),
     )
+    try:
+        job = create_job(**payload)
+    except Exception as exc:
+        logger.error(
+            "BMLL create_job failed. payload=%s error=%s",
+            payload,
+            exc,
+            exc_info=True,
+        )
+        raise RuntimeError(f"Failed to create BMLL job: {exc}") from exc
 
     if job and hasattr(job, "id"):
         desired_log_path = (
