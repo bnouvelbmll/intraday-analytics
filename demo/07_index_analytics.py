@@ -8,9 +8,9 @@ to index-level metrics in pass2 using a group dataframe (ListingId -> IndexId).
 import bmll.reference
 import polars as pl
 
-from intraday_analytics.cli import run_cli
-from intraday_analytics.dagster_compat import CustomUniverse
-from intraday_analytics.pipeline import create_pipeline
+from basalt.cli import run_cli
+from basalt.dagster.dagster_compat import CustomUniverse
+from basalt.pipeline import create_pipeline
 
 
 USER_CONFIG = {

@@ -26,7 +26,7 @@ from dagster import (
     MultiPartitionsDefinition,
     schedule,
 )
-from intraday_analytics.dagster_compat import (
+from basalt.dagster.dagster_compat import (
     build_assets,
     build_materialization_checks,
     build_schedules,
@@ -45,7 +45,7 @@ from intraday_analytics.dagster_compat import (
     default_universes,
 )
 import yaml
-from intraday_analytics.utils import create_date_batches
+from basalt.utils import create_date_batches
 
 def _available_mics():
     import bmll.reference

@@ -1,5 +1,5 @@
 """
-This script runs the intraday analytics pipeline.
+This script runs the basalt analytics pipeline.
 
 It processes high-frequency financial data for a specified date range and universe
 of symbols. The pipeline is configurable through the `CONFIG` dictionary and can
@@ -25,21 +25,21 @@ import sys
 import shutil
 import logging
 
-from intraday_analytics.cli import run_cli
+from basalt.cli import run_cli
 
-from intraday_analytics import cache_universe
-from intraday_analytics.utils import create_date_batches
-from intraday_analytics.pipeline import AnalyticsPipeline, create_pipeline
+from basalt import cache_universe
+from basalt.utils import create_date_batches
+from basalt.pipeline import AnalyticsPipeline, create_pipeline
 
 # Re-add direct imports for analytics modules
-from intraday_analytics.analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
-from intraday_analytics.analytics.trade import TradeAnalytics
-from intraday_analytics.analytics.l3 import L3Analytics
-from intraday_analytics.analytics.execution import ExecutionAnalytics
-from intraday_analytics.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
+from basalt.analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
+from basalt.analytics.trade import TradeAnalytics
+from basalt.analytics.l3 import L3Analytics
+from basalt.analytics.execution import ExecutionAnalytics
+from basalt.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
 
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig
-from intraday_analytics.dagster_compat import MICUniverse
+from basalt.configuration import AnalyticsConfig, PassConfig
+from basalt.dagster.dagster_compat import MICUniverse
 
 # At 1min : 3 minutes per day.
 # At 10 sec: 15 minutes per day ! 250gb matchine (20 GB memory)

@@ -8,7 +8,7 @@ This document details the specific strategies ("tricks") employed in this projec
 Instead of loading the entire date range (e.g., a month or year) into a single Polars LazyFrame graph, we iterate through the date range one day at a time.
 
 **Implementation:**
--   **Location:** `intraday_analytics.execution.ProcessInterval.run`
+-   **Location:** `basalt.execution.ProcessInterval.run`
 -   **Mechanism:** A simple Python `for` loop iterates over `pd.date_range(start, end)`.
 -   **Why it works:** Polars' query optimizer is powerful, but a query graph covering 365 days of high-frequency data can become too large to optimize effectively, and intermediate materializations might exceed RAM. Processing one day at a time ensures the "working set" of data is bounded by the volume of a single trading day.
 
@@ -18,7 +18,7 @@ Instead of loading the entire date range (e.g., a month or year) into a single P
 We partition the universe of symbols into "batches" such that the data for each batch fits comfortably in RAM. We then "shred" the monolithic S3 files into local, per-batch parquet files.
 
 **Implementation:**
--   **Location:** `intraday_analytics.batching.S3SymbolBatcher`
+-   **Location:** `basalt.batching.S3SymbolBatcher`
 -   **Symbol Size Estimation:** We use `SymbolSizeEstimator` to query historical trade counts. This allows us to estimate the memory footprint of each symbol.
 -   **Bin Packing:** `HeuristicBatchingStrategy` groups symbols into batches, ensuring the sum of estimated rows < `MAX_ROWS_PER_TABLE`.
 -   **Shredding:** We read S3 files in chunks, filter them, join with a `batch_id` map, and write to local partitioned datasets (`/tmp/.../batch_id=X/`).
@@ -30,7 +30,7 @@ We partition the universe of symbols into "batches" such that the data for each 
 We execute both the **S3 shredding** and the **metric computation** phases in **separate, freshly spawned processes**.
 
 **Implementation:**
--   **Location:** `intraday_analytics.execution.ProcessInterval.run`
+-   **Location:** `basalt.execution.ProcessInterval.run`
 -   **Mechanism:**
     ```python
     # For Shredding
@@ -51,7 +51,7 @@ We execute both the **S3 shredding** and the **metric computation** phases in **
 We delete the intermediate "shredded" batch files immediately after they are processed.
 
 **Implementation:**
--   **Location:** `intraday_analytics.execution.process_batch_task`
+-   **Location:** `basalt.execution.process_batch_task`
 -   **Mechanism:** `os.remove(path)` is called on the input batch files as soon as the pipeline finishes for that batch.
 -   **Why it works:** This keeps the disk usage footprint low (bounded by ~1 day of data), preventing the local disk from filling up during long backtests.
 
@@ -60,7 +60,7 @@ We delete the intermediate "shredded" batch files immediately after they are pro
 If memory is constrained on the local machine, use a BMLL instance job:
 
 ```bash
-beaf job run --pipeline demo/01_ohlcv_bars.py --instance_size 128
+basalt job run --pipeline demo/01_ohlcv_bars.py --instance_size 128
 ```
 
 You can also tune `MEMORY_PER_WORKER` in `AnalyticsConfig`.

@@ -9,8 +9,8 @@ a single MIC/date pair using 1-hour time buckets.
 import bmll.reference
 import polars as pl
 
-from intraday_analytics.cli import run_cli
-from intraday_analytics.dagster_compat import CustomUniverse
+from basalt.cli import run_cli
+from basalt.dagster.dagster_compat import CustomUniverse
 
 
 USER_CONFIG = {

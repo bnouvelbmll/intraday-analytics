@@ -37,8 +37,8 @@ from dagster._core.storage.event_log.schema import (
 )
 from dagster._core.storage.event_log.sql_event_log import SqlEventLogStorage
 
-from intraday_analytics.tables import ALL_TABLES
-from intraday_analytics.dagster_compat import (
+from basalt.tables import ALL_TABLES
+from basalt.dagster.dagster_compat import (
     _parse_table_s3_path,
     _s3_list_all_objects,
     _s3_table_root_prefix,

@@ -39,7 +39,7 @@ from scripts.s3_bulk_sync_db import (  # noqa: E402
     _insert_events,
     _update_asset_indexes,
 )
-from intraday_analytics.dagster_compat import (  # noqa: E402
+from basalt.dagster.dagster_compat import (  # noqa: E402
     build_input_source_assets,
 )
 

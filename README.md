@@ -1,7 +1,7 @@
-# Intraday Analytics Pipeline
+# Basalt Pipeline
 
 ## Project Description
-This project implements a robust and extensible intraday analytics pipeline designed to process high-frequency financial data. It allows for the computation of various metrics on a configurable universe of symbols and date ranges, with a focus on modularity, performance, and ease of extension.
+This project implements a robust and extensible basalt analytics pipeline designed to process high-frequency financial data. It allows for the computation of various metrics on a configurable universe of symbols and date ranges, with a focus on modularity, performance, and ease of extension.
 
 The pipeline is designed to handle large volumes of data by shredding S3 data into smaller, symbol-based batches and processing them in parallel across multiple processes. This approach ensures efficient memory usage and scalable performance.
 
@@ -22,7 +22,7 @@ The pipeline is designed to handle large volumes of data by shredding S3 data in
 1.  Clone this repository:
     ```bash
     git clone <repository_url>
-    cd intraday-analytics-pipeline # Or your project directory name
+    cd bmll-basalt # Or your project directory name
     ```
 2.  Install the required Python packages:
     ```bash
@@ -53,7 +53,7 @@ USER_CONFIG = {
 }
 ```
 
-For a complete list of all configuration options and their descriptions, see the comments in `intraday_analytics/configuration.py`.
+For a complete list of all configuration options and their descriptions, see the comments in `basalt/configuration.py`.
 
 ## Usage
 
@@ -85,13 +85,13 @@ There is also a self-contained setup script:
 The pipeline is designed for easy extension:
 
 ### Adding New Data Tables
-1.  Create a new class in `intraday_analytics/tables.py` that inherits from `DataTable`.
+1.  Create a new class in `basalt/tables.py` that inherits from `DataTable`.
 2.  Implement its `load` and `post_load_process` methods.
 3.  Add an instance of your new table class to the `ALL_TABLES` dictionary in the same file.
 4.  Add the new table's name to the `TABLES_TO_LOAD` list in your `USER_CONFIG`.
 
 ### Adding New Analytics
-1.  Create or extend an analytics module in `intraday_analytics/analytics/`.
+1.  Create or extend an analytics module in `basalt/analytics/`.
 2.  Implement your analytics logic within a class that follows the pattern of the existing analytics modules (e.g., `TradeAnalytics`).
 3.  Add your new analytics class to the `modules` list within the `get_pipeline` function in `main.py`.
 

@@ -9,15 +9,15 @@ pipeline context, then tell TradeAnalytics to read from that context key.
 import bmll.reference
 import polars as pl
 
-from intraday_analytics.cli import run_cli
-from intraday_analytics.pipeline import AnalyticsPipeline
-from intraday_analytics.dense_analytics import DenseAnalytics
-from intraday_analytics.analytics.trade import TradeAnalytics
-from intraday_analytics.dataset_transforms.aggressive_trades import (
+from basalt.cli import run_cli
+from basalt.pipeline import AnalyticsPipeline
+from basalt.dense_analytics import DenseAnalytics
+from basalt.analytics.trade import TradeAnalytics
+from basalt.preprocessors.aggressive_trades import (
     AggressiveTradesTransform,
 )
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig
-from intraday_analytics.dagster_compat import CustomUniverse
+from basalt.configuration import AnalyticsConfig, PassConfig
+from basalt.dagster.dagster_compat import CustomUniverse
 
 
 USER_CONFIG = {

@@ -121,11 +121,11 @@ Notes:
 
 ## Materialization Plots
 
-Use `intraday_analytics.plotting` to visualize Dagster materializations.
+Use `basalt.plotting` to visualize Dagster materializations.
 
 ```python
 from dagster import DagsterInstance, AssetKey
-from intraday_analytics.plotting import materialization_dashboard
+from basalt.plotting import materialization_dashboard
 
 instance = DagsterInstance.get()
 asset_keys = [AssetKey(["BMLL", "l2"])]
@@ -141,7 +141,7 @@ This shows:
 
 ```python
 from dagster import DagsterInstance, AssetKey
-from intraday_analytics.plotting import materialization_dashboard_interactive
+from basalt.plotting import materialization_dashboard_interactive
 
 instance = DagsterInstance.get()
 datasets = {
@@ -189,21 +189,21 @@ materialization_dashboard(
 Use the CLI to list available analytics for a pipeline configuration:
 
 ```bash
-beaf analytics list
-beaf analytics list --pipeline demo/01_ohlcv_bars.py
+basalt analytics list
+basalt analytics list --pipeline demo/01_ohlcv_bars.py
 ```
 
 Explain a specific analytic column (module config + relevant docs):
 
 ```bash
-beaf analytics explain --pipeline demo/01_ohlcv_bars.py --column TradeTotalVolume
+basalt analytics explain --pipeline demo/01_ohlcv_bars.py --column TradeTotalVolume
 ```
 
 For configuration details and long-form docs on each option, use the schema-driven
 config UI:
 
 ```bash
-beaf pipeline config demo/01_ohlcv_bars.py
+basalt pipeline config demo/01_ohlcv_bars.py
 ```
 
 You can also opt into a DB-direct reader (SQL) for larger installations:
@@ -357,4 +357,4 @@ Notes:
 - Output column names are determined by the metric configurations (some modules use explicit output name patterns).
 - Results are sorted by ListingId and TimeBucket during final write.
 
-For full configuration options, see the Pydantic configs in `intraday_analytics/analytics/*` and `intraday_analytics/configuration.py`.
+For full configuration options, see the Pydantic configs in `basalt/analytics/*` and `basalt/configuration.py`.

@@ -46,7 +46,7 @@ def _write_defs_file(defs_dir: Path) -> Path:
         "\n".join(
             [
                 "from dagster import Definitions, DailyPartitionsDefinition, StaticPartitionsDefinition",
-                "from intraday_analytics.dagster_compat import build_input_source_assets",
+                "from basalt.dagster.dagster_compat import build_input_source_assets",
                 "",
                 "date_parts = DailyPartitionsDefinition(start_date='2020-01-01', end_date='2020-01-03')",
                 "mic_parts = StaticPartitionsDefinition(['XNAS', 'XLON'])",

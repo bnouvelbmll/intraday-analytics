@@ -1,12 +1,12 @@
 # Dagster Compatibility
 
 This project includes a lightweight Dagster compatibility layer in
-`intraday_analytics/dagster_compat.py`. It provides a partition model
+`basalt/dagster/dagster_compat.py`. It provides a partition model
 and a `run_partition` helper that can be wrapped by Dagster assets/jobs.
 
 ## What's new (highlights)
 
-- New `beaf` CLI (`beaf pipeline run`, `beaf pipeline config`, `beaf job run`, `beaf dagster run`).
+- New `basalt` CLI (`basalt pipeline run`, `basalt pipeline config`, `basalt job run`, `basalt dagster run`).
 - BMLL instance jobs for remote execution (with automatic bootstrap).
 - Optional Dagster run launcher backed by BMLL instances.
 - Per-run tags for instance size/conda env/concurrency.
@@ -47,7 +47,7 @@ New universe helpers:
 
 ```python
 from dagster import Definitions, asset
-from intraday_analytics.dagster_compat import (
+from basalt.dagster.dagster_compat import (
     UniversePartition,
     DatePartition,
     PartitionRun,
@@ -99,7 +99,7 @@ defs = Definitions(assets=[intraday_partition])
 `build_partition_runs` to get all (MIC x date) pairs.
 
 ```python
-from intraday_analytics.dagster_compat import (
+from basalt.dagster.dagster_compat import (
     UniversePartition,
     DatePartition,
     build_partition_runs,
@@ -121,9 +121,9 @@ for partition in partition_runs:
 
 `UniversePartition(name="mic", value="XLON")` maps to the CLI-style
 `--universe mic=XLON` and will call
-`intraday_analytics/universes/mic.py:get_universe(date, "XLON")`.
+`basalt/universes/mic.py:get_universe(date, "XLON")`.
 
-Available universe modules can be added under `intraday_analytics/universes/`.
+Available universe modules can be added under `basalt/universes/`.
 Each module must expose:
 
 ```python
@@ -138,7 +138,7 @@ universe classes:
 
 ```python
 from dagster import StaticPartitionsDefinition, MultiPartitionsDefinition
-from intraday_analytics.dagster_compat import (
+from basalt.dagster.dagster_compat import (
     MICUniverse, IndexUniverse, CustomUniverse, CartProdUniverse,
     build_universe_partitions,
 )
@@ -172,8 +172,8 @@ YAML can be either:
 Launch a schema-driven UI editor for YAML configs:
 
 ```bash
-beaf pipeline config demo/01_ohlcv_bars.py
-beaf pipeline config --web demo/01_ohlcv_bars.py
+basalt pipeline config demo/01_ohlcv_bars.py
+basalt pipeline config --web demo/01_ohlcv_bars.py
 ```
 
 This creates or edits `demo/01_ohlcv_bars.yaml`. The UI mirrors the
@@ -202,20 +202,20 @@ Requirements:
 Example: schedule daemon every 6 hours on a 16GB instance for 1 hour:
 
 ```bash
-beaf dagster scheduler install --pipeline demo/01_ohlcv_bars.py --interval_hours 6 --instance_size 16 --max_runtime_hours 1
+basalt dagster scheduler install --pipeline demo/01_ohlcv_bars.py --interval_hours 6 --instance_size 16 --max_runtime_hours 1
 ```
 
 If a job with the same name already exists, the default behavior is to **fail**.
 Use `--overwrite_existing` to delete the existing job and recreate it:
 
 ```bash
-beaf dagster scheduler install --pipeline demo/01_ohlcv_bars.py --interval_hours 6 --overwrite_existing
+basalt dagster scheduler install --pipeline demo/01_ohlcv_bars.py --interval_hours 6 --overwrite_existing
 ```
 
 Start the UI without the daemon:
 
 ```bash
-beaf dagster ui --pipeline demo/01_ohlcv_bars.py --port 3000
+basalt dagster ui --pipeline demo/01_ohlcv_bars.py --port 3000
 ```
 
 ## Bulk Sync (Materializations/Observations)
@@ -224,13 +224,13 @@ You can force Dagster to ingest materializations/observations from S3 using the
 bulk sync job (direct event-log insertions):
 
 ```bash
-beaf dagster sync --tables l2,l3,trades --start_date 2025-01-01 --end_date 2025-01-31
+basalt dagster sync --tables l2,l3,trades --start_date 2025-01-01 --end_date 2025-01-31
 ```
 
 To sync a **specific S3 path** (e.g. after a manual write):
 
 ```bash
-beaf dagster sync --paths s3://bucket/prefix/data/.../2025-01-05.parquet
+basalt dagster sync --paths s3://bucket/prefix/data/.../2025-01-05.parquet
 ```
 
 ## Artifact Handling
@@ -250,7 +250,7 @@ Add the IO manager to your Definitions:
 
 ```python
 from dagster import Definitions
-from intraday_analytics.dagster_io import output_target_io_manager
+from basalt.dagster.dagster_io import output_target_io_manager
 
 defs = Definitions(
     assets=build_assets(...),
@@ -276,7 +276,7 @@ If you want to expose all demo scripts as Dagster assets, use
 
 ```python
 from dagster import Definitions
-from intraday_analytics.dagster_compat import build_assets
+from basalt.dagster.dagster_compat import build_assets
 
 defs = Definitions(assets=build_assets(pkg="demo"))
 ```
@@ -304,7 +304,7 @@ USER_CONFIG:
 To register schedules in Dagster, include them in your Definitions:
 ```python
 from dagster import Definitions
-from intraday_analytics.dagster_compat import build_assets, build_schedules
+from basalt.dagster.dagster_compat import build_assets, build_schedules
 
 defs = Definitions(
     assets=build_assets(pkg="demo", split_passes=True),
@@ -312,14 +312,14 @@ defs = Definitions(
 )
 ```
 
-## New CLI: beaf
+## New CLI: basalt
 
-The `beaf` CLI provides a consistent interface for analytics, config, jobs, and Dagster:
+The `basalt` CLI provides a consistent interface for analytics, config, jobs, and Dagster:
 
 ```bash
-beaf analytics list
-beaf pipeline config demo/01_ohlcv_bars.py
-beaf pipeline run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01
+basalt analytics list
+basalt pipeline config demo/01_ohlcv_bars.py
+basalt pipeline run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01
 ```
 
 ### Remote BMLL Jobs
@@ -327,13 +327,13 @@ beaf pipeline run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01
 Run a pipeline on a dedicated BMLL instance:
 
 ```bash
-beaf job run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01 --instance_size 64
+basalt job run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01 --instance_size 64
 ```
 
 Install a cron-triggered job:
 
 ```bash
-beaf job install --pipeline demo/01_ohlcv_bars.py --cron "0 6 ? * MON-FRI *"
+basalt job install --pipeline demo/01_ohlcv_bars.py --cron "0 6 ? * MON-FRI *"
 ```
 
 Jobs default their logs under:
@@ -349,7 +349,7 @@ Cron notes:
 Run a pipeline directly via Dagster helpers:
 
 ```bash
-beaf dagster run --pipeline demo/01_ohlcv_bars.py \
+basalt dagster run --pipeline demo/01_ohlcv_bars.py \
   --job demo_ohlcv_1min__job \
   --partition "date=2026-02-01,universe=mic=XLON"
 ```
@@ -361,14 +361,14 @@ If no partition is provided, defaults come from `START_DATE` and the first `UNIV
 Update the pipeline YAML to enable schedules and auto-materialization:
 
 ```bash
-beaf dagster install --pipeline demo/01_ohlcv_bars.py \
+basalt dagster install --pipeline demo/01_ohlcv_bars.py \
   --cron "0 2 * * *" --timezone "Europe/London" --auto_materialize_latest_days 7
 ```
 
 Remove the schedule (and optionally disable auto-materialization):
 
 ```bash
-beaf dagster uninstall --pipeline demo/01_ohlcv_bars.py
+basalt dagster uninstall --pipeline demo/01_ohlcv_bars.py
 ```
 
 ## Dagster Run Launcher (BMLL Instances)
@@ -377,7 +377,7 @@ To run Dagster jobs on BMLL EC2 instances, configure the run launcher:
 
 ```yaml
 run_launcher:
-  module: intraday_analytics.dagster_bmll
+  module: basalt.dagster.dagster_bmll
   class: BMLLRunLauncher
 ```
 
@@ -412,7 +412,7 @@ from dagster import (
     MultiPartitionsDefinition,
     asset,
 )
-from intraday_analytics.dagster_compat import (
+from basalt.dagster.dagster_compat import (
     DatePartition,
     PartitionRun,
     parse_universe_spec,

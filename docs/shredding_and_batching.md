@@ -6,7 +6,7 @@ This document outlines the data processing pipeline for the `s3_shredding` mode,
 
 For configuration and execution, prefer the CLI:
 ```bash
-beaf pipeline run --pipeline demo/01_ohlcv_bars.py
+basalt pipeline run --pipeline demo/01_ohlcv_bars.py
 ```
 
 The core problem is to efficiently process terabytes of financial data without running out of memory. The solution is a multi-stage process that involves:

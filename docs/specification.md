@@ -1,10 +1,10 @@
-# Intraday Analytics Framework Specification
+# Basalt Framework Specification
 
-This document outlines the functional and non-functional requirements for the Intraday Analytics Framework. It serves as a specification for developers intending to implement a system with equivalent capabilities.
+This document outlines the functional and non-functional requirements for the Basalt Framework. It serves as a specification for developers intending to implement a system with equivalent capabilities.
 
 ## 1. Introduction
 
-The Intraday Analytics Framework is a high-performance, configuration-driven system designed to process large-scale financial market data (Trades, L2, L3). It computes granular metrics, aggregates them over time and instruments, and supports multi-pass execution flows. The core design philosophy emphasizes lazy evaluation, parallel processing, and modular extensibility.
+The Basalt Framework is a high-performance, configuration-driven system designed to process large-scale financial market data (Trades, L2, L3). It computes granular metrics, aggregates them over time and instruments, and supports multi-pass execution flows. The core design philosophy emphasizes lazy evaluation, parallel processing, and modular extensibility.
 
 ## 2. System Architecture
 

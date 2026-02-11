@@ -1,6 +1,6 @@
 # Intro Tutorial
 
-This tutorial shows how to configure and run the Intraday Analytics framework, plus the minimum data you need to get results.
+This tutorial shows how to configure and run the Basalt framework, plus the minimum data you need to get results.
 It focuses on user-facing analytics modules and does not cover the internal dense row-generation module.
 
 ## 1) Concepts in 60 seconds
@@ -16,8 +16,8 @@ This example runs a single pass with trade analytics only.
 
 ```python
 import polars as pl
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig
-from intraday_analytics.execution import run_metrics_pipeline
+from basalt.configuration import AnalyticsConfig, PassConfig
+from basalt.execution import run_metrics_pipeline
 
 
 def get_universe(date_str: str) -> pl.DataFrame:
@@ -58,7 +58,7 @@ Notes:
 
 CLI shortcut:
 ```bash
-beaf pipeline run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01
+basalt pipeline run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01
 ```
 
 ## 3) Multi-pass example (trade -> generic)
@@ -67,8 +67,8 @@ Pass 1 computes trade metrics. Pass 2 re-aggregates them (e.g., per InstrumentId
 Optional: enable the `retail_imbalance` module if you want `RetailTradeImbalance` as a separate output.
 
 ```python
-from intraday_analytics.analytics.trade import TradeGenericConfig
-from intraday_analytics.analytics.generic import TalibIndicatorConfig
+from basalt.analytics.trade import TradeGenericConfig
+from basalt.analytics.generic import TalibIndicatorConfig
 
 config = AnalyticsConfig(
     START_DATE="2025-01-01",
@@ -107,6 +107,6 @@ config.PASSES[1].generic_analytics.talib_indicators = [
 - See docs/multi_pass_analytics.md for chaining passes.
 - See docs/shredding_and_batching.md for data preparation modes.
 - Enumerate potential metric columns (schema preview):
-  - `beaf analytics list`
-  - `beaf analytics list --pipeline demo/01_ohlcv_bars.py`
-  - `beaf analytics list --levels 5 --impact-horizons 1s,5s --json`
+  - `basalt analytics list`
+  - `basalt analytics list --pipeline demo/01_ohlcv_bars.py`
+  - `basalt analytics list --levels 5 --impact-horizons 1s,5s --json`

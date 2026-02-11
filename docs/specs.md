@@ -1,6 +1,6 @@
 # Framework Specs
 
-This document summarizes the key features of the framework and the current test coverage status. “Tested” means there is automated test coverage in `intraday_analytics/tests` or `intraday_analytics/analytics/tests`. “Partial” means some behavior is covered but not all variants. “Not tested” means no automated coverage yet.
+This document summarizes the key features of the framework and the current test coverage status. “Tested” means there is automated test coverage in `basalt/tests` or `basalt/analytics/tests`. “Partial” means some behavior is covered but not all variants. “Not tested” means no automated coverage yet.
 
 ## Core Pipeline
 
@@ -15,7 +15,7 @@ This document summarizes the key features of the framework and the current test 
 
 ## Analytics Modules
 
-Module-level tests live in `intraday_analytics/analytics/tests/` and focus on quant correctness. Framework/pipeline tests live in `intraday_analytics/tests/`.
+Module-level tests live in `basalt/analytics/tests/` and focus on quant correctness. Framework/pipeline tests live in `basalt/tests/`.
 
 | Module | Status | Tests / Notes |
 | --- | --- | --- |
@@ -49,15 +49,15 @@ Module-level tests live in `intraday_analytics/analytics/tests/` and focus on qu
 | --- | --- | --- |
 | Dagster asset generation | Tested | `test_dagster_compat.py` |
 | OutputTarget IO manager | Not tested | Manual validation recommended |
-| Dagster CLI helpers (`beaf dagster …`) | Not tested | Manual validation recommended |
+| Dagster CLI helpers (`basalt dagster …`) | Not tested | Manual validation recommended |
 | Scheduler install/uninstall | Not tested | Manual validation recommended |
 
 ## CLI / Tools
 
 | Feature | Status | Tests / Notes |
 | --- | --- | --- |
-| `beaf pipeline run` | Partial | Pipeline tests cover logic; CLI parsing not covered |
-| `beaf analytics list/explain` | Partial | Schema tests cover data; UI behavior not covered |
+| `basalt pipeline run` | Partial | Pipeline tests cover logic; CLI parsing not covered |
+| `basalt analytics list/explain` | Partial | Schema tests cover data; UI behavior not covered |
 | Config UI (Textual) | Not tested | Manual validation recommended |
 | Schema browser (Textual) | Partial | Data path tested; UI rendering not covered |
 

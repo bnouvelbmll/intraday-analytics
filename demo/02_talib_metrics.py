@@ -14,13 +14,13 @@ pip install talib-binary
 import bmll.reference
 import polars as pl
 import talib
-from intraday_analytics.analytics_base import BaseAnalytics
-from intraday_analytics.pipeline import AnalyticsPipeline
-from intraday_analytics.cli import run_cli
-from intraday_analytics.analytics.trade import TradeAnalytics
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig
-from intraday_analytics.dense_analytics import DenseAnalytics
-from intraday_analytics.dagster_compat import CustomUniverse
+from basalt.analytics_base import BaseAnalytics
+from basalt.pipeline import AnalyticsPipeline
+from basalt.cli import run_cli
+from basalt.analytics.trade import TradeAnalytics
+from basalt.configuration import AnalyticsConfig, PassConfig
+from basalt.dense_analytics import DenseAnalytics
+from basalt.dagster.dagster_compat import CustomUniverse
 
 # --- Configuration ---
 USER_CONFIG = {

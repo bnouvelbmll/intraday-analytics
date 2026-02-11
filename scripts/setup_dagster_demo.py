@@ -35,7 +35,7 @@ def _write_definitions(path: Path) -> None:
                 MultiPartitionsDefinition,
                 schedule,
             )
-            from intraday_analytics.dagster_compat import (
+            from basalt.dagster.dagster_compat import (
                 build_assets,
                 build_assets_for_module,
                 build_materialization_checks,
@@ -319,8 +319,8 @@ def main() -> int:
     print("\nDagster demo prepared for remote scheduler.")
     print(f"Definitions: {definitions_file}")
     print("\nSuggested commands:")
-    print(f"  beaf dagster scheduler install --workspace {definitions_file}")
-    print(f"  beaf dagster ui --workspace {definitions_file}")
+    print(f"  basalt dagster scheduler install --workspace {definitions_file}")
+    print(f"  basalt dagster ui --workspace {definitions_file}")
     return 0
 
 

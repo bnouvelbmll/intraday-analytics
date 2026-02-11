@@ -9,8 +9,8 @@ aggregated into 1-minute bars.
 import bmll.reference
 import polars as pl
 
-from intraday_analytics.cli import run_cli
-from intraday_analytics.dagster_compat import CustomUniverse
+from basalt.cli import run_cli
+from basalt.dagster.dagster_compat import CustomUniverse
 
 # This configuration defines the parameters for the analytics pipeline.
 # You can customize the date range, universe, dataset name, and the analytics to be computed.

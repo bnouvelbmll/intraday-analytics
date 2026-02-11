@@ -8,8 +8,8 @@ from tqdm import tqdm
 
 from dagster import DagsterInstance, AssetKey, AssetMaterialization, AssetObservation
 
-from intraday_analytics.tables import ALL_TABLES
-from intraday_analytics.dagster_compat import (
+from basalt.tables import ALL_TABLES
+from basalt.dagster.dagster_compat import (
     _parse_table_s3_path,
     _s3_list_all_objects,
     _s3_table_root_prefix,

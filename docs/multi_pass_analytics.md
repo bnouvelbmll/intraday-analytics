@@ -1,6 +1,6 @@
 # Multi-Pass Analytics
 
-The Intraday Analytics pipeline supports multi-pass execution, allowing you to chain analytics modules where the output of one pass serves as the input for subsequent passes. This is particularly useful for:
+The Basalt pipeline supports multi-pass execution, allowing you to chain analytics modules where the output of one pass serves as the input for subsequent passes. This is particularly useful for:
 
 1.  **Aggregation**: Computing metrics at a granular level (e.g., per trade or 1-minute buckets) in the first pass, and then aggregating them to a higher level (e.g., per instrument or 15-minute buckets) in a second pass.
 2.  **Derived Metrics**: Calculating complex indicators (like TA-Lib technical indicators) on pre-aggregated data.
@@ -11,7 +11,7 @@ The Intraday Analytics pipeline supports multi-pass execution, allowing you to c
 Multi-pass execution is configured via the `PASSES` list in `AnalyticsConfig`. Each `PassConfig` object defines a single pass.
 
 ```python
-from intraday_analytics.configuration import AnalyticsConfig, PassConfig, GenericAnalyticsConfig, TradeGenericConfig
+from basalt.configuration import AnalyticsConfig, PassConfig, GenericAnalyticsConfig, TradeGenericConfig
 
 config = AnalyticsConfig(
     # ... other config ...
@@ -57,7 +57,7 @@ The `generic` analytics module (`GenericAnalytics`) is designed specifically for
 
 ## Tips
 
-- Use `beaf pipeline config <pipeline.py>` for a guided editor that reflects pass type, module dependencies, and advanced options.
+- Use `basalt pipeline config <pipeline.py>` for a guided editor that reflects pass type, module dependencies, and advanced options.
 - Output targets can be set globally or per-pass (Parquet/Delta/SQL).
 
 ### Key Features

@@ -1,6 +1,6 @@
 # Architecture Overview
 
-This document provides a high-level overview of the Intraday Analytics Pipeline's architecture, data flow, and key components.
+This document provides a high-level overview of the Basalt Pipeline's architecture, data flow, and key components.
 
 ## Core Philosophy
 
@@ -12,8 +12,8 @@ The pipeline is designed around a few core principles:
 
 ## New Capabilities (High Level)
 
-- **Schema-driven config UI** (`beaf pipeline config`) edits YAML configs safely.
-- **Remote execution** on BMLL EC2 instances (`beaf job run` / `beaf job install`).
+- **Schema-driven config UI** (`basalt pipeline config`) edits YAML configs safely.
+- **Remote execution** on BMLL EC2 instances (`basalt job run` / `basalt job install`).
 - **Dagster integration** via `build_assets(...)` and optional BMLL-backed run launcher.
 - **Flexible outputs** to Parquet/Delta/SQL with optional dedupe on partition keys.
 
@@ -49,16 +49,16 @@ The pipeline executes in the following stages:
 
 ## Control Plane (CLI + Dagster)
 
-- `beaf pipeline run` drives local runs.
-- `beaf job run` submits the same pipeline to a BMLL instance (with bootstrap).
+- `basalt pipeline run` drives local runs.
+- `basalt job run` submits the same pipeline to a BMLL instance (with bootstrap).
 - Dagster assets can call `run_partition(...)` and can be scheduled via config.
 
 ## Key Components
 
 *   **`main.py`**: The entry point of the application. It handles configuration, defines the `get_universe` and `get_pipeline` functions, and orchestrates the overall execution flow.
-*   **`intraday_analytics/configuration.py`**: Defines the `AnalyticsConfig` dataclass, which provides a strongly-typed structure for all pipeline settings.
-*   **`intraday_analytics/execution.py`**: Contains the core orchestration logic, including the `run_metrics_pipeline` function and the `ProcessInterval` class that manages the work for each date batch.
-*   **`intraday_analytics/pipeline.py`**: Defines the `AnalyticsPipeline` and `AnalyticsRunner` classes, which are responsible for executing the sequence of analytics modules on a given batch of data.
-*   **`intraday_analytics/batching.py`**: Contains the logic for creating symbol-based batches from the source data. The `S3SymbolBatcher` is the primary component for the efficient `s3_shredding` mode.
-*   **`intraday_analytics/tables.py`**: Defines the data sources. Each table (e.g., `TradesPlusTable`) is represented by a class that knows how to load and pre-process its specific data.
-*   **`intraday_analytics/analytics/`**: This directory contains the individual analytics modules. Each module is responsible for calculating a specific set of analytics (e.g., `dense.py` for dense analytics, `trade.py` for trade-based analytics).
+*   **`basalt/configuration.py`**: Defines the `AnalyticsConfig` dataclass, which provides a strongly-typed structure for all pipeline settings.
+*   **`basalt/execution.py`**: Contains the core orchestration logic, including the `run_metrics_pipeline` function and the `ProcessInterval` class that manages the work for each date batch.
+*   **`basalt/pipeline.py`**: Defines the `AnalyticsPipeline` and `AnalyticsRunner` classes, which are responsible for executing the sequence of analytics modules on a given batch of data.
+*   **`basalt/batching.py`**: Contains the logic for creating symbol-based batches from the source data. The `S3SymbolBatcher` is the primary component for the efficient `s3_shredding` mode.
+*   **`basalt/tables.py`**: Defines the data sources. Each table (e.g., `TradesPlusTable`) is represented by a class that knows how to load and pre-process its specific data.
+*   **`basalt/analytics/`**: This directory contains the individual analytics modules. Each module is responsible for calculating a specific set of analytics (e.g., `dense.py` for dense analytics, `trade.py` for trade-based analytics).
