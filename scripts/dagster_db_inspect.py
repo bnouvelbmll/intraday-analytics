@@ -20,6 +20,11 @@ from dagster._core.storage.event_log.schema import (
 from dagster._core.storage.event_log.sql_event_log import SqlEventLogStorage
 
 
+def _disable_fire_pager() -> None:
+    if "PAGER" not in os.environ:
+        os.environ["PAGER"] = "cat"
+
+
 def _ensure_dagster_home(dagster_home: str | None) -> str:
     resolved = dagster_home or os.getenv("DAGSTER_HOME", "/tmp/dagster_test")
     os.environ.setdefault("DAGSTER_HOME", resolved)
@@ -235,4 +240,5 @@ def inspect_db(
 
 
 if __name__ == "__main__":
+    _disable_fire_pager()
     fire.Fire(inspect_db)

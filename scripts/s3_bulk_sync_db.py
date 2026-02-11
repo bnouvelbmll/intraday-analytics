@@ -46,6 +46,11 @@ from intraday_analytics.dagster_compat import (
 )
 
 
+def _disable_fire_pager() -> None:
+    if "PAGER" not in os.environ:
+        os.environ["PAGER"] = "cat"
+
+
 def _date_range_default():
     today = dt.date.today()
     end = today - dt.timedelta(days=0)
@@ -529,4 +534,5 @@ def sync(
 
 
 if __name__ == "__main__":
+    _disable_fire_pager()
     fire.Fire(sync)

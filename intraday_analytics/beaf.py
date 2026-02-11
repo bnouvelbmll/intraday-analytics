@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import fire
 import sys
 
@@ -15,6 +16,11 @@ from intraday_analytics import schema_utils
 from intraday_analytics import config_ui
 from intraday_analytics.analytics_explain import main as analytics_explain_main
 from intraday_analytics.dagster_remote import run_dagster_pipeline, run_dagster_remote
+
+
+def _disable_fire_pager() -> None:
+    if "PAGER" not in os.environ:
+        os.environ["PAGER"] = "cat"
 
 
 def _schema_utils(*args, **kwargs):
@@ -308,6 +314,7 @@ class BeafCLI:
 
 
 def main():
+    _disable_fire_pager()
     fire.Fire(BeafCLI)
 
 

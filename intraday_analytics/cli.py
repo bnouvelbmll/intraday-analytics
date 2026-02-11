@@ -17,6 +17,11 @@ from intraday_analytics.bmll_jobs import submit_instance_job
 from intraday_analytics.execution import run_multiday_pipeline
 
 
+def _disable_fire_pager() -> None:
+    if "PAGER" not in os.environ:
+        os.environ["PAGER"] = "cat"
+
+
 def _get_universe_from_spec(date, spec: str):
     module_name, value = (
         (spec.split("=", 1) + [None])[:2] if "=" in spec else (spec, None)
@@ -485,6 +490,7 @@ def run_cli(
 
 
 def main():
+    _disable_fire_pager()
     if len(sys.argv) > 1 and sys.argv[1] == "bmll_job_run":
         sys.argv.pop(1)
         fire.Fire(bmll_job_run)
