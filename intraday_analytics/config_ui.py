@@ -411,7 +411,7 @@ class ModelEditor(Screen):
                 )
         elif (union_list_lit := _list_literal_from_union(annotation)) is not None:
             widget = []
-            current = set(value or [])
+            current = {str(v) for v in (value or [])}
             for opt in union_list_lit:
                 cb = Checkbox(opt, value=opt in current)
                 widget.append(cb)
@@ -428,7 +428,7 @@ class ModelEditor(Screen):
             )
         elif (list_literal := _is_list_of_literal(annotation)) is not None:
             widget = []
-            current = set(value or [])
+            current = {str(v) for v in (value or [])}
             for opt in list_literal:
                 cb = Checkbox(opt, value=opt in current)
                 widget.append(cb)
@@ -673,7 +673,7 @@ class ModelEditor(Screen):
                     self.status.update(f"Invalid YAML for {name}: {exc}")
                     return
             elif isinstance(widget, list):
-                raw[name] = [cb.label for cb in widget if cb.value]
+                raw[name] = [str(cb.label) for cb in widget if cb.value]
             elif isinstance(widget, Button) and _is_basemodel(annotation):
                 raw[name] = self.data.get(name, {})
             elif (
