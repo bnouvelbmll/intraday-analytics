@@ -166,7 +166,7 @@ def _write_dagster_scheduler_script(
     jobs_dir = Path(job_config.jobs_dir)
     jobs_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    script_path = jobs_dir / f"beaf_dagster_scheduler_{stamp}.sh"
+    script_path = jobs_dir / f"beaf_dagster_scheduler_{stamp}.py"
     cmd = ["dagster-daemon", "run"]
     if workspace:
         cmd.extend(["-w", workspace])
@@ -175,17 +175,28 @@ def _write_dagster_scheduler_script(
     else:
         raise ValueError("pipeline or workspace is required for dagster scheduler.")
     timeout_seconds = int(max(runtime_hours, 1) * 3600)
-    cmd = ["timeout", str(timeout_seconds)] + cmd
-    env_lines = []
-    if dagster_home:
-        env_lines.append(f"export DAGSTER_HOME=\"{dagster_home}\"")
     script_path.write_text(
         "\n".join(
             [
-                "#!/usr/bin/env bash",
-                "set -euo pipefail",
-                *env_lines,
-                " ".join(cmd),
+                "#!/usr/bin/env python3",
+                "import os",
+                "import subprocess",
+                "import sys",
+                "",
+                f"cmd = {cmd!r}",
+                f"timeout = {timeout_seconds}",
+                "",
+                "env = os.environ.copy()",
+                f"dagster_home = {repr(dagster_home)}",
+                "if dagster_home:",
+                "    env['DAGSTER_HOME'] = dagster_home",
+                "try:",
+                "    subprocess.run(cmd, check=True, env=env, timeout=timeout)",
+                "except subprocess.TimeoutExpired:",
+                "    sys.exit(0)",
+                "except subprocess.CalledProcessError as exc:",
+                "    sys.stderr.write(str(exc) + \"\\n\")",
+                "    sys.exit(exc.returncode or 1)",
             ]
         ),
         encoding="utf-8",
@@ -221,6 +232,7 @@ def dagster_scheduler_install(
     dagster_home: Optional[str] = None,
     max_runtime_hours: int = 1,
     cron_timezone: Optional[str] = None,
+    overwrite_existing: bool = False,
 ):
     """
     Install a cron-triggered BMLL job that runs the Dagster daemon periodically.
@@ -245,6 +257,7 @@ def dagster_scheduler_install(
         max_runtime_hours=max_runtime_hours,
         delete_after=False,
         config=job_config,
+        on_name_conflict="overwrite" if overwrite_existing else "fail",
     )
     payload = {
         "job_id": getattr(job, "id", None),
@@ -254,12 +267,12 @@ def dagster_scheduler_install(
         "pipeline": pipeline,
         "workspace": workspace,
         "instance_size": instance_size,
-        "conda_env": conda_env,
+        "conda_env": conda_env or job_config.default_conda_env,
         "dagster_home": dagster_home,
         "max_runtime_hours": max_runtime_hours,
     }
     _write_scheduler_metadata(job_config, scheduler_name, payload)
-    return job
+    return payload
 
 
 def dagster_scheduler_uninstall(
@@ -299,6 +312,7 @@ def bmll_job_run(
     delete_after: Optional[bool] = None,
     cron: Optional[str] = None,
     cron_timezone: Optional[str] = None,
+    overwrite_existing: bool = False,
     **kwargs,
 ):
     """
@@ -323,6 +337,7 @@ def bmll_job_run(
         cron_timezone=cron_timezone,
         delete_after=delete_after,
         config=job_config,
+        on_name_conflict="overwrite" if overwrite_existing else "fail",
     )
 
 
@@ -334,6 +349,7 @@ def bmll_job_install(
     conda_env: Optional[str] = None,
     cron: Optional[str] = None,
     cron_timezone: Optional[str] = None,
+    overwrite_existing: bool = False,
     **kwargs,
 ):
     """
@@ -347,6 +363,7 @@ def bmll_job_install(
         delete_after=False,
         cron=cron,
         cron_timezone=cron_timezone,
+        overwrite_existing=overwrite_existing,
         **kwargs,
     )
 

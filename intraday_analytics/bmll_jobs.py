@@ -188,6 +188,7 @@ def submit_instance_job(
     delete_after: Optional[bool] = None,
     script_parameters: Optional[dict] = None,
     config: Optional[BMLLJobConfig] = None,
+    on_name_conflict: str = "fail",
 ):
     config = config or BMLLJobConfig()
     _check_concurrency(config)
@@ -196,6 +197,29 @@ def submit_instance_job(
     bootstrap_area, bootstrap_path, bootstrap_args = ensure_default_bootstrap(config)
 
     from bmll.compute import Bootstrap, CronTrigger, JobTrigger, create_job
+
+    if name:
+        try:
+            from bmll import compute
+
+            existing = None
+            if hasattr(compute, "get_jobs"):
+                for candidate in compute.get_jobs():
+                    if getattr(candidate, "name", None) == name:
+                        existing = candidate
+                        break
+            if existing is not None:
+                if on_name_conflict == "overwrite":
+                    try:
+                        existing.delete()
+                    except Exception:
+                        pass
+                else:
+                    raise RuntimeError(f"BMLL job with name '{name}' already exists.")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
 
     bootstraps = [Bootstrap(area=bootstrap_area, path=bootstrap_path, args=bootstrap_args)]
 
