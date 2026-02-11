@@ -456,9 +456,10 @@ class ModelEditor(Screen):
             widget = TextArea(text=_yaml_from_value(value), language="yaml")
             widget.styles.height = 5
 
-        if getattr(widget, "id", None) is None:
-            widget.id = f"field_{name}"
-        self._widget_names[widget.id] = name
+        if not isinstance(widget, list):
+            if getattr(widget, "id", None) is None:
+                widget.id = f"field_{name}"
+            self._widget_names[widget.id] = name
         self.widgets[name] = (widget, annotation)
         with Vertical(classes="field-box"):
             yield Label(f"--")
