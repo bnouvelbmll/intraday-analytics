@@ -333,6 +333,7 @@ def sync(
     tables: str | None = "all",
     start_date: str | None = None,
     end_date: str | None = None,
+    paths: str | None = None,
     emit_observations: bool = True,
     emit_materializations: bool = True,
     force_refresh: bool = False,
@@ -353,6 +354,7 @@ def sync(
         tables: comma-separated list (e.g. "l2,l3,trades"), or "all".
         start_date: inclusive YYYY-MM-DD. Defaults to last 30 days.
         end_date: inclusive YYYY-MM-DD. Defaults to yesterday.
+        paths: comma-separated S3 paths to sync (overrides listing scan).
         emit_observations: emit AssetObservation events.
         emit_materializations: emit AssetMaterialization events.
         force_refresh: bypass cache for S3 listings.
@@ -378,6 +380,7 @@ def sync(
         raise RuntimeError("Event log storage is not SQL-backed.")
 
     table_list = _parse_tables(tables)
+    explicit_paths = [p.strip() for p in (paths or "").split(",") if p.strip()]
     total_emitted = 0
     target_run_id = run_id if run_id is not None else RUNLESS_RUN_ID
     target_job_name = job_name if job_name is not None else RUNLESS_JOB_NAME
@@ -394,16 +397,27 @@ def sync(
         prefix = _s3_table_root_prefix(table)
         if not prefix:
             continue
-        objects = _s3_list_all_objects(prefix, force_refresh=force_refresh)
+        objects = {}
+        if not explicit_paths:
+            objects = _s3_list_all_objects(prefix, force_refresh=force_refresh)
 
         filtered: list[tuple[str, dict, str, str]] = []
-        for path, meta in _iter_objects_newest_first(objects):
-            parsed = _parse_table_s3_path(table, path)
-            if not parsed:
-                continue
-            mic, date_key = parsed
-            if _date_in_range(date_key, start_date, end_date):
-                filtered.append((path, meta, mic, date_key))
+        if explicit_paths:
+            for path in explicit_paths:
+                parsed = _parse_table_s3_path(table, path)
+                if not parsed:
+                    continue
+                mic, date_key = parsed
+                if _date_in_range(date_key, start_date, end_date):
+                    filtered.append((path, {}, mic, date_key))
+        else:
+            for path, meta in _iter_objects_newest_first(objects):
+                parsed = _parse_table_s3_path(table, path)
+                if not parsed:
+                    continue
+                mic, date_key = parsed
+                if _date_in_range(date_key, start_date, end_date):
+                    filtered.append((path, meta, mic, date_key))
 
         asset_key = AssetKey([*key_prefix, table_name] if key_prefix else [table_name])
 

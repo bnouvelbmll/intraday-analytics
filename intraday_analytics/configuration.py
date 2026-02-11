@@ -12,6 +12,34 @@ from .analytics.iceberg import IcebergAnalyticsConfig
 from .analytics.cbbo import CBBOAnalyticsConfig
 from .analytics.l3_characteristics import L3CharacteristicsConfig
 from .analytics.trade_characteristics import TradeCharacteristicsConfig
+from .analytics.alpha101 import Alpha101AnalyticsConfig
+from .analytics.events import EventAnalyticsConfig
+from .analytics.correlation import CorrelationAnalyticsConfig
+
+
+class QualityCheckConfig(BaseModel):
+    """
+    Post-processing quality checks for metric outputs.
+    """
+
+    ENABLED: bool = False
+    null_rate_max: float = Field(
+        0.2,
+        ge=0.0,
+        le=1.0,
+        description="Maximum allowed null rate per metric (0-1).",
+        json_schema_extra={"section": "Advanced"},
+    )
+    ranges: Dict[str, List[float]] = Field(
+        default_factory=dict,
+        description="Optional per-metric bounds: {column: [min, max]}.",
+        json_schema_extra={"section": "Advanced"},
+    )
+    action: Literal["warn", "raise"] = Field(
+        "warn",
+        description="Whether to warn or raise on failed checks.",
+        json_schema_extra={"section": "Advanced"},
+    )
 
 
 class PrepareDataMode(str, Enum):
@@ -93,6 +121,22 @@ class OutputTarget(BaseModel):
             "depends_on": {"type": ["delta", "sql"]},
         },
     )
+    preserve_index: bool = Field(
+        False,
+        description="Preserve pandas index as columns when writing outputs.",
+        json_schema_extra={
+            "section": "Advanced",
+            "depends_on": {"type": ["parquet", "delta", "sql"]},
+        },
+    )
+    index_name: Optional[str] = Field(
+        None,
+        description="Optional index column name when preserving index.",
+        json_schema_extra={
+            "section": "Advanced",
+            "depends_on": {"type": ["parquet", "delta", "sql"]},
+        },
+    )
 
 
 class PassConfig(BaseModel):
@@ -115,6 +159,10 @@ class PassConfig(BaseModel):
     output: Optional[OutputTarget] = Field(
         None,
         description="Optional per-pass output target override.",
+    )
+    extra_outputs: List[OutputTarget] = Field(
+        default_factory=list,
+        description="Optional additional output targets for this pass.",
     )
 
     ## Module specific config
@@ -141,6 +189,14 @@ class PassConfig(BaseModel):
     reaggregate_analytics: ReaggregateAnalyticsConfig = Field(
         default_factory=ReaggregateAnalyticsConfig
     )
+    alpha101_analytics: Alpha101AnalyticsConfig = Field(
+        default_factory=Alpha101AnalyticsConfig
+    )
+    event_analytics: EventAnalyticsConfig = Field(default_factory=EventAnalyticsConfig)
+    correlation_analytics: CorrelationAnalyticsConfig = Field(
+        default_factory=CorrelationAnalyticsConfig
+    )
+    quality_checks: QualityCheckConfig = Field(default_factory=QualityCheckConfig)
 
     @model_validator(mode="after")
     def propagate_pass_settings(self) -> "PassConfig":
@@ -479,6 +535,21 @@ class AnalyticsConfig(BaseModel):
         False,
         description="Skip outputs if they already exist.",
         json_schema_extra={"section": "Outputs"},
+    )
+    QUALITY_CHECKS: QualityCheckConfig = Field(
+        default_factory=QualityCheckConfig,
+        description="Default quality checks for outputs.",
+        json_schema_extra={"section": "Advanced"},
+    )
+    SCHEMA_LOCK_MODE: Literal["off", "warn", "raise", "update"] = Field(
+        "off",
+        description="Schema lock behavior when output columns change.",
+        json_schema_extra={"section": "Advanced"},
+    )
+    SCHEMA_LOCK_PATH: Optional[str] = Field(
+        None,
+        description="Path to schema lock file (JSON). If unset, schema lock is skipped.",
+        json_schema_extra={"section": "Advanced"},
     )
 
     def to_dict(self):

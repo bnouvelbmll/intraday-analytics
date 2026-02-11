@@ -8,6 +8,7 @@ from intraday_analytics.cli import (
     bmll_job_run,
     dagster_scheduler_install,
     dagster_scheduler_uninstall,
+    dagster_sync,
     run_cli,
 )
 from intraday_analytics import schema_utils
@@ -201,6 +202,7 @@ def main():
                 "run": _dagster_run,
                 "install": _dagster_install,
                 "uninstall": _dagster_uninstall,
+                "sync": dagster_sync,
                 "scheduler": {
                     "install": dagster_scheduler_install,
                     "uninstall": dagster_scheduler_uninstall,

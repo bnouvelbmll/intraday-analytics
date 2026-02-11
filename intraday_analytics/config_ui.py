@@ -28,6 +28,11 @@ from textual.widgets import (
 from rich.panel import Panel
 
 from intraday_analytics.configuration import AnalyticsConfig, PassConfig, OutputTarget
+from intraday_analytics.analytics.generic import (
+    TalibIndicatorConfig,
+    GenericAnalyticsConfig,
+    TALIB_AVAILABLE,
+)
 from intraday_analytics.execution import _derive_tables_to_load
 from intraday_analytics.schema_utils import get_output_schema, get_full_output_schema
 from intraday_analytics.analytics.l3 import L3AdvancedConfig
@@ -355,6 +360,18 @@ class ModelEditor(Screen):
         label = Label(name)
         if annotation is bool:
             widget = Checkbox(value=bool(value))
+        elif self.model_cls is TalibIndicatorConfig and name == "name":
+            if TALIB_AVAILABLE:
+                import talib
+
+                options = sorted(talib.get_functions())
+                if not options:
+                    widget = Input(value="" if value is None else str(value))
+                else:
+                    current = value if value in options else options[0]
+                    widget = Select([(o, o) for o in options], value=current)
+            else:
+                widget = Input(value="" if value is None else str(value))
         elif (union_lit := _literal_from_union(annotation)) is not None:
             # If the type allows a list of literals, render as multi-select checkboxes
             if (union_list_lit := _list_literal_from_union(annotation)) is not None:
@@ -472,6 +489,9 @@ class ModelEditor(Screen):
             if isinstance(variant, list):
                 return "FleetingLiquidityRatio" in variant
             return variant == "FleetingLiquidityRatio"
+        if self.model_cls is GenericAnalyticsConfig and name == "talib_indicators":
+            if not TALIB_AVAILABLE:
+                return False
         return True
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -865,6 +885,21 @@ MODULE_INFO = {
         "columns": ["IndexAggregation"],
         "tier": "post",
     },
+    "alpha101": {
+        "desc": "Postprocessing: subset of 101 formulaic alphas (adapted).",
+        "columns": ["Alpha001", "Alpha101"],
+        "tier": "post",
+    },
+    "events": {
+        "desc": "Postprocessing: event rows (local min/max on SMA/EWMA).",
+        "columns": ["EventType", "IndicatorValue"],
+        "tier": "post",
+    },
+    "correlation": {
+        "desc": "Postprocessing: correlation matrices (rows or matrix).",
+        "columns": ["MetricX", "MetricY", "Corr"],
+        "tier": "post",
+    },
     "characteristics": {
         "desc": "Advanced/internal: characteristics over L3/trades.",
         "columns": ["L3Characteristics", "TradeCharacteristics"],
@@ -881,6 +916,9 @@ PASS_MODULE_FIELD_MAP = {
     "cbbo": ["cbbo_analytics"],
     "generic": ["generic_analytics"],
     "reaggregate": ["reaggregate_analytics"],
+    "alpha101": ["alpha101_analytics"],
+    "events": ["event_analytics"],
+    "correlation": ["correlation_analytics"],
     "characteristics": [
         "l3_characteristics_analytics",
         "trade_characteristics_analytics",
@@ -894,6 +932,9 @@ MODULE_SCHEMA_KEYS = {
     "execution": ["execution"],
     "iceberg": ["iceberg"],
     "cbbo": ["cbbo"],
+    "alpha101": ["alpha101"],
+    "events": ["events"],
+    "correlation": ["correlation"],
 }
 
 
@@ -1080,6 +1121,9 @@ class PassEditor(Screen):
             self.widgets["modules_box"] = modules_box
             yield modules_box
 
+            yield Label("Dense output")
+            yield Button("Edit dense output", id="edit_dense")
+
             yield Label("Advanced options")
             yield Button("Edit full PassConfig", id="edit_full")
         with Horizontal():
@@ -1110,6 +1154,7 @@ class PassEditor(Screen):
                 "modules",
                 "dense_analytics",
                 "generic_analytics",
+                "quality_checks",
             }
             for mod in selected_modules:
                 allowed.update(PASS_MODULE_FIELD_MAP.get(mod, []))
@@ -1117,6 +1162,21 @@ class PassEditor(Screen):
                 PassConfig, self.data, "PassConfig (Advanced)", _on_save
             )
             screen._allowed_fields = allowed
+            self.app.push_screen(screen)
+            return
+        if button_id == "edit_dense":
+            def _on_save(updated):
+                self.data["dense_analytics"] = updated
+            current = self.data.get("dense_analytics", {})
+            dense_model = PassConfig.model_fields["dense_analytics"].annotation  # type: ignore[assignment]
+            screen = ModelEditor(
+                dense_model,
+                current
+                if isinstance(current, dict)
+                else getattr(current, "model_dump", lambda: {})(),
+                title="PassConfig.dense_analytics",
+                on_save=_on_save,
+            )
             self.app.push_screen(screen)
             return
         if button_id.startswith("edit_module_"):

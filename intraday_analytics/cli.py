@@ -6,6 +6,8 @@ from pathlib import Path
 from functools import partial
 from typing import Callable, Optional
 import inspect
+import subprocess
+import sys
 
 import fire
 import yaml
@@ -311,6 +313,57 @@ def bmll_job_install(
         cron_timezone=cron_timezone,
         **kwargs,
     )
+
+
+def dagster_sync(
+    *,
+    tables: str | None = "all",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    paths: str | None = None,
+    emit_observations: bool = True,
+    emit_materializations: bool = True,
+    force_refresh: bool = False,
+    batch_size: int = 500,
+    run_id: str | None = None,
+    job_name: str | None = None,
+    seed_with_api: bool = False,
+    asset_key_prefix: str | None = "BMLL",
+    refresh_status_cache: bool = True,
+):
+    """
+    Run the bulk S3 -> Dagster event sync (direct DB insertion).
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "s3_bulk_sync_db.py"
+    if not script_path.exists():
+        raise FileNotFoundError(f"Bulk sync script not found: {script_path}")
+    cmd = [
+        sys.executable,
+        str(script_path),
+        "sync",
+        "--tables",
+        tables or "all",
+    ]
+    if start_date:
+        cmd.extend(["--start_date", start_date])
+    if end_date:
+        cmd.extend(["--end_date", end_date])
+    if paths:
+        cmd.extend(["--paths", paths])
+    cmd.extend(["--emit_observations", str(bool(emit_observations))])
+    cmd.extend(["--emit_materializations", str(bool(emit_materializations))])
+    cmd.extend(["--force_refresh", str(bool(force_refresh))])
+    cmd.extend(["--batch_size", str(batch_size)])
+    if run_id:
+        cmd.extend(["--run_id", run_id])
+    if job_name:
+        cmd.extend(["--job_name", job_name])
+    cmd.extend(["--seed_with_api", str(bool(seed_with_api))])
+    if asset_key_prefix is not None:
+        cmd.extend(["--asset_key_prefix", asset_key_prefix])
+    cmd.extend(["--refresh_status_cache", str(bool(refresh_status_cache))])
+    subprocess.check_call(cmd)
 
 
 def run_cli(

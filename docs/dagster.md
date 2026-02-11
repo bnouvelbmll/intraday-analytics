@@ -188,12 +188,79 @@ insert events outside the API, you must either:
 - Call `wipe_asset_cached_status(...)`
 - Or rebuild the cached status via `get_and_update_asset_status_cache_value(...)`
 
+## Scheduler + UI Separation (Remote Daemon)
+
+For production-like setups, run the **Dagster daemon** on a remote BMLL instance
+and keep the **webserver/UI** local. The daemon is responsible for schedules and
+sensors; the UI can be started independently.
+
+Requirements:
+- Provide either a Dagster **workspace** (`workspace.yaml`) or a **pipeline file**
+  to the daemon and webserver.
+- Ensure `DAGSTER_HOME` is set consistently for both (shared event log storage).
+
+Example: schedule daemon every 6 hours on a 16GB instance for 1 hour:
+
+```bash
+beaf dagster scheduler install --pipeline demo/01_ohlcv_bars.py --interval_hours 6 --instance_size 16 --max_runtime_hours 1
+```
+
+Start the UI without the daemon:
+
+```bash
+beaf dagster ui --pipeline demo/01_ohlcv_bars.py --port 3000
+```
+
+## Bulk Sync (Materializations/Observations)
+
+You can force Dagster to ingest materializations/observations from S3 using the
+bulk sync job (direct event-log insertions):
+
+```bash
+beaf dagster sync --tables l2,l3,trades --start_date 2025-01-01 --end_date 2025-01-31
+```
+
+To sync a **specific S3 path** (e.g. after a manual write):
+
+```bash
+beaf dagster sync --paths s3://bucket/prefix/data/.../2025-01-05.parquet
+```
+
 ## Artifact Handling
 
 Use the `on_result` callback in `run_partition` to integrate with Dagster's
 asset store or metadata. The callback receives the partition and the resolved
 `AnalyticsConfig`, so it can compute output paths and register artifacts
 per partition.
+
+## OutputTarget IO Manager (Default)
+
+The compatibility layer now defaults assets to the `output_target_io_manager`
+so Dagster can transparently read/write outputs using `OutputTarget`
+(parquet/delta/sql).
+
+Add the IO manager to your Definitions:
+
+```python
+from dagster import Definitions
+from intraday_analytics.dagster_io import output_target_io_manager
+
+defs = Definitions(
+    assets=build_assets(...),
+    resources={
+        "output_target_io_manager": output_target_io_manager.configured(
+            {
+                "base_config": USER_CONFIG,
+                # optional override:
+                # "output_target": {"type": "delta", "path_template": "..."},
+            }
+        )
+    },
+)
+```
+
+If you want to use a different IO manager, set `OUTPUT_TARGET.io_manager_key`
+in your config.
 
 ## Demo Discovery
 

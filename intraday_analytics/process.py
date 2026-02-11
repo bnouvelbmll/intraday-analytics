@@ -12,6 +12,7 @@ from intraday_analytics.utils import (
     normalize_float_df,
 )
 from intraday_analytics.configuration import OutputTarget
+from intraday_analytics.quality_checks import run_quality_checks, emit_quality_results
 
 
 def get_final_output_path(start_date, end_date, config, pass_name, output_target=None):
@@ -180,6 +181,16 @@ def aggregate_and_write_final_output(
                 "Set OutputTarget.partition_columns to existing columns."
             )
         df_to_write = final_with_pk
+        quality_config = (
+            pass_config.quality_checks
+            if pass_config.quality_checks.ENABLED
+            else config.QUALITY_CHECKS
+        )
+        if quality_config.ENABLED:
+            df_for_checks = df_to_write.collect(streaming=True)
+            problems = run_quality_checks(df_for_checks, quality_config)
+            emit_quality_results(problems, quality_config)
+            df_to_write = df_for_checks.lazy()
         if output_type == "parquet":
             return df_to_write.sink_parquet(final_s3_path, compression="snappy")
         if output_type == "delta":
@@ -261,7 +272,17 @@ def aggregate_and_write_final_output(
                     with engine.begin() as conn:
                         for offset in range(0, len(df), batch):
                             chunk = df.slice(offset, batch)
-                            chunk.to_pandas().to_sql(
+                            pdf = chunk.to_pandas()
+                            if output_target.preserve_index:
+                                if output_target.index_name and not all(pdf.index.names):
+                                    if pdf.index.nlevels == 1:
+                                        pdf.index.name = output_target.index_name
+                                    else:
+                                        pdf.index.names = [
+                                            output_target.index_name if not n else n
+                                            for n in pdf.index.names
+                                        ]
+                            pdf.to_sql(
                                 output_target.sql_table,
                                 conn,
                                 if_exists=(
@@ -269,7 +290,7 @@ def aggregate_and_write_final_output(
                                     if offset == 0
                                     else "append"
                                 ),
-                                index=False,
+                                index=output_target.preserve_index,
                                 method="multi",
                             )
                     return None

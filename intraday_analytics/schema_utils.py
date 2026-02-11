@@ -34,6 +34,10 @@ from .analytics.execution import (
 )
 from .analytics.iceberg import IcebergAnalyticsConfig, IcebergMetricConfig
 from .analytics.cbbo import CBBOAnalytics, CBBOAnalyticsConfig
+from .analytics.alpha101 import Alpha101Analytics, Alpha101AnalyticsConfig
+from .analytics.events import EventAnalyticsConfig
+from .analytics.correlation import CorrelationAnalyticsConfig
+import pandas as pd
 
 
 def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfig:
@@ -456,6 +460,37 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
         output_columns["cbbo"] = cbbo_df.collect_schema().names()
     except Exception as e:
         output_columns["cbbo_error"] = [str(e)]
+
+    # --- Alpha101 ---
+    try:
+        alpha_cfg = Alpha101AnalyticsConfig()
+        alpha_cols = [f"Alpha{idx:03d}" for idx in alpha_cfg.alpha_ids]
+        output_columns["alpha101"] = ["ListingId", "TimeBucket", *alpha_cols]
+    except Exception as e:
+        output_columns["alpha101_error"] = [str(e)]
+
+    # --- Events ---
+    try:
+        output_columns["events"] = [
+            "ListingId",
+            "TimeBucket",
+            "EventType",
+            "Indicator",
+            "IndicatorValue",
+        ]
+    except Exception as e:
+        output_columns["events_error"] = [str(e)]
+
+    # --- Correlation ---
+    try:
+        output_columns["correlation"] = [
+            "ListingId",
+            "MetricX",
+            "MetricY",
+            "Corr",
+        ]
+    except Exception as e:
+        output_columns["correlation_error"] = [str(e)]
 
     return output_columns
 

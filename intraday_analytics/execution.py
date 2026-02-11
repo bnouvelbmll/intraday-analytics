@@ -32,6 +32,7 @@ from .process import (
     get_final_s3_path,
     get_final_output_path,
 )
+from .schema_utils import get_output_schema
 from .configuration import OutputTarget
 
 
@@ -514,6 +515,9 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
 
         get_pipeline = create_pipeline
 
+    if config.SCHEMA_LOCK_MODE != "off" and config.SCHEMA_LOCK_PATH:
+        _check_schema_lock(config)
+
     if "region" not in config.S3_STORAGE_OPTIONS and config.DEFAULT_S3_REGION:
         config.S3_STORAGE_OPTIONS["region"] = config.DEFAULT_S3_REGION
 
@@ -613,3 +617,38 @@ def run_multiday_pipeline(config, get_universe, get_pipeline=None):
     Compatibility wrapper for running multi-day pipelines.
     """
     return run_metrics_pipeline(config, get_universe, get_pipeline=get_pipeline)
+
+
+def _check_schema_lock(config):
+    import json
+
+    lock_path = config.SCHEMA_LOCK_PATH
+    if not lock_path:
+        return
+    try:
+        with open(lock_path, "r", encoding="utf-8") as handle:
+            locked = json.load(handle)
+    except FileNotFoundError:
+        locked = {}
+    except Exception:
+        locked = {}
+
+    current = {}
+    for pass_cfg in config.PASSES or []:
+        schema = get_output_schema(pass_cfg)
+        cols = []
+        for values in schema.values():
+            if isinstance(values, list):
+                cols.extend(values)
+        current[pass_cfg.name] = cols
+
+    if config.SCHEMA_LOCK_MODE == "update" or not locked:
+        with open(lock_path, "w", encoding="utf-8") as handle:
+            json.dump(current, handle, indent=2)
+        return
+
+    if locked != current:
+        message = f"Schema lock mismatch. Expected={locked} Current={current}"
+        if config.SCHEMA_LOCK_MODE == "raise":
+            raise RuntimeError(message)
+        logging.warning(message)
