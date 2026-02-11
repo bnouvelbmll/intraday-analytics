@@ -70,7 +70,17 @@ def _load_pipeline_module(path_or_name: str):
     return importlib.import_module(path_or_name)
 
 
+def _help_requested() -> bool:
+    return any(arg in {"-h", "--help"} for arg in sys.argv)
+
+
 def _pipeline_run(*, pipeline: str | None = None, **kwargs):
+    if _help_requested():
+        print(
+            "Usage: beaf pipeline run --pipeline <path_or_module> [options]\n"
+            "Options are forwarded to the pipeline CLI (e.g. --start_date, --end_date, --batch_freq)."
+        )
+        return None
     if not pipeline:
         raise SystemExit("Provide --pipeline <path_or_module>")
     module = _load_pipeline_module(pipeline)
@@ -89,6 +99,12 @@ def _pipeline_run(*, pipeline: str | None = None, **kwargs):
 
 
 def _job_run(*, pipeline: str | None = None, **kwargs):
+    if _help_requested():
+        print(
+            "Usage: beaf job run --pipeline <path_or_module> [options]\n"
+            "Options are forwarded to the pipeline CLI (e.g. --start_date, --end_date, --batch_freq)."
+        )
+        return None
     if pipeline and "config_file" not in kwargs:
         kwargs["config_file"] = pipeline
     return bmll_job_run(**kwargs)
@@ -220,25 +236,79 @@ def _dagster_ui(
     return subprocess.call(cmd, env=env)
 
 
+class AnalyticsCLI:
+    @staticmethod
+    def list(*args, **kwargs):
+        return _schema_utils(*args, **kwargs)
+
+    @staticmethod
+    def explain(*args, **kwargs):
+        return _analytics_explain(*args, **kwargs)
+
+
+class PipelineCLI:
+    @staticmethod
+    def run(*args, **kwargs):
+        return _pipeline_run(*args, **kwargs)
+
+    @staticmethod
+    def config(*args, **kwargs):
+        return _config_ui(*args, **kwargs)
+
+
+class JobCLI:
+    @staticmethod
+    def run(*args, **kwargs):
+        return _job_run(*args, **kwargs)
+
+    @staticmethod
+    def install(*args, **kwargs):
+        return bmll_job_install(*args, **kwargs)
+
+
+class DagsterSchedulerCLI:
+    @staticmethod
+    def install(*args, **kwargs):
+        return dagster_scheduler_install(*args, **kwargs)
+
+    @staticmethod
+    def uninstall(*args, **kwargs):
+        return dagster_scheduler_uninstall(*args, **kwargs)
+
+
+class DagsterCLI:
+    scheduler = DagsterSchedulerCLI
+
+    @staticmethod
+    def run(*args, **kwargs):
+        return _dagster_run(*args, **kwargs)
+
+    @staticmethod
+    def install(*args, **kwargs):
+        return _dagster_install(*args, **kwargs)
+
+    @staticmethod
+    def uninstall(*args, **kwargs):
+        return _dagster_uninstall(*args, **kwargs)
+
+    @staticmethod
+    def sync(*args, **kwargs):
+        return dagster_sync(*args, **kwargs)
+
+    @staticmethod
+    def ui(*args, **kwargs):
+        return _dagster_ui(*args, **kwargs)
+
+
+class BeafCLI:
+    analytics = AnalyticsCLI
+    pipeline = PipelineCLI
+    job = JobCLI
+    dagster = DagsterCLI
+
+
 def main():
-    fire.Fire(
-        {
-            "analytics": {"list": _schema_utils, "explain": _analytics_explain},
-            "pipeline": {"run": _pipeline_run, "config": _config_ui},
-            "job": {"run": _job_run, "install": bmll_job_install},
-            "dagster": {
-                "run": _dagster_run,
-                "install": _dagster_install,
-                "uninstall": _dagster_uninstall,
-                "sync": dagster_sync,
-                "scheduler": {
-                    "install": dagster_scheduler_install,
-                    "uninstall": dagster_scheduler_uninstall,
-                },
-                "ui": _dagster_ui,
-            },
-        }
-    )
+    fire.Fire(BeafCLI)
 
 
 if __name__ == "__main__":
