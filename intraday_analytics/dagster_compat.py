@@ -331,7 +331,7 @@ def build_assets(
         )
         auto_kwargs = _auto_materialize_kwargs(config_model)
         output_target = config_model.OUTPUT_TARGET
-        io_manager_key = getattr(output_target, "io_manager_key", None) or "output_target_io_manager"
+        io_manager_key = config_model.DAGSTER_IO_MANAGER_KEY or "output_target_io_manager"
         passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
         last_pass_key = None
 
@@ -482,7 +482,7 @@ def build_assets_for_module(
     )
     auto_kwargs = _auto_materialize_kwargs(config_model)
     output_target = config_model.OUTPUT_TARGET
-    io_manager_key = getattr(output_target, "io_manager_key", None) or "output_target_io_manager"
+    io_manager_key = config_model.DAGSTER_IO_MANAGER_KEY or "output_target_io_manager"
     passes = base_config.get("PASSES", []) if isinstance(base_config, dict) else []
     last_pass_key = None
 

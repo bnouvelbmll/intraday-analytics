@@ -511,17 +511,6 @@ class ModelEditor(Screen):
                         allowed = [dep_values]
                     if current not in allowed:
                         return False
-        if self.model_cls is AnalyticsConfig and name == "AREA":
-            output_target = self.data.get("OUTPUT_TARGET") or {}
-            if isinstance(output_target, BaseModel):
-                output_target = output_target.model_dump()
-            path_template = None
-            if isinstance(output_target, dict):
-                path_template = output_target.get("path_template")
-            if not path_template:
-                path_template = OutputTarget().path_template
-            if not str(path_template).startswith("s3://"):
-                return False
         if self.model_cls is L3AdvancedConfig and name == "fleeting_threshold_ms":
             variant = self.data.get("variant")
             if isinstance(variant, list):
@@ -903,7 +892,12 @@ class ConfigEditor(App):
         data = self.config_data or {}
         dataset = data.get("DATASETNAME", "unknown")
         passes = data.get("PASSES", []) or []
-        area = data.get("AREA", "unknown")
+        area = "unknown"
+        output_target = data.get("OUTPUT_TARGET") or {}
+        if isinstance(output_target, OutputTarget):
+            output_target = output_target.model_dump()
+        if isinstance(output_target, dict):
+            area = output_target.get("area", "unknown")
         universe = data.get("UNIVERSE") or "default"
         start_date = data.get("START_DATE") or "default"
         end_date = data.get("END_DATE") or "default"

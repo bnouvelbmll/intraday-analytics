@@ -147,13 +147,13 @@ def _expand_cron_without_slash(expr: str) -> list[str]:
 
     if minute_vals:
         return [
-            f\"{m} {hour} {dom} {month} {dow} {year}\"
+            f"{m} {hour} {dom} {month} {dow} {year}"
             for m in minute_vals
         ]
 
     if hour_vals:
         return [
-            f\"{minute} {h} {dom} {month} {dow} {year}\"
+            f"{minute} {h} {dom} {month} {dow} {year}"
             for h in hour_vals
         ]
 
@@ -283,10 +283,10 @@ def submit_instance_job(
                     f"Invalid BMLL cron expression '{expr}': {reason}"
                 )
             trigger = CronTrigger(expr)
-            suffix = f\"_{idx}\" if len(expanded) > 1 else \"\"
+            suffix = f"_{idx}" if len(expanded) > 1 else ""
             triggers.append(
                 JobTrigger(
-                    name=f\"{name or 'bmll_job'}_cron{name_suffix}{suffix}\",
+                    name=f"{name or 'bmll_job'}_cron{name_suffix}{suffix}",
                     trigger=trigger,
                 )
             )

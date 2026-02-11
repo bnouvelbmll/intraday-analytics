@@ -70,9 +70,10 @@ class OutputTarget(BaseModel):
         description="Path template for parquet/delta outputs (supports {bucket}, {prefix}, {datasetname}, {universe}, {start_date}, {end_date}).",
         json_schema_extra={"depends_on": {"type": ["parquet", "delta"]}},
     )
-    io_manager_key: Optional[str] = Field(
-        None,
-        description="Dagster IO manager key to use when running in Dagster.",
+    area: str = Field(
+        "user",
+        description="Bucket area to use for S3-backed outputs.",
+        json_schema_extra={"depends_on": {"type": ["parquet", "delta"]}},
     )
     delta_mode: Literal["append", "overwrite"] = Field(
         "append",
@@ -435,13 +436,10 @@ class AnalyticsConfig(BaseModel):
         description="Local temp directory used during processing (auto-generated if empty).",
         json_schema_extra={"section": "Advanced"},
     )
-    AREA: str = Field(
-        "user",
-        description="Bucket to use to store the data on S3.",
-        json_schema_extra={
-            "section": "Outputs",
-            "depends_on": {"OUTPUT_TARGET.type": ["parquet", "delta"]},
-        },
+    DAGSTER_IO_MANAGER_KEY: Optional[str] = Field(
+        None,
+        description="Dagster IO manager key to use when running in Dagster.",
+        json_schema_extra={"section": "Outputs"},
     )
 
     # --- Execution ---
