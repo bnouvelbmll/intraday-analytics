@@ -15,7 +15,11 @@ from .batching import (
     S3SymbolBatcher,
     HeuristicBatchingStrategy,
     SymbolSizeEstimator,
+    PolarsScanBatchingStrategy,
+    shard_lazyframes_to_batches,
+    DEFAULT_GROUPED_BUFFER_ROWS,
 )
+from .analytics_registry import resolve_batch_group_by
 from .pipeline import AnalyticsRunner
 from .utils import (
     preload,
@@ -23,6 +27,7 @@ from .utils import (
     create_date_batches,
     is_s3_path,
     retry_s3,
+    SYMBOL_COL,
 )
 from .tables import ALL_TABLES
 from .api_stats import init_api_stats, summarize_api_stats
@@ -42,6 +47,46 @@ def _coerce_to_iso_date(value):
             return pd.Timestamp(value).date().isoformat()
         except Exception:
             return value
+    return value
+
+
+def _resolve_module_names(pass_config) -> list[str]:
+    module_names = list(pass_config.modules)
+    if pass_config.trade_analytics.enable_retail_imbalance:
+        if "retail_imbalance" not in module_names:
+            module_names.append("retail_imbalance")
+    if pass_config.trade_analytics.use_tagged_trades:
+        if "iceberg" not in module_names:
+            module_names.insert(0, "iceberg")
+        else:
+            try:
+                trade_idx = module_names.index("trade")
+                iceberg_idx = module_names.index("iceberg")
+                if iceberg_idx > trade_idx:
+                    module_names.pop(iceberg_idx)
+                    module_names.insert(trade_idx, "iceberg")
+            except ValueError:
+                pass
+    return module_names
+
+
+def _resolve_batch_group_map(pass_config, ref: pl.DataFrame) -> dict | None:
+    module_names = _resolve_module_names(pass_config)
+    group_key = resolve_batch_group_by(module_names)
+    if not group_key:
+        return None
+    if group_key not in ref.columns:
+        logging.warning(
+            "Batch grouping requested on '%s' but column missing from universe.",
+            group_key,
+        )
+        return None
+    if SYMBOL_COL not in ref.columns:
+        logging.warning(
+            "Batch grouping requested but universe missing '%s'.", SYMBOL_COL
+        )
+        return None
+    return dict(zip(ref[SYMBOL_COL].to_list(), ref[group_key].to_list()))
     try:
         return pd.Timestamp(value).date().isoformat()
     except Exception:
@@ -154,6 +199,7 @@ def shred_data_task(
     get_universe,
     time_bucket_anchor,
     time_bucket_closed,
+    group_map,
 ):
     """
     Worker function to run S3 shredding in a separate process.
@@ -178,6 +224,7 @@ def shred_data_task(
                 config.MAX_ROWS_PER_TABLE,
             ),
             temp_dir=temp_dir,
+            group_map=group_map,
             storage_options=config.S3_STORAGE_OPTIONS,
             date=current_date,
             get_universe=get_universe,
@@ -274,17 +321,33 @@ class ProcessInterval(Process):
             logging.warning(f"No data found for {current_date}")
             return
 
-        # 2. Batching from LazyFrames
-        batcher = SymbolBatcherStreaming(lf_dict, self.config.MAX_ROWS_PER_TABLE)
+        group_map = _resolve_batch_group_map(self.pass_config, ref)
 
         tasks = []
-        for i, batch_data in enumerate(batcher.stream_batches()):
-            for table_name, df in batch_data.items():
-                out_path = os.path.join(
-                    self.config.TEMP_DIR, f"batch-{table_name}-{i}.parquet"
-                )
-                df.write_parquet(out_path)
-            tasks.append(i)
+        if group_map:
+            symbols = sorted(ref[SYMBOL_COL].unique().to_list())
+            strategy = PolarsScanBatchingStrategy(lf_dict, self.config.MAX_ROWS_PER_TABLE)
+            batches = strategy.create_batches(symbols, group_map=group_map)
+            mode = os.environ.get("INTRADAY_GROUPED_BATCHING_MODE", "buffered").lower()
+            buffer_rows = 0 if mode == "preshard" else DEFAULT_GROUPED_BUFFER_ROWS
+            shard_lazyframes_to_batches(
+                lf_dict=lf_dict,
+                batches=batches,
+                temp_dir=self.config.TEMP_DIR,
+                buffer_rows=buffer_rows,
+            )
+            tasks = list(range(len(batches)))
+        else:
+            # 2. Batching from LazyFrames
+            batcher = SymbolBatcherStreaming(lf_dict, self.config.MAX_ROWS_PER_TABLE)
+
+            for i, batch_data in enumerate(batcher.stream_batches()):
+                for table_name, df in batch_data.items():
+                    out_path = os.path.join(
+                        self.config.TEMP_DIR, f"batch-{table_name}-{i}.parquet"
+                    )
+                    df.write_parquet(out_path)
+                tasks.append(i)
 
         # 3. Process batches in parallel
         n_jobs = self.config.NUM_WORKERS
@@ -318,6 +381,7 @@ class ProcessInterval(Process):
         with ProcessPoolExecutor(
             max_workers=1, mp_context=get_context("spawn")
         ) as executor:
+            group_map = _resolve_batch_group_map(self.pass_config, ref)
             future = executor.submit(
                 shred_data_task,
                 s3_file_lists,
@@ -330,6 +394,7 @@ class ProcessInterval(Process):
                 self.get_universe,
                 self.pass_config.time_bucket_anchor,
                 self.pass_config.time_bucket_closed,
+                group_map,
             )
             future.result()
 

@@ -106,10 +106,9 @@ def _pipeline_run(*, pipeline: str | None = None, **kwargs):
 
 def _job_run(*, pipeline: str | None = None, **kwargs):
     if _help_requested():
-        print(
-            "Usage: beaf job run --pipeline <path_or_module> [options]\n"
-            "Options are forwarded to the pipeline CLI (e.g. --start_date, --end_date, --batch_freq)."
-        )
+        from fire import helptext
+
+        print(helptext.HelpText(bmll_job_run))
         return None
     if pipeline and "config_file" not in kwargs:
         kwargs["config_file"] = pipeline

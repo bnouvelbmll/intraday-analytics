@@ -64,3 +64,22 @@ def build_module_registry(pass_config, ref) -> Dict[str, Callable[[], BaseAnalyt
             )
 
     return registry
+
+
+def resolve_batch_group_by(module_names: list[str]) -> str | None:
+    discover_analytics()
+    group_keys = set()
+    for name in module_names:
+        entry = _REGISTRY.get(name)
+        if not entry:
+            continue
+        group_key = getattr(entry.cls, "BATCH_GROUP_BY", None)
+        if group_key:
+            group_keys.add(group_key)
+    if not group_keys:
+        return None
+    if len(group_keys) > 1:
+        raise ValueError(
+            f"Multiple batch grouping keys requested: {sorted(group_keys)}"
+        )
+    return next(iter(group_keys))

@@ -18,6 +18,8 @@ from intraday_analytics.utils import (
     filter_existing_s3_files,
 )
 
+DEFAULT_GROUPED_BUFFER_ROWS = 250_000
+
 
 class SymbolBatcherStreaming:
     """
@@ -46,8 +48,6 @@ class SymbolBatcherStreaming:
         )
 
         self.batches = self._define_batches()
-
-    # ----------------------------------------
     def _compute_symbol_counts(self) -> Dict[str, pl.DataFrame]:
         """
         Compute row counts per symbol for each table. This is done once during
@@ -58,7 +58,6 @@ class SymbolBatcherStreaming:
             counts[name] = lf.group_by(SYMBOL_COL).agg(pl.len()).collect()
         return counts
 
-    # ----------------------------------------
     def _define_batches(self) -> List[List[str]]:
         """
         Dynamically group symbols into batches without exceeding max_rows_per_table.
@@ -174,6 +173,29 @@ class SymbolBatcherStreaming:
                 else:
                     batch_data[name] = pl.DataFrame()
             yield batch_data
+
+
+def _build_group_members(
+    symbols: List[str], group_map: Dict[Any, Any]
+) -> tuple[list[Any], dict[Any, list[str]]]:
+    group_to_symbols: dict[Any, list[str]] = {}
+    for sym in symbols:
+        group = group_map.get(sym, sym)
+        group_to_symbols.setdefault(group, []).append(sym)
+    group_ids = sorted(group_to_symbols.keys())
+    return group_ids, group_to_symbols
+
+
+def _expand_group_batches(
+    group_batches: List[List[Any]], group_to_symbols: dict[Any, list[str]]
+) -> List[List[str]]:
+    batches: List[List[str]] = []
+    for group_batch in group_batches:
+        symbols: list[str] = []
+        for group_id in group_batch:
+            symbols.extend(group_to_symbols.get(group_id, []))
+        batches.append(symbols)
+    return batches
 
 
 # --- Batching Strategy Abstraction ---
@@ -403,15 +425,59 @@ class HeuristicBatchingStrategy(BatchingStrategy):
 
         symbol_estimates = self.estimator.get_estimates_for_symbols(symbols)
         table_names = list(self.max_rows_per_table.keys())
+        group_map = kwargs.get("group_map")
 
         if not symbol_estimates:
             logging.warning(
                 "No size estimates found. Falling back to fixed-size batching."
             )
             fixed_size = 100
+            if group_map:
+                group_ids, group_to_symbols = _build_group_members(symbols, group_map)
+                group_batches = [
+                    group_ids[i : i + fixed_size]
+                    for i in range(0, len(group_ids), fixed_size)
+                ]
+                return _expand_group_batches(group_batches, group_to_symbols)
             return [
                 symbols[i : i + fixed_size] for i in range(0, len(symbols), fixed_size)
             ]
+
+        if group_map:
+            group_ids, group_to_symbols = _build_group_members(symbols, group_map)
+            group_estimates: dict[str, dict[Any, int]] = {
+                name: {} for name in table_names
+            }
+            for name in table_names:
+                for sym, rows in symbol_estimates.get(name, {}).items():
+                    group = group_map.get(sym, sym)
+                    group_estimates[name][group] = group_estimates[name].get(group, 0) + (
+                        rows or 0
+                    )
+            batches = []
+            current_batch = []
+            current_rows = {name: 0 for name in table_names}
+            for group in group_ids:
+                exceeds = False
+                for name in table_names:
+                    rows = group_estimates.get(name, {}).get(group, 0)
+                    if current_rows[name] + rows > self.max_rows_per_table[name]:
+                        exceeds = True
+                        break
+                if exceeds and current_batch:
+                    batches.append(current_batch)
+                    current_batch = []
+                    current_rows = {name: 0 for name in table_names}
+                current_batch.append(group)
+                for name in table_names:
+                    rows = group_estimates.get(name, {}).get(group, 0)
+                    current_rows[name] += rows
+            if current_batch:
+                batches.append(current_batch)
+            logging.info(
+                f"Defined {len(batches)} grouped batches using HeuristicBatchingStrategy."
+            )
+            return _expand_group_batches(batches, group_to_symbols)
 
         batches = []
         current_batch = []
@@ -478,6 +544,44 @@ class PolarsScanBatchingStrategy(BatchingStrategy):
         logging.info("Defining batches using PolarsScanBatchingStrategy...")
 
         symbol_counts = self._compute_symbol_counts()
+        group_map = kwargs.get("group_map")
+
+        if group_map:
+            group_ids, group_to_symbols = _build_group_members(symbols, group_map)
+            group_counts: dict[str, dict[Any, int]] = {}
+            for name in self.lf_dict:
+                group_counts[name] = {}
+                counts_df = symbol_counts[name]
+                for row in counts_df.iter_rows(named=True):
+                    sym = row.get(SYMBOL_COL)
+                    rows = row.get("len", 0) or 0
+                    group = group_map.get(sym, sym)
+                    group_counts[name][group] = group_counts[name].get(group, 0) + rows
+
+            batches = []
+            current_batch = []
+            current_rows = {name: 0 for name in self.lf_dict}
+            for group in group_ids:
+                exceeds = False
+                for name in self.lf_dict:
+                    rows = group_counts.get(name, {}).get(group, 0)
+                    if current_rows[name] + rows > self.max_rows_per_table[name]:
+                        exceeds = True
+                        break
+                if exceeds and current_batch:
+                    batches.append(current_batch)
+                    current_batch = []
+                    current_rows = {name: 0 for name in self.lf_dict}
+                current_batch.append(group)
+                for name in self.lf_dict:
+                    rows = group_counts.get(name, {}).get(group, 0)
+                    current_rows[name] += rows
+            if current_batch:
+                batches.append(current_batch)
+            logging.info(
+                f"Defined {len(batches)} grouped batches using PolarsScanBatchingStrategy."
+            )
+            return _expand_group_batches(batches, group_to_symbols)
 
         batches = []
         current_batch = []
@@ -585,6 +689,153 @@ def _process_s3_chunk(
     logging.info(f"Worker {worker_id}: Read {total_rows} rows.")
 
 
+def _build_batch_map_table(batches: List[List[str]]) -> pa.Table:
+    rows = []
+    for b_id, symbols in enumerate(batches):
+        for sym in symbols:
+            rows.append({SYMBOL_COL: sym, "batch_id": b_id})
+    df_map = pl.DataFrame(rows).with_columns(pl.col("batch_id").cast(pl.Int32))
+    assert len(df_map[SYMBOL_COL].unique()) == len(df_map)
+    return df_map.to_arrow()
+
+
+def _finalize_batches_from_shards(
+    *,
+    temp_dir: Path,
+    table_names: list[str],
+    storage_options: Dict[str, Any] | None,
+    batch_count: int,
+) -> int:
+    logging.info(f"Finalizing {batch_count} batches...")
+    total_rows = 0
+    for b_id in range(batch_count):
+        batch_data = {}
+        try:
+            for name in table_names:
+                path = temp_dir / name / f"{b_id}"
+                if path.exists():
+                    parquet_files = glob.glob(str(path / "*.parquet"))
+                    if not parquet_files:
+                        logging.warning(f"{path} has no parquet files...")
+                        batch_data[name] = pl.DataFrame()
+                        continue
+                    lf = pl.scan_parquet(
+                        parquet_files,
+                        storage_options=storage_options or {},
+                    )
+                    sort_col = "TradeTimestamp" if name == "trades" else "EventTimestamp"
+                    batch_data[name] = lf.sort([SYMBOL_COL, sort_col]).collect()
+                else:
+                    logging.warning(f"{path} does not exist...")
+                    batch_data[name] = pl.DataFrame()
+
+            for name, df in batch_data.items():
+                if not df.is_empty():
+                    out_path = temp_dir / f"batch-{name}-{b_id}.parquet"
+                    df.write_parquet(out_path)
+                else:
+                    logging.warning(f"Batch {b_id} for table {name} is empty.")
+
+            batch_rows = sum(len(df) for df in batch_data.values())
+            total_rows += batch_rows
+            logging.info(f"Batch {b_id}: wrote {batch_rows} rows.")
+        finally:
+            for name in table_names:
+                path = temp_dir / name / f"{b_id}"
+                if path.exists():
+                    for g in glob.glob(str(path / "*.parquet")):
+                        os.unlink(g)
+    return total_rows
+
+
+def shard_lazyframes_to_batches(
+    *,
+    lf_dict: Dict[str, pl.LazyFrame],
+    batches: List[List[str]],
+    temp_dir: str,
+    buffer_rows: int = 0,
+    storage_options: Dict[str, Any] | None = None,
+) -> int:
+    temp_path = Path(temp_dir)
+    temp_path.mkdir(parents=True, exist_ok=True)
+    for table_name in lf_dict.keys():
+        table_dir = temp_path / table_name
+        if table_dir.exists():
+            shutil.rmtree(table_dir)
+    for batch_file in temp_path.glob("batch-*.parquet"):
+        try:
+            batch_file.unlink()
+        except OSError:
+            logging.debug("Could not remove %s", batch_file, exc_info=True)
+
+    batch_map_table = _build_batch_map_table(batches)
+    pl_map = pl.from_arrow(batch_map_table)
+
+    for name, lf in lf_dict.items():
+        buffers: dict[int, list[pl.DataFrame]] = {}
+        buffer_counts: dict[int, int] = {}
+        chunk_idx = 0
+        for df_chunk in lf.collect_batches():
+            if df_chunk.is_empty():
+                continue
+            shredded = df_chunk.join(pl_map, on=SYMBOL_COL, how="inner")
+            if shredded.is_empty():
+                continue
+            for b_id, sub in shredded.partition_by("batch_id", as_dict=True).items():
+                if buffer_rows <= 0:
+                    ds.write_dataset(
+                        sub.to_arrow(),
+                        base_dir=f"{temp_path}/{name}",
+                        partitioning=["batch_id"],
+                        format="parquet",
+                        existing_data_behavior="overwrite_or_ignore",
+                        max_rows_per_group=1_000_000,
+                        basename_template=f"f-{chunk_idx}-{{i}}.parquet",
+                    )
+                    chunk_idx += 1
+                    continue
+                buffers.setdefault(b_id, []).append(sub)
+                buffer_counts[b_id] = buffer_counts.get(b_id, 0) + len(sub)
+                if buffer_counts[b_id] >= buffer_rows:
+                    to_write = pl.concat(buffers[b_id])
+                    ds.write_dataset(
+                        to_write.to_arrow(),
+                        base_dir=f"{temp_path}/{name}",
+                        partitioning=["batch_id"],
+                        format="parquet",
+                        existing_data_behavior="overwrite_or_ignore",
+                        max_rows_per_group=1_000_000,
+                        basename_template=f"f-{chunk_idx}-{{i}}.parquet",
+                    )
+                    chunk_idx += 1
+                    buffers[b_id] = []
+                    buffer_counts[b_id] = 0
+
+        for b_id, parts in list(buffers.items()):
+            if not parts:
+                continue
+            to_write = pl.concat(parts)
+            ds.write_dataset(
+                to_write.to_arrow(),
+                base_dir=f"{temp_path}/{name}",
+                partitioning=["batch_id"],
+                format="parquet",
+                existing_data_behavior="overwrite_or_ignore",
+                max_rows_per_group=1_000_000,
+                basename_template=f"f-{chunk_idx}-{{i}}.parquet",
+            )
+            chunk_idx += 1
+            buffers[b_id] = []
+            buffer_counts[b_id] = 0
+
+    return _finalize_batches_from_shards(
+        temp_dir=temp_path,
+        table_names=list(lf_dict.keys()),
+        storage_options=storage_options,
+        batch_count=len(batches),
+    )
+
+
 class S3SymbolBatcher:
     """
     Orchestrates the batch processing of data from S3.
@@ -600,6 +851,7 @@ class S3SymbolBatcher:
         transform_fns: Dict[str, Callable[[pl.LazyFrame], pl.LazyFrame]],
         batching_strategy: BatchingStrategy,
         temp_dir: str,
+        group_map: Dict[Any, Any] | None = None,
         storage_options: Dict[str, str] = None,
         date: str = None,
         get_universe: Callable = None,
@@ -619,7 +871,8 @@ class S3SymbolBatcher:
         logging.info("Computing Batches...")
         universe = self.get_universe(date)
         self.batches = self.batching_strategy.create_batches(
-            sorted(universe[SYMBOL_COL].unique())
+            sorted(universe[SYMBOL_COL].unique()),
+            group_map=group_map,
         )
         logging.info(f"{len(self.batches)} batches created.")
 
@@ -628,15 +881,7 @@ class S3SymbolBatcher:
 
     def _create_batch_map_table(self) -> pa.Table:
         """Creates a PyArrow Table mapping Symbol -> batch_id"""
-        rows = []
-        for b_id, symbols in enumerate(self.batches):
-            for sym in symbols:
-                rows.append({SYMBOL_COL: sym, "batch_id": b_id})
-        df_map = pl.DataFrame(rows).with_columns(pl.col("batch_id").cast(pl.Int32))
-        assert len(df_map[SYMBOL_COL].unique()) == len(
-            df_map
-        )  # assert symbol only once per batch
-        return df_map.to_arrow()
+        return _build_batch_map_table(self.batches)
 
     def process(self, num_workers=-1):
         """
@@ -719,49 +964,12 @@ class S3SymbolBatcher:
         Finalizes the batches by reading the locally shredded data, sorting it,
         and writing the final output for each batch.
         """
-        logging.info(f"Finalizing {len(self.batches)} batches...")
-        total_rows = 0
-        for b_id in range(len(self.batches)):
-            batch_data = {}
-            try:
-                for name in self.s3_file_lists.keys():
-                    # This path contains ONLY the data for this batch, pre-filtered
-                    path = self.temp_dir / name / f"{b_id}"
-                    # transform_fn = self.transform_fns.get(name, lambda x: x)
-
-                    if path.exists():
-                        parquet_files = glob.glob(str(path / "*.parquet"))
-                        if not parquet_files:
-                            logging.warning(f"{path} has no parquet files...")
-                            batch_data[name] = pl.DataFrame()
-                            continue
-
-                        # Read the local parquet shards
-                        lf = pl.scan_parquet(
-                            parquet_files,
-                            storage_options=self.storage_options,
-                        )
-
-                        # Sort - This is now fast because dataset is small & local
-                        sort_col = (
-                            "TradeTimestamp" if name == "trades" else "EventTimestamp"
-                        )
-                        batch_data[name] = lf.sort([SYMBOL_COL, sort_col]).collect()
-                    else:
-                        logging.warning(f"{path} does not exist...")
-                        batch_data[name] = pl.DataFrame()
-
-                # Write final output
-                self._write_output(b_id, batch_data)
-                batch_rows = sum(len(df) for df in batch_data.values())
-                total_rows += batch_rows
-                logging.info(f"Batch {b_id}: wrote {batch_rows} rows.")
-            finally:
-                for name in self.s3_file_lists.keys():
-                    path = self.temp_dir / name / f"{b_id}"
-                    if path.exists():
-                        for g in glob.glob(str(path / "*.parquet")):
-                            os.unlink(g)
+        total_rows = _finalize_batches_from_shards(
+            temp_dir=self.temp_dir,
+            table_names=list(self.s3_file_lists.keys()),
+            storage_options=self.storage_options,
+            batch_count=len(self.batches),
+        )
         self.last_total_rows = total_rows
 
     def _write_output(self, b_id, batch_data):

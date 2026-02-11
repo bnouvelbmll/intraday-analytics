@@ -22,6 +22,34 @@ def _disable_fire_pager() -> None:
         os.environ["PAGER"] = "cat"
 
 
+def _apply_job_prefix(name: str, prefix: str) -> str:
+    if name.startswith(prefix):
+        return name
+    return f"{prefix} {name}"
+
+
+def _default_beaf_job_name(config_file: str | None, name: str | None) -> str:
+    base = Path(config_file).stem if config_file else "job"
+    prefix = f"[beaf][{base}][pipeline]"
+    if name:
+        return _apply_job_prefix(name, prefix)
+    return prefix
+
+
+def _default_beaf_scheduler_name(
+    pipeline: str | None, workspace: str | None, name: str | None
+) -> str:
+    if name:
+        return _apply_job_prefix(name, "[beaf][dagster][scheduler]")
+    if pipeline:
+        base = Path(pipeline).stem
+    elif workspace:
+        base = Path(workspace).stem
+    else:
+        base = "scheduler"
+    return f"[beaf][dagster][scheduler][{base}]"
+
+
 def _get_universe_from_spec(date, spec: str):
     module_name, value = (
         (spec.split("=", 1) + [None])[:2] if "=" in spec else (spec, None)
@@ -243,7 +271,7 @@ def dagster_scheduler_install(
     Install a cron-triggered BMLL job that runs the Dagster daemon periodically.
     """
     job_config = _load_bmll_job_config(pipeline or workspace)
-    scheduler_name = name or "dagster_scheduler"
+    scheduler_name = _default_beaf_scheduler_name(pipeline, workspace, name)
     dow = getattr(job_config, "scheduler_days", "MON-SAT") or "MON-SAT"
     if interval_hours == 24:
         cron = f"0 0 ? * {dow} *"
@@ -291,7 +319,7 @@ def dagster_scheduler_uninstall(
     workspace: Optional[str] = None,
 ):
     job_config = _load_bmll_job_config(pipeline or workspace)
-    scheduler_name = name or "dagster_scheduler"
+    scheduler_name = _default_beaf_scheduler_name(pipeline, workspace, name)
     meta = _load_scheduler_metadata(job_config, scheduler_name) or {}
     job_id = meta.get("job_id")
     try:
@@ -326,7 +354,10 @@ def bmll_job_run(
 ):
     """
     Submit a remote BMLL job that runs the standard CLI (`beaf run`).
+    Requires --config_file (or use `beaf job run --pipeline ...`).
     """
+    if not config_file:
+        raise SystemExit("Provide --config_file (or use beaf job run --pipeline ...).")
     job_config = _load_bmll_job_config(config_file)
     if not job_config.enabled:
         logging.warning("BMLL_JOBS.enabled is False; job will still be submitted.")
@@ -337,9 +368,10 @@ def bmll_job_run(
     allowed = set(inspect.signature(run_cli).parameters.keys())
     cli_args = {k: v for k, v in cli_args.items() if k in allowed}
     script_path = _write_beaf_run_script(job_config, _format_cli_args(cli_args))
+    job_name = _default_beaf_job_name(config_file, name)
     return submit_instance_job(
         script_path,
-        name=name,
+        name=job_name,
         instance_size=instance_size,
         conda_env=conda_env,
         cron=cron,

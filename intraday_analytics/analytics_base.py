@@ -241,6 +241,8 @@ class BaseAnalytics(ABC):
     - grouping and aggregating to a final LazyFrame.
     """
 
+    BATCH_GROUP_BY: str | None = None
+
     def __init__(
         self,
         name: str,

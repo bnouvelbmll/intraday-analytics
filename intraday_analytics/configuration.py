@@ -10,6 +10,7 @@ from .analytics.generic import GenericAnalyticsConfig
 from .analytics.reaggregate import ReaggregateAnalyticsConfig
 from .analytics.iceberg import IcebergAnalyticsConfig
 from .analytics.cbbo import CBBOAnalyticsConfig
+from .analytics.cbbo_preprocess import CBBOPreprocessConfig
 from .analytics.l3_characteristics import L3CharacteristicsConfig
 from .analytics.trade_characteristics import TradeCharacteristicsConfig
 from .analytics.alpha101 import Alpha101AnalyticsConfig
@@ -177,6 +178,9 @@ class PassConfig(BaseModel):
         default_factory=IcebergAnalyticsConfig
     )
     cbbo_analytics: CBBOAnalyticsConfig = Field(default_factory=CBBOAnalyticsConfig)
+    cbbo_preprocess: CBBOPreprocessConfig = Field(
+        default_factory=CBBOPreprocessConfig
+    )
     l3_characteristics_analytics: L3CharacteristicsConfig = Field(
         default_factory=L3CharacteristicsConfig
     )

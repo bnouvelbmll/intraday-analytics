@@ -203,6 +203,7 @@ class CBBOAnalytics(BaseAnalytics):
     """
 
     REQUIRES = ["l2", "cbbo"]
+    BATCH_GROUP_BY = "InstrumentId"
 
     def __init__(self, ref: pl.DataFrame, config: CBBOAnalyticsConfig):
         self.ref = ref
