@@ -77,7 +77,7 @@ def _validate_bmll_cron(expr: str) -> tuple[bool, str]:
     def _num_or_star(value: str, lo: int, hi: int) -> bool:
         if value == "*":
             return True
-        if _match(r"\*/\d+", value):
+        if _match(r"0/\d+", value):
             step = int(value.split("/", 1)[1])
             return step > 0
         if _match(r"\d+", value):

@@ -204,7 +204,6 @@ class L3AnalyticsConfig(BaseModel):
             "Computed in `L3GenericAnalytic`.\n"
             "Use this for broad activity measures on the order book.\n"
             "The number of metrics grows with list sizes.\n"
-            "Reduce lists to control output width.\n"
         },
     )
     advanced_metrics: List[L3AdvancedConfig] = Field(
@@ -218,7 +217,6 @@ class L3AnalyticsConfig(BaseModel):
             "FleetingLiquidityRatio uses `fleeting_threshold_ms`.\n"
             "Computed in `L3AdvancedAnalytic` inside `L3Analytics`.\n"
             "Advanced metrics are more expensive to compute.\n"
-            "Use sparingly for targeted analysis.\n"
             "Check input schemas to ensure required columns exist.\n"
         },
     )

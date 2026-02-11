@@ -192,47 +192,6 @@ def get_universe(date):
 
     return ref
 
-
-def get_pipeline_old(pass_config, context, symbols=None, ref=None, date=None):
-    """
-    Constructs the analytics pipeline for a single pass.
-
-    This function creates an `AnalyticsPipeline` instance and adds the desired
-    analytics modules to it based on the pass configuration.
-
-    Args:
-        pass_config: The configuration for the analytics pass.
-        context: A dictionary for sharing data between passes.
-        symbols: An optional list of symbols to filter the universe by.
-        ref: An optional reference DataFrame.
-        date: The date for which the pipeline is being constructed.
-
-    Returns:
-        An `AnalyticsPipeline` instance.
-    """
-    assert date is not None
-    modules = []
-
-    for module_name in pass_config.modules:
-        if module_name == "dense":
-            cref = ref if ref is not None else get_universe(date)
-            if symbols is not None:
-                cref = cref.filter(pl.col("ListingId").is_in(list(symbols)))
-            modules.append(DenseAnalytics(cref, pass_config.dense_analytics))
-        elif module_name == "l2_last":
-            modules.append(L2AnalyticsLast(pass_config.l2_analytics))
-        elif module_name == "l2_tw":
-            modules.append(L2AnalyticsTW(pass_config.l2_analytics))
-        elif module_name == "trade":
-            modules.append(TradeAnalytics(pass_config.trade_analytics))
-        elif module_name == "l3":
-            modules.append(L3Analytics(pass_config.l3_analytics))
-        elif module_name == "execution":
-            modules.append(ExecutionAnalytics(pass_config.execution_analytics))
-
-    return AnalyticsPipeline(modules, CONFIG, pass_config, context)
-
-
 def get_pipeline(
     pass_config: PassConfig,
     context: dict,
