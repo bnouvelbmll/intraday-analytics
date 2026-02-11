@@ -205,6 +205,13 @@ Example: schedule daemon every 6 hours on a 16GB instance for 1 hour:
 beaf dagster scheduler install --pipeline demo/01_ohlcv_bars.py --interval_hours 6 --instance_size 16 --max_runtime_hours 1
 ```
 
+If a job with the same name already exists, the default behavior is to **fail**.
+Use `--overwrite_existing` to delete the existing job and recreate it:
+
+```bash
+beaf dagster scheduler install --pipeline demo/01_ohlcv_bars.py --interval_hours 6 --overwrite_existing
+```
+
 Start the UI without the daemon:
 
 ```bash
