@@ -5,9 +5,8 @@ from typing import List, Literal, Optional, Union
 import polars as pl
 from pydantic import BaseModel, Field, ConfigDict
 
-from basalt.analytics_base import BaseAnalytics
+from basalt.analytics_base import BaseAnalytics, MarketState
 from basalt.analytics_registry import register_analytics
-from basalt.analytics.common import MarketState
 from basalt.analytics.utils import apply_market_state_filter
 
 

@@ -65,6 +65,20 @@ python3 main.py
 
 The script will process the data for the configured date range and universe, writing the final aggregated output to the S3 location specified by `OUTPUT_TARGET.path_template` in the configuration.
 
+## Testing
+
+Run the test suite:
+
+```bash
+python3 -m pytest
+```
+
+Run scoped coverage for project modules only:
+
+```bash
+coverage run --source=basalt,demo,main -m pytest && coverage report -m
+```
+
 ## Dagster Compatibility
 
 The framework includes a Dagster compatibility layer that models the run as a

@@ -121,11 +121,11 @@ Notes:
 
 ## Materialization Plots
 
-Use `basalt.plotting` to visualize Dagster materializations.
+Use `basalt.dagster.plotting` to visualize Dagster materializations.
 
 ```python
 from dagster import DagsterInstance, AssetKey
-from basalt.plotting import materialization_dashboard
+from basalt.dagster.plotting import materialization_dashboard
 
 instance = DagsterInstance.get()
 asset_keys = [AssetKey(["BMLL", "l2"])]
@@ -141,7 +141,7 @@ This shows:
 
 ```python
 from dagster import DagsterInstance, AssetKey
-from basalt.plotting import materialization_dashboard_interactive
+from basalt.dagster.plotting import materialization_dashboard_interactive
 
 instance = DagsterInstance.get()
 datasets = {

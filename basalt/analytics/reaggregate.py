@@ -5,12 +5,12 @@ from typing import List, Optional
 import polars as pl
 from pydantic import BaseModel, Field, ConfigDict
 
-from basalt.analytics_base import BaseAnalytics
-from basalt.analytics_registry import register_analytics
-from basalt.analytics.hinting import (
+from basalt.analytics_base import (
+    BaseAnalytics,
     apply_overrides,
     default_hint_for_column,
 )
+from basalt.analytics_registry import register_analytics
 
 
 class ReaggregateAnalyticsConfig(BaseModel):

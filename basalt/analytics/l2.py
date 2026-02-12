@@ -4,8 +4,10 @@ from basalt.analytics_base import BaseAnalytics, BaseTWAnalytics
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Union, Literal, Dict, Any
 
-from .common import CombinatorialMetricConfig, Side, AggregationMethod
 from basalt.analytics_base import (
+    CombinatorialMetricConfig,
+    Side,
+    AggregationMethod,
     AnalyticSpec,
     AnalyticContext,
     AnalyticDoc,

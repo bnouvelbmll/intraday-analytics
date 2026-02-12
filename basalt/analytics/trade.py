@@ -3,14 +3,12 @@ from basalt.analytics_base import BaseAnalytics
 from pydantic import BaseModel, Field, model_validator, ConfigDict
 from typing import List, Union, Literal, Optional, Dict, Any
 
-from .common import (
+from .utils import apply_market_state_filter, apply_alias
+from basalt.analytics_base import (
     CombinatorialMetricConfig,
     Side,
     AggregationMethod,
     apply_aggregation,
-)
-from .utils import apply_market_state_filter, apply_alias
-from basalt.analytics_base import (
     AnalyticSpec,
     AnalyticContext,
     AnalyticDoc,

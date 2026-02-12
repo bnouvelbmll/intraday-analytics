@@ -14,8 +14,11 @@ from .analytics.trade import (
 )
 from .analytics.execution import ExecutionAnalytics
 from .preprocessors.iceberg import IcebergAnalytics
-from .analytics.common import METRIC_HINTS, METRIC_DOCS
-from .analytics.hinting import apply_overrides, default_hint_for_column
+from .analytics_base import (
+    ANALYTIC_DOCS,
+    apply_overrides,
+    default_hint_for_column,
+)
 from .dense_analytics import DenseAnalytics
 from .analytics.l2 import (
     L2AnalyticsConfig,
@@ -528,7 +531,7 @@ def _filter_schema_for_pass1(config: AnalyticsConfig | PassConfig, schema: Dict[
 def _apply_docs(module: str, col: str):
     import re
 
-    for doc in METRIC_DOCS:
+    for doc in ANALYTIC_DOCS:
         if doc.get("module") != module:
             continue
         pattern = doc.get("pattern")

@@ -3,8 +3,8 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Union, Literal, Dict, Any, Optional
 
 from basalt.analytics_base import BaseAnalytics
-from basalt.analytics.common import CombinatorialMetricConfig
 from basalt.analytics_base import (
+    CombinatorialMetricConfig,
     AnalyticSpec,
     AnalyticContext,
     AnalyticDoc,
