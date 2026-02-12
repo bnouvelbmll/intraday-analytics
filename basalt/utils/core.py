@@ -8,7 +8,7 @@ import pyarrow.parquet as pq
 from typing import List, Callable
 import logging
 from functools import wraps
-from .tables import DataTable, ALL_TABLES
+from ..tables import DataTable, ALL_TABLES
 
 # small constants
 SYMBOL_COL = "ListingId"
@@ -531,7 +531,7 @@ def cache_universe(cache_dir_path_from_config: str | None):
         @wraps(func)
         def wrapper(date, *args, **kwargs):
             import bmll2  # Moved import inside function
-            from .api_stats import api_call
+            from ..api_stats import api_call
             import tempfile
 
             # Ensure the date is in a consistent format for the filename

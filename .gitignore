@@ -1,1 +1,9 @@
 demo/*.yaml
+build
+dist
+*.egg-info
+archives
+.pytest_cache
+.benchmark
+**/__pycache__
+**/*.pyc 

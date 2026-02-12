@@ -50,6 +50,104 @@ def _coerce_to_iso_date(value):
     return value
 
 
+def _normalized_data_source_path(config) -> list[str]:
+    raw = getattr(config, "DATA_SOURCE_PATH", None) or ["bmll"]
+    out: list[str] = []
+    for entry in raw:
+        source = str(getattr(entry, "value", entry)).strip().lower()
+        if not source:
+            continue
+        if source not in out:
+            out.append(source)
+    return out or ["bmll"]
+
+
+def _load_table_lazy_with_fallback(
+    *,
+    table_name: str,
+    config,
+    pass_config,
+    current_date,
+    ref: pl.DataFrame,
+    nanoseconds: int,
+) -> tuple[pl.LazyFrame | None, str | None]:
+    table = ALL_TABLES.get(table_name)
+    mics = ref["MIC"].unique().to_list()
+    for source in _normalized_data_source_path(config):
+        try:
+            if source == "bmll":
+                files = []
+                try:
+                    files = get_files_for_date_range(
+                        current_date,
+                        current_date,
+                        mics,
+                        table_name,
+                        exclude_weekends=config.EXCLUDE_WEEKENDS,
+                    )
+                except Exception:
+                    files = []
+                if files:
+                    lf = pl.scan_parquet(files)
+                    if table:
+                        transform = table.get_transform_fn(
+                            ref,
+                            nanoseconds,
+                            time_bucket_anchor=pass_config.time_bucket_anchor,
+                            time_bucket_closed=pass_config.time_bucket_closed,
+                        )
+                        lf = transform(lf)
+                    return lf, source
+                if table is None:
+                    continue
+                lf = table.load_from_source(
+                    "bmll",
+                    markets=mics,
+                    start_date=current_date,
+                    end_date=current_date,
+                    ref=ref,
+                    nanoseconds=nanoseconds,
+                    time_bucket_anchor=pass_config.time_bucket_anchor,
+                    time_bucket_closed=pass_config.time_bucket_closed,
+                )
+                return lf.lazy() if isinstance(lf, pl.DataFrame) else lf, source
+
+            if table is None:
+                logging.warning(
+                    "Skipping table '%s' via source '%s': table definition not found.",
+                    table_name,
+                    source,
+                )
+                continue
+            lf = table.load_from_source(
+                source,
+                markets=mics,
+                start_date=current_date,
+                end_date=current_date,
+                ref=ref,
+                nanoseconds=nanoseconds,
+                time_bucket_anchor=pass_config.time_bucket_anchor,
+                time_bucket_closed=pass_config.time_bucket_closed,
+            )
+            return lf, source
+        except NotImplementedError as e:
+            logging.info(
+                "Table '%s' source '%s' not available yet: %s",
+                table_name,
+                source,
+                e,
+            )
+        except Exception as e:
+            logging.warning(
+                "Table '%s' source '%s' failed for %s: %s",
+                table_name,
+                source,
+                current_date,
+                e,
+            )
+    return None, None
+
+
 def _resolve_module_names(pass_config) -> list[str]:
     module_names = list(pass_config.modules)
     if pass_config.trade_analytics.enable_retail_imbalance:
@@ -311,29 +409,22 @@ class ProcessInterval(Process):
 
         # 1. Identify input files and create LazyFrames
         lf_dict = {}
-        mics = ref["MIC"].unique().to_list()
         for table_name in self.config.TABLES_TO_LOAD:
-            files = get_files_for_date_range(
-                current_date, current_date, mics, table_name
+            lf, source = _load_table_lazy_with_fallback(
+                table_name=table_name,
+                config=self.config,
+                pass_config=self.pass_config,
+                current_date=current_date,
+                ref=ref,
+                nanoseconds=nanoseconds,
             )
-            if files:
-                try:
-                    lf = pl.scan_parquet(files)
-                except Exception as e:
-                    logging.warning(
-                        f"Skipping table {table_name} for {current_date.date()} due to "
-                        f"read error: {e}"
-                    )
-                    continue
-                table = ALL_TABLES.get(table_name)
-                if table:
-                    transform = table.get_transform_fn(
-                        ref,
-                        nanoseconds,
-                        time_bucket_anchor=self.pass_config.time_bucket_anchor,
-                        time_bucket_closed=self.pass_config.time_bucket_closed,
-                    )
-                    lf = transform(lf)
+            if lf is not None:
+                logging.info(
+                    "Loaded table '%s' via source '%s' for %s.",
+                    table_name,
+                    source,
+                    current_date.date(),
+                )
                 lf_dict[table_name] = lf
 
         if not lf_dict:
@@ -388,6 +479,13 @@ class ProcessInterval(Process):
 
     def run_shredding(self, pipe, nanoseconds, ref, current_date):
         logging.info("🚚 Starting S3 Shredding (Spawned Process)...")
+        if "bmll" not in _normalized_data_source_path(self.config):
+            logging.warning(
+                "PREPARE_DATA_MODE=s3_shredding requires 'bmll' in DATA_SOURCE_PATH; "
+                "falling back to naive mode for %s.",
+                current_date.date(),
+            )
+            return self.run_naive(pipe, nanoseconds, ref, current_date)
 
         tables_to_load_names = self.config.TABLES_TO_LOAD
         if not tables_to_load_names and self.pass_config.module_inputs:

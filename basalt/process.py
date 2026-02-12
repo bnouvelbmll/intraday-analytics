@@ -13,6 +13,7 @@ from basalt.utils import (
 )
 from basalt.configuration import OutputTarget
 from basalt.quality_checks import run_quality_checks, emit_quality_results
+from basalt.polars_engine import collect_lazy
 
 
 def get_final_output_path(start_date, end_date, config, pass_name, output_target=None):
@@ -197,7 +198,9 @@ def aggregate_and_write_final_output(
             else config.QUALITY_CHECKS
         )
         if quality_config.ENABLED:
-            df_for_checks = df_to_write.collect(streaming=True)
+            df_for_checks = collect_lazy(
+                df_to_write, config=config, streaming=True
+            )
             problems = run_quality_checks(df_for_checks, quality_config)
             emit_quality_results(problems, quality_config)
             df_to_write = df_for_checks.lazy()
@@ -212,12 +215,10 @@ def aggregate_and_write_final_output(
             if output_target.dedupe_on_partition and partition_cols:
                 try:
                     dt = DeltaTable(final_s3_path)
-                    partition_values = (
-                        df_to_write.select(partition_cols)
-                        .unique()
-                        .collect()
-                        .to_dicts()
-                    )
+                    partition_values = collect_lazy(
+                        df_to_write.select(partition_cols).unique(),
+                        config=config,
+                    ).to_dicts()
                     for vals in partition_values:
                         predicate = " AND ".join(
                             [f"{k} = '{_sql_quote(vals[k])}'" for k in partition_cols]
@@ -228,7 +229,7 @@ def aggregate_and_write_final_output(
                     pass
             return write_deltalake(
                 final_s3_path,
-                df_to_write.collect(),
+                collect_lazy(df_to_write, config=config),
                 mode=output_target.delta_mode,
                 storage_options=config.S3_STORAGE_OPTIONS,
                 partition_by=partition_cols or None,
@@ -256,18 +257,16 @@ def aggregate_and_write_final_output(
                 )
             engine = create_engine(output_target.sql_connection)
             try:
-                df = df_to_write.collect(streaming=True)
+                df = collect_lazy(df_to_write, config=config, streaming=True)
                 if (
                     output_target.dedupe_on_partition
                     and partition_cols
                     and output_target.sql_if_exists != "replace"
                 ):
-                    partition_values = (
-                        df_to_write.select(partition_cols)
-                        .unique()
-                        .collect()
-                        .to_dicts()
-                    )
+                    partition_values = collect_lazy(
+                        df_to_write.select(partition_cols).unique(),
+                        config=config,
+                    ).to_dicts()
                     if partition_values:
                         try:
                             with engine.begin() as conn:

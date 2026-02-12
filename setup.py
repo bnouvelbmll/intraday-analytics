@@ -38,6 +38,7 @@ def _build_all_dists() -> None:
         "characteristics",
         "alpha101",
         "talib",
+        "mcp",
         "aws_ec2",
         "kubernetes",
     ]
@@ -63,6 +64,7 @@ subpackage_requirements = {
     "characteristics": [],
     "alpha101": [],
     "talib": ["TA-Lib"],
+    "mcp": ["fastmcp"],
     "aws_ec2": [],
     "kubernetes": [],
 }
@@ -82,6 +84,7 @@ if dist == "core":
             "basalt.analytics.alpha101*",
             "basalt.executors*",
             "basalt.analytics.talib*",
+            "basalt.mcp*",
             "basalt.tests*",
             "basalt.analytics.tests*",
             "basalt.dagster.tests*",
@@ -206,6 +209,24 @@ elif dist == "talib":
         include=(
             "basalt.analytics.talib",
             "basalt.analytics.talib.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "mcp":
+    name = "bmll-basalt-mcp"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "mcp=basalt.mcp:get_basalt_plugin",
+        ],
+        "basalt.cli": [
+            "mcp=basalt.mcp.cli_ext:get_cli_extension",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.mcp",
+            "basalt.mcp.*",
         )
     )
     install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]

@@ -45,6 +45,65 @@ class QualityCheckConfig(BaseModel):
     )
 
 
+class PassExpectationConfig(BaseModel):
+    """
+    Invariants expected from a pass output relative to its main input.
+
+    These checks are optional and run after pass execution. They are useful for
+    regression detection when a pass is expected to preserve structural properties
+    (entity coverage, row count, column continuity, missingness guarantees).
+    """
+
+    preserve_listing_id_count: bool = Field(
+        False,
+        description=(
+            "Require output to keep the same number of distinct ListingId values as "
+            "the reference input."
+        ),
+        json_schema_extra={"section": "Advanced"},
+    )
+    preserve_listing_ids: bool = Field(
+        False,
+        description=(
+            "Require output to keep exactly the same ListingId set as the reference input."
+        ),
+        json_schema_extra={"section": "Advanced"},
+    )
+    preserve_rows: bool = Field(
+        False,
+        description=(
+            "Require output row count to equal the reference input row count."
+        ),
+        json_schema_extra={"section": "Advanced"},
+    )
+    preserve_existing_columns: bool = Field(
+        False,
+        description=(
+            "Require output columns to include all columns present in the reference input."
+        ),
+        json_schema_extra={"section": "Advanced"},
+    )
+    all_non_nans: bool = Field(
+        False,
+        description=(
+            "Require all output values to be non-null and non-NaN, except exempt columns."
+        ),
+        json_schema_extra={"section": "Advanced"},
+    )
+    non_nan_exempt_columns: List[str] = Field(
+        default_factory=lambda: ["ListingId", "TimeBucket"],
+        description=(
+            "Columns excluded from the all_non_nans check (for example keys/index columns)."
+        ),
+        json_schema_extra={"section": "Advanced"},
+    )
+    action: Literal["warn", "raise"] = Field(
+        "raise",
+        description="Action when a pass expectation fails.",
+        json_schema_extra={"section": "Advanced"},
+    )
+
+
 class PrepareDataMode(str, Enum):
     NAIVE = "naive"
     S3_SHREDDING = "s3_shredding"
@@ -58,6 +117,12 @@ class BatchingStrategyType(str, Enum):
 class DenseOutputMode(str, Enum):
     ADAPTATIVE = "adaptative"
     UNIFORM = "uniform"
+
+
+class DataSourceMechanism(str, Enum):
+    BMLL = "bmll"
+    SNOWFLAKE = "snowflake"
+    DATABRICKS = "databricks"
 
 
 class PassTimelineMode(str, Enum):
@@ -277,6 +342,10 @@ class PassConfig(BaseModel):
     quality_checks: QualityCheckConfig = Field(
         default_factory=QualityCheckConfig,
         description="Postprocessing quality-check rules for this pass output.",
+    )
+    pass_expectations: PassExpectationConfig = Field(
+        default_factory=PassExpectationConfig,
+        description="Optional structural invariants expected from this pass output.",
     )
 
     @model_validator(mode="before")
@@ -614,6 +683,14 @@ class AnalyticsConfig(BaseModel):
         description="How input data is prepared (naive or s3_shredding).",
         json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
     )
+    DATA_SOURCE_PATH: List[DataSourceMechanism] = Field(
+        default_factory=lambda: [DataSourceMechanism.BMLL],
+        description=(
+            "Ordered data-source fallback path for table loading "
+            "(bmll, snowflake, databricks)."
+        ),
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
     DEFAULT_FFILL: bool = Field(
         False,
         description="Forward-fill missing values when needed.",
@@ -660,6 +737,14 @@ class AnalyticsConfig(BaseModel):
     ENABLE_POLARS_PROFILING: bool = Field(
         False,
         description="Enable Polars profiling.",
+        json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
+    )
+    POLARS_GPU_ENABLED: Optional[bool] = Field(
+        None,
+        description=(
+            "Enable Polars GPU engine for LazyFrame collect. "
+            "True=force GPU, False=force CPU, None=auto-detect NVIDIA host."
+        ),
         json_schema_extra={"section": "PerformanceAndExecutionEnvironment"},
     )
 

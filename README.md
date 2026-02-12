@@ -18,6 +18,7 @@ long date ranges via batching, shredding, and process isolation.
 
 - `basalt/`: core framework package and CLI.
 - `basalt/dagster/`: Dagster integration and Dagster-specific plotting helpers.
+- `basalt/mcp/`: MCP server and shared run-configuration/monitoring APIs.
 - `basalt/analytics/`: analytics implementations (trade, l2, l3, execution, etc).
 - `basalt/preprocessors/`: preprocessors (iceberg, cbbo preprocess, aggressive trades).
 - `demo/`: runnable pipeline examples.
@@ -113,6 +114,33 @@ Reuse existing `.coverage` data (no test rerun):
 python3 scripts/coverage_by_package.py --skip-tests
 ```
 
+Benchmark run performance (single executor per run):
+
+```bash
+python3 scripts/performance_benchmark.py \
+  --pipeline demo/01_ohlcv_bars.py \
+  --executors bmll \
+  --instance-sizes 16,32,64 \
+  --repeats 2 \
+  --output-dir benchmark_results
+```
+
+Executors: `direct`, `dagster`, `bmll`, `ec2`, `kubernetes`.
+This writes per-run logs (`jsonl`, `csv`) and an aggregated summary (`csv`) with
+duration percentiles and success rates.
+
+Visualize latest benchmark summary:
+
+```bash
+python3 scripts/visualize_benchmark_results.py --results-dir benchmark_results
+```
+
+Validate DB<->Pascal name conversion against an external schema catalog:
+
+```bash
+python3 scripts/validate_schema_name_mapping.py --schema-dir /path/to/schema-catalog
+```
+
 ## Packaging
 
 The default build (`BASALT_DIST=core`) produces `bmll-basalt`.
@@ -125,9 +153,16 @@ Build commands (`bdist_wheel`, `bdist`, `sdist`) automatically rotate through:
 - `characteristics` -> `bmll-basalt-characteristics`
 - `alpha101` -> `bmll-basalt-alpha101`
 - `talib` -> `bmll-basalt-talib`
+- `mcp` -> `bmll-basalt-mcp`
 
 These non-core packages are standalone subpackage wheels that depend on
 `bmll-basalt`.
+
+MCP package:
+
+- Install `bmll-basalt-mcp` to enable `basalt mcp ...` CLI commands and MCP server tools.
+- Start server (stdio transport by default): `basalt mcp serve`.
+- The same capabilities are available via CLI: `configure`, `run`, `recent_runs`, `success_rate`, `materialized_partitions`.
 
 TA-Lib support is modular:
 

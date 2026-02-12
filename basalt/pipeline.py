@@ -6,6 +6,7 @@ import logging
 from .configuration import PassConfig
 from .utils import dc, ffill_with_shifts, assert_unique_lazy
 from .utils import SYMBOL_COL
+from .polars_engine import collect_lazy
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,131 @@ def _resolve_module_inputs(pass_config: PassConfig, module: BaseAnalytics) -> di
     raise ValueError(
         f"module_inputs for '{module_key}' must be a string or mapping."
     )
+
+
+def _to_df(value: Any, config) -> pl.DataFrame | None:
+    if value is None:
+        return None
+    if isinstance(value, pl.DataFrame):
+        return value
+    if isinstance(value, pl.LazyFrame):
+        return collect_lazy(value, config=config)
+    if hasattr(value, "lazy"):
+        try:
+            return value.lazy().collect()
+        except Exception:
+            return None
+    return None
+
+
+def _reference_input_df(
+    pass_config: PassConfig,
+    modules: list[BaseAnalytics],
+    tables_for_sym: dict[str, Any],
+    context: dict[str, Any],
+    config,
+) -> pl.DataFrame | None:
+    for module in modules:
+        module_inputs = _resolve_module_inputs(pass_config, module)
+        for req in list(getattr(module, "REQUIRES", []) or []):
+            source = module_inputs.get(req, req)
+            if source in tables_for_sym:
+                ref = _to_df(tables_for_sym[source], config)
+                if ref is not None:
+                    return ref
+            if source in context:
+                ref = _to_df(context[source], config)
+                if ref is not None:
+                    return ref
+    for value in tables_for_sym.values():
+        ref = _to_df(value, config)
+        if ref is not None:
+            return ref
+    return None
+
+
+def _validate_pass_expectations(
+    pass_config: PassConfig,
+    output_df: pl.DataFrame,
+    reference_df: pl.DataFrame | None,
+) -> None:
+    exp = pass_config.pass_expectations
+    checks_enabled = any(
+        [
+            exp.preserve_listing_id_count,
+            exp.preserve_listing_ids,
+            exp.preserve_rows,
+            exp.preserve_existing_columns,
+            exp.all_non_nans,
+        ]
+    )
+    if not checks_enabled:
+        return
+
+    failures: list[str] = []
+    if reference_df is None:
+        failures.append("no reference input available for expectation checks")
+    else:
+        if exp.preserve_rows and output_df.height != reference_df.height:
+            failures.append(
+                f"preserve_rows failed: output={output_df.height} reference={reference_df.height}"
+            )
+        if exp.preserve_existing_columns:
+            missing = sorted(set(reference_df.columns) - set(output_df.columns))
+            if missing:
+                failures.append(
+                    f"preserve_existing_columns failed: missing={missing}"
+                )
+        if exp.preserve_listing_id_count:
+            if "ListingId" not in output_df.columns or "ListingId" not in reference_df.columns:
+                failures.append(
+                    "preserve_listing_id_count failed: ListingId missing in output or reference"
+                )
+            else:
+                out_n = output_df.select(pl.col("ListingId").n_unique()).item()
+                ref_n = reference_df.select(pl.col("ListingId").n_unique()).item()
+                if out_n != ref_n:
+                    failures.append(
+                        f"preserve_listing_id_count failed: output={out_n} reference={ref_n}"
+                    )
+        if exp.preserve_listing_ids:
+            if "ListingId" not in output_df.columns or "ListingId" not in reference_df.columns:
+                failures.append(
+                    "preserve_listing_ids failed: ListingId missing in output or reference"
+                )
+            else:
+                out_ids = set(output_df.get_column("ListingId").to_list())
+                ref_ids = set(reference_df.get_column("ListingId").to_list())
+                if out_ids != ref_ids:
+                    failures.append(
+                        f"preserve_listing_ids failed: only_in_output={sorted(out_ids - ref_ids)[:5]} "
+                        f"only_in_reference={sorted(ref_ids - out_ids)[:5]}"
+                    )
+
+    if exp.all_non_nans:
+        exempt = set(exp.non_nan_exempt_columns or [])
+        for col in output_df.columns:
+            if col in exempt:
+                continue
+            series = output_df.get_column(col)
+            nulls = series.null_count()
+            nans = 0
+            if series.dtype in (pl.Float32, pl.Float64):
+                nans = output_df.select(pl.col(col).is_nan().sum()).item()
+            if nulls or nans:
+                failures.append(
+                    f"all_non_nans failed: {col} has nulls={nulls}, nans={nans}"
+                )
+
+    if not failures:
+        return
+
+    message = (
+        f"Pass expectations failed for pass '{pass_config.name}': " + "; ".join(failures)
+    )
+    if exp.action == "raise":
+        raise AssertionError(message)
+    logger.warning(message)
 
 
 class AnalyticsPipeline:
@@ -117,7 +243,7 @@ class AnalyticsPipeline:
             lf_result = module.compute()
 
             if self.config.EAGER_EXECUTION:
-                module.df = lf_result.collect().lazy()
+                module.df = collect_lazy(lf_result, config=self.config).lazy()
                 lf_result = module.df
 
             # Assert uniqueness of the result
@@ -126,7 +252,7 @@ class AnalyticsPipeline:
             )
 
             if self.config.EAGER_EXECUTION:
-                lf_result = lf_result.collect().lazy()
+                lf_result = collect_lazy(lf_result, config=self.config).lazy()
 
             # Join the result with the base DataFrame
             if base is None:
@@ -145,11 +271,20 @@ class AnalyticsPipeline:
                     use_asof=use_asof,
                 )
                 if self.config.EAGER_EXECUTION:
-                    base = base.collect().lazy()
+                    base = collect_lazy(base, config=self.config).lazy()
                 prev_specific_cols.update(module.specific_fill_cols)
 
         # Store the result in the context for subsequent passes
-        self.context[self.pass_config.name] = base.collect()
+        output_df = collect_lazy(base, config=self.config)
+        reference_df = _reference_input_df(
+            self.pass_config,
+            self.modules,
+            tables_for_sym,
+            self.context,
+            self.config,
+        )
+        _validate_pass_expectations(self.pass_config, output_df, reference_df)
+        self.context[self.pass_config.name] = output_df
         return self.context[self.pass_config.name]
 
     def save(self, df: pl.DataFrame | pl.LazyFrame, path: str, profile: bool = False):
@@ -216,7 +351,9 @@ class AnalyticsRunner:
                 if SYMBOL_COL not in cols:
                     continue
                 if isinstance(df, pl.LazyFrame):
-                    sym_vals = df.select(SYMBOL_COL).collect()[SYMBOL_COL].to_list()
+                    sym_vals = collect_lazy(
+                        df.select(SYMBOL_COL), config=self.config
+                    )[SYMBOL_COL].to_list()
                 else:
                     sym_vals = df[SYMBOL_COL].to_list()
                 symbols.update(sym_vals)

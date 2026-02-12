@@ -13,6 +13,13 @@ from .cli import run_cli
 from .bmll_jobs import bmll_job
 from .pipeline import create_pipeline
 from .utils import cache_universe
+from .connections import (
+    snowflake_connect_kwargs,
+    snowflake_connection,
+    databricks_connect_kwargs,
+    databricks_connection,
+    s3_connection_options,
+)
 
 __all__ = [
     "SUITE_NAME",
@@ -28,4 +35,9 @@ __all__ = [
     "bmll_job",
     "create_pipeline",
     "cache_universe",
+    "snowflake_connect_kwargs",
+    "snowflake_connection",
+    "databricks_connect_kwargs",
+    "databricks_connection",
+    "s3_connection_options",
 ]
