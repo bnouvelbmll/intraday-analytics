@@ -24,8 +24,17 @@ def get_final_output_path(start_date, end_date, config, pass_name, output_target
 
     dataset_name = config.DATASETNAME
     area = getattr(output_target, "area", None) or "user"
-    output_bucket = bmll2.storage_paths()[area]["bucket"]
-    output_prefix = bmll2.storage_paths()[area]["prefix"]
+    output_bucket = ""
+    output_prefix = ""
+    storage_paths = getattr(bmll2, "storage_paths", None)
+    if callable(storage_paths):
+        try:
+            paths = storage_paths()
+            output_bucket = paths[area]["bucket"]
+            output_prefix = paths[area]["prefix"]
+        except Exception:
+            output_bucket = ""
+            output_prefix = ""
 
     # Append pass_name to the datasetname to distinguish pass outputs
     final_dataset_name = f"{dataset_name}_{pass_name}"

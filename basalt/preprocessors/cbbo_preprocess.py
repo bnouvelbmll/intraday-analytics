@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Literal, Optional, Union
 
 import polars as pl
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from basalt.analytics_base import BaseAnalytics
 from basalt.analytics_registry import register_analytics
@@ -12,6 +12,18 @@ from basalt.analytics.utils import apply_market_state_filter
 
 
 class CBBOPreprocessConfig(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "cbbo_preprocess",
+                "tier": "pre",
+                "desc": "Pre: combine L2 across listings into a composite book.",
+                "outputs": ["CBBO"],
+                "schema_keys": ["cbbo_preprocess"],
+            }
+        }
+    )
+
     ENABLED: bool = True
     index_by: Literal["InstrumentId", "PrimaryListingId"] = Field(
         "InstrumentId",

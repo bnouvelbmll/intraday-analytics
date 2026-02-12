@@ -438,10 +438,10 @@ defs = Definitions(assets=[demo06_characteristics])
 ## Setup Script
 
 Two helper scripts are available:
-- `basalt/dagster/demo/setup_dagster_demo.sh` (legacy, quick start)
+- `basalt/dagster/demo/setup_dagster_demo.py` (quick start)
 - `basalt/dagster/demo/setup_dagster_demo.py` (configurable demo selector + schedules)
 
-The shell script `basalt/dagster/demo/setup_dagster_demo.sh`:
+The quick-start script `basalt/dagster/demo/setup_dagster_demo.py`:
 - sets `DAGSTER_HOME=/home/bmll/user/my-dagster`
 - builds universe partitions from `bmll.reference.available_markets()` (Equity + IsAlive)
 - builds date partitions from `2015-01-01` to yesterday
@@ -449,7 +449,7 @@ The shell script `basalt/dagster/demo/setup_dagster_demo.sh`:
 
 Example:
 ```bash
-BATCH_FREQ=W ./basalt/dagster/demo/setup_dagster_demo.sh
+BATCH_FREQ=W python basalt/dagster/demo/setup_dagster_demo.py
 ```
 
 The Python script supports demo selection, schedules, and BMLL tags:

@@ -78,7 +78,7 @@ See `basalt/dagster/docs/dagster.md` for a full walkthrough, including:
 - `on_result` callback for artifact handling
 
 There is also a self-contained setup script:
-`basalt/dagster/demo/setup_dagster_demo.sh`
+`basalt/dagster/demo/setup_dagster_demo.py`
 
 ## Extending the Pipeline
 
