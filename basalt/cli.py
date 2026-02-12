@@ -14,7 +14,7 @@ import yaml
 
 from basalt.configuration import AnalyticsConfig, BMLLJobConfig
 from basalt.bmll_jobs import submit_instance_job
-from basalt.execution import run_multiday_pipeline
+from basalt.orchestrator import run_multiday_pipeline
 
 
 def _disable_fire_pager() -> None:

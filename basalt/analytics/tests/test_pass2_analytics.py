@@ -8,7 +8,7 @@ import pickle
 from unittest.mock import MagicMock, patch
 
 from basalt.configuration import AnalyticsConfig, PassConfig
-from basalt.execution import run_metrics_pipeline, ProcessInterval
+from basalt.orchestrator import run_metrics_pipeline, ProcessInterval
 from basalt.pipeline import AnalyticsPipeline
 from basalt.analytics.trade import TradeAnalytics, TradeGenericConfig
 from basalt.analytics.generic import GenericAnalytics, TalibIndicatorConfig
@@ -152,17 +152,17 @@ class TestPass2Analytics(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
         shutil.rmtree(self.source_dir)
 
-    @patch("basalt.execution.get_final_s3_path")
+    @patch("basalt.orchestrator.get_final_s3_path")
     @patch("basalt.process.get_final_s3_path")
     @patch(
-        "basalt.execution.ProcessInterval", side_effect=SyncProcessInterval
+        "basalt.orchestrator.ProcessInterval", side_effect=SyncProcessInterval
     )
-    @patch("basalt.execution.get_files_for_date_range")
+    @patch("basalt.orchestrator.get_files_for_date_range")
     @patch(
-        "basalt.execution.as_completed", side_effect=lambda futures: futures
+        "basalt.orchestrator.as_completed", side_effect=lambda futures: futures
     )
     @patch("bmll.time_series.query")
-    @patch("basalt.execution.ProcessPoolExecutor")
+    @patch("basalt.orchestrator.ProcessPoolExecutor")
     def test_pass2_aggregation_by_instrument(
         self,
         mock_process_pool_executor,
@@ -256,17 +256,17 @@ class TestPass2Analytics(unittest.TestCase):
         # Volume should be 200 (100 from A + 100 from B)
         self.assertEqual(df["TradeTotalVolume"][0], 200)
 
-    @patch("basalt.execution.get_final_s3_path")
+    @patch("basalt.orchestrator.get_final_s3_path")
     @patch("basalt.process.get_final_s3_path")
     @patch(
-        "basalt.execution.ProcessInterval", side_effect=SyncProcessInterval
+        "basalt.orchestrator.ProcessInterval", side_effect=SyncProcessInterval
     )
-    @patch("basalt.execution.get_files_for_date_range")
+    @patch("basalt.orchestrator.get_files_for_date_range")
     @patch(
-        "basalt.execution.as_completed", side_effect=lambda futures: futures
+        "basalt.orchestrator.as_completed", side_effect=lambda futures: futures
     )
     @patch("bmll.time_series.query")
-    @patch("basalt.execution.ProcessPoolExecutor")
+    @patch("basalt.orchestrator.ProcessPoolExecutor")
     def test_pass2_resampling(
         self,
         mock_process_pool_executor,
@@ -353,17 +353,17 @@ class TestPass2Analytics(unittest.TestCase):
         # Volume should be 300 (100 * 3 minutes)
         self.assertEqual(df["TradeTotalVolume"][0], 300)
 
-    @patch("basalt.execution.get_final_s3_path")
+    @patch("basalt.orchestrator.get_final_s3_path")
     @patch("basalt.process.get_final_s3_path")
     @patch(
-        "basalt.execution.ProcessInterval", side_effect=SyncProcessInterval
+        "basalt.orchestrator.ProcessInterval", side_effect=SyncProcessInterval
     )
-    @patch("basalt.execution.get_files_for_date_range")
+    @patch("basalt.orchestrator.get_files_for_date_range")
     @patch(
-        "basalt.execution.as_completed", side_effect=lambda futures: futures
+        "basalt.orchestrator.as_completed", side_effect=lambda futures: futures
     )
     @patch("bmll.time_series.query")
-    @patch("basalt.execution.ProcessPoolExecutor")
+    @patch("basalt.orchestrator.ProcessPoolExecutor")
     def test_pass2_talib(
         self,
         mock_process_pool_executor,

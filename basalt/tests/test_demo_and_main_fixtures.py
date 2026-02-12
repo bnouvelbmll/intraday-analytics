@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import polars as pl
 
-from basalt.execution import run_metrics_pipeline, ProcessInterval
+from basalt.orchestrator import run_metrics_pipeline, ProcessInterval
 from basalt.configuration import AnalyticsConfig, PassConfig
 
 
@@ -61,12 +61,12 @@ def _run_with_fixtures(config: AnalyticsConfig, get_pipeline=None):
         config.TEMP_DIR, "final_{pass}_{start_date}_{end_date}.parquet"
     )
     with patch(
-        "basalt.execution.ProcessInterval", SyncProcessInterval
+        "basalt.orchestrator.ProcessInterval", SyncProcessInterval
     ), patch(
-        "basalt.execution.get_files_for_date_range",
+        "basalt.orchestrator.get_files_for_date_range",
         side_effect=fixture_files,
     ), patch(
-        "basalt.execution.get_final_s3_path",
+        "basalt.orchestrator.get_final_s3_path",
         side_effect=lambda sd, ed, cfg, pass_name: os.path.join(
             cfg.TEMP_DIR, f"final_{pass_name}_{sd.date()}_{ed.date()}.parquet"
         ),

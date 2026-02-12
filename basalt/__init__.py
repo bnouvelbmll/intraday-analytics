@@ -8,7 +8,7 @@ SUITE_FULL_NAME = f"{SUITE_NAME}: {SUITE_EXPANSION}"
 
 from .configuration import AnalyticsConfig, PassConfig
 from .analytics_base import BaseAnalytics, BaseTWAnalytics
-from .execution import run_metrics_pipeline, run_multiday_pipeline
+from .orchestrator import run_metrics_pipeline, run_multiday_pipeline
 from .cli import run_cli
 from .bmll_jobs import bmll_job
 from .pipeline import create_pipeline

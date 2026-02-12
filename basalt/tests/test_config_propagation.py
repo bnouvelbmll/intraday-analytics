@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 from unittest.mock import MagicMock, patch, ANY
-from basalt.execution import ProcessInterval
+from basalt.orchestrator import ProcessInterval
 from basalt.configuration import (
     AnalyticsConfig,
     PassConfig,
@@ -70,16 +70,16 @@ class TestConfigPropagation(unittest.TestCase):
         mock_table = MagicMock(timestamp_col="ts")
         mock_table.name = self.custom_table_name
 
-        with patch("basalt.execution.preload") as mock_preload, patch(
-            "basalt.execution.SymbolBatcherStreaming"
+        with patch("basalt.orchestrator.preload") as mock_preload, patch(
+            "basalt.orchestrator.SymbolBatcherStreaming"
         ) as mock_sbs, patch(
-            "basalt.execution.glob.glob"
+            "basalt.orchestrator.glob.glob"
         ) as mock_glob, patch(
-            "basalt.execution.process_batch_task"
+            "basalt.orchestrator.process_batch_task"
         ) as mock_process_batch_task, patch(
-            "basalt.execution.aggregate_and_write_final_output"
+            "basalt.orchestrator.aggregate_and_write_final_output"
         ), patch(
-            "basalt.execution.ALL_TABLES",
+            "basalt.orchestrator.ALL_TABLES",
             {self.custom_table_name: mock_table},
         ), patch(
             "basalt.utils.ALL_TABLES",

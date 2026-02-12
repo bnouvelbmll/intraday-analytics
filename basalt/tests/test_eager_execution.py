@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 from unittest.mock import MagicMock, patch
-from basalt.execution import run_metrics_pipeline, ProcessInterval
+from basalt.orchestrator import run_metrics_pipeline, ProcessInterval
 from basalt.configuration import (
     AnalyticsConfig,
     PassConfig,
@@ -124,15 +124,15 @@ class TestEagerExecution(unittest.TestCase):
         )
 
         with patch(
-            "basalt.execution.ProcessInterval",
+            "basalt.orchestrator.ProcessInterval",
             side_effect=SyncProcessInterval,
         ), patch(
-            "basalt.execution.get_files_for_date_range"
+            "basalt.orchestrator.get_files_for_date_range"
         ) as mock_get_files, patch(
-            "basalt.execution.as_completed",
+            "basalt.orchestrator.as_completed",
             side_effect=lambda futures: futures,
         ), patch(
-            "basalt.execution.ProcessPoolExecutor"
+            "basalt.orchestrator.ProcessPoolExecutor"
         ) as mock_process_pool_executor:
             mock_get_files.return_value = [self.trades_file]
 

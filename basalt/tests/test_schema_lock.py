@@ -3,7 +3,7 @@ import json
 import pytest
 
 from basalt.configuration import AnalyticsConfig, PassConfig
-from basalt.execution import _check_schema_lock
+from basalt.orchestrator import _check_schema_lock
 
 
 def _make_config(tmp_path, mode: str, locked: dict | None = None) -> AnalyticsConfig:

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pandas as pd
 
-from basalt.execution import run_metrics_pipeline, ProcessInterval
+from basalt.orchestrator import run_metrics_pipeline, ProcessInterval
 from basalt.configuration import (
     AnalyticsConfig,
     PassConfig,
@@ -115,15 +115,15 @@ class TestOutputTargets(unittest.TestCase):
             return mock_future
 
         with patch(
-            "basalt.execution.ProcessInterval",
+            "basalt.orchestrator.ProcessInterval",
             side_effect=SyncProcessInterval,
         ), patch(
-            "basalt.execution.as_completed",
+            "basalt.orchestrator.as_completed",
             side_effect=lambda futures: futures,
         ), patch(
-            "basalt.execution.get_files_for_date_range"
+            "basalt.orchestrator.get_files_for_date_range"
         ) as mock_get_files, patch(
-            "basalt.execution.ProcessPoolExecutor"
+            "basalt.orchestrator.ProcessPoolExecutor"
         ) as mock_pool:
             mock_get_files.side_effect = mock_files
             mock_pool.return_value.__enter__.return_value.submit.side_effect = (

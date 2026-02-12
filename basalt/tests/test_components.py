@@ -10,7 +10,7 @@ import os
 
 from basalt.utils import create_date_batches, ffill_with_shifts
 from basalt.configuration import PassConfig
-from basalt.execution import _derive_tables_to_load
+from basalt.orchestrator import _derive_tables_to_load
 from basalt.batching import (
     HeuristicBatchingStrategy,
     SymbolSizeEstimator,

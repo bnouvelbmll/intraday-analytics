@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 from unittest.mock import MagicMock, patch
-from basalt.execution import run_metrics_pipeline, ProcessInterval
+from basalt.orchestrator import run_metrics_pipeline, ProcessInterval
 from basalt.configuration import (
     AnalyticsConfig,
     PassConfig,
@@ -120,13 +120,13 @@ class TestEndToEnd(unittest.TestCase):
         shutil.rmtree(self.source_dir)
 
     @patch(
-        "basalt.execution.ProcessInterval", side_effect=SyncProcessInterval
+        "basalt.orchestrator.ProcessInterval", side_effect=SyncProcessInterval
     )
     @patch(
-        "basalt.execution.as_completed", side_effect=lambda futures: futures
+        "basalt.orchestrator.as_completed", side_effect=lambda futures: futures
     )
-    @patch("basalt.execution.get_files_for_date_range")
-    @patch("basalt.execution.ProcessPoolExecutor")
+    @patch("basalt.orchestrator.get_files_for_date_range")
+    @patch("basalt.orchestrator.ProcessPoolExecutor")
     def test_run_pipeline(
         self,
         mock_process_pool_executor,

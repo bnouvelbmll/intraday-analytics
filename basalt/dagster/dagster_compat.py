@@ -14,7 +14,7 @@ from basalt.tables import ALL_TABLES
 from basalt.utils import filter_existing_s3_files
 
 from basalt.configuration import AnalyticsConfig, SchedulePartitionSelector
-from basalt.execution import run_multiday_pipeline
+from basalt.orchestrator import run_multiday_pipeline
 from basalt.cli import _load_universe_override, resolve_user_config
 
 
