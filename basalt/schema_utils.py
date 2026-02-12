@@ -34,7 +34,7 @@ from .analytics.execution import (
 )
 from .preprocessors.iceberg import IcebergAnalyticsConfig, IcebergMetricConfig
 from .analytics.cbbo import CBBOAnalytics, CBBOAnalyticsConfig
-from .analytics.alpha101 import Alpha101Analytics, Alpha101AnalyticsConfig
+from .alpha101.alpha101 import Alpha101Analytics, Alpha101AnalyticsConfig
 from .analytics.events import EventAnalyticsConfig
 from .analytics.correlation import CorrelationAnalyticsConfig
 import pandas as pd

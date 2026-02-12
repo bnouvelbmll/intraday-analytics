@@ -13,7 +13,7 @@ from .analytics.cbbo import CBBOAnalyticsConfig
 from .preprocessors.cbbo_preprocess import CBBOPreprocessConfig
 from .characteristics.l3_characteristics import L3CharacteristicsConfig
 from .characteristics.trade_characteristics import TradeCharacteristicsConfig
-from .analytics.alpha101 import Alpha101AnalyticsConfig
+from .alpha101.alpha101 import Alpha101AnalyticsConfig
 from .analytics.events import EventAnalyticsConfig
 from .analytics.correlation import CorrelationAnalyticsConfig
 
