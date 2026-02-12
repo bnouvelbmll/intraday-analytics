@@ -1,112 +1,119 @@
-# Basalt Pipeline
+# Basalt
 
-## Project Description
-This project implements a robust and extensible basalt analytics pipeline designed to process high-frequency financial data. It allows for the computation of various metrics on a configurable universe of symbols and date ranges, with a focus on modularity, performance, and ease of extension.
+Basalt is a modular, multi-pass analytics framework for high-frequency market
+data (Trades, L2, L3, MarketState). It is optimized for large universes and
+long date ranges via batching, shredding, and process isolation.
 
-The pipeline is designed to handle large volumes of data by shredding S3 data into smaller, symbol-based batches and processing them in parallel across multiple processes. This approach ensures efficient memory usage and scalable performance.
+## What It Does
 
-## Features
--   **Modular Architecture**: Easily define and integrate new input data tables and analytics modules without modifying core pipeline logic.
--   **Configurable Date Batching**: Process data in intelligently aligned date batches (e.g., weekly, monthly) to optimize resource usage.
--   **Performant by Default**: Uses modern, high-performance libraries like Polars and leverages process-based parallelism to scale across multiple CPU cores.
--   **Memory Safety**: Employs a "spawn" multiprocessing context and process isolation to ensure robust memory cleanup between tasks, preventing common memory leak issues in long-running data processing jobs.
--   **Standardized Logging**: Comprehensive and configurable logging using Python's standard `logging` module.
+- Runs one or more analytics passes (`PassConfig`) over configurable time buckets.
+- Supports preprocessors (for example `cbbo_preprocess`) and postprocessors
+  (for example `reaggregate`, `alpha101`).
+- Supports local runs, BMLL remote job runs, and Dagster integration.
+- Writes to Parquet, Delta, or SQL via output targets.
 
-## Setup
+## Project Layout
 
-### Prerequisites
--   Python 3.9+
--   Access to the BMLL data platform (assumed to be configured in your environment).
+- `basalt/`: core framework package and CLI.
+- `basalt/dagster/`: Dagster integration and Dagster-specific plotting helpers.
+- `basalt/analytics/`: analytics implementations (trade, l2, l3, execution, etc).
+- `basalt/preprocessors/`: preprocessors (iceberg, cbbo preprocess, aggressive trades).
+- `demo/`: runnable pipeline examples.
+- `docs/`: architecture, batching, multi-pass, and reference docs.
 
-### Installation
-1.  Clone this repository:
-    ```bash
-    git clone <repository_url>
-    cd bmll-basalt # Or your project directory name
-    ```
-2.  Install the required Python packages:
-    ```bash
-    pip install -r requirements.txt
-    ```
+## Install
 
-## Configuration
-
-The pipeline's behavior is controlled by the `AnalyticsConfig` dataclass, which is initialized in `main.py` by merging a `USER_CONFIG` dictionary with the `DEFAULT_CONFIG`.
-
-### `USER_CONFIG` (in `main.py`)
-This dictionary allows you to override default settings for a specific run. Key options include:
-
--   `START_DATE`, `END_DATE`: The date range for data processing.
--   `TIME_BUCKET_SECONDS`: Granularity for time-series aggregations.
--   `BATCH_FREQ`: The frequency for creating date batches (e.g., "W" for weekly, "M" for monthly). If `None`, it's auto-detected.
--   `TABLES_TO_LOAD`: List of table names to load (e.g., `["trades", "l2", "l3"]`).
--   `LOGGING_LEVEL`: Set the logging verbosity (e.g., "INFO", "DEBUG").
-
-Example `USER_CONFIG`:
-```python
-USER_CONFIG = {
-    "START_DATE": "2025-11-01",
-    "END_DATE": "2025-12-31",
-    "TIME_BUCKET_SECONDS": 60,
-    "BATCH_FREQ": "W", # Force weekly batches
-    "TABLES_TO_LOAD": ["trades", "l2"], # Only load trades and L2 data
-}
-```
-
-For a complete list of all configuration options and their descriptions, see the comments in `basalt/configuration.py`.
-
-## Usage
-
-To run the pipeline, execute the `main.py` script:
+From source (recommended for development):
 
 ```bash
-python3 main.py
+pip install -e .
 ```
 
-The script will process the data for the configured date range and universe, writing the final aggregated output to the S3 location specified by `OUTPUT_TARGET.path_template` in the configuration.
+Optional extras:
+
+```bash
+pip install -e '.[dagster]'
+pip install -e '.[all]'
+```
+
+## CLI Quick Start
+
+Run a pipeline module:
+
+```bash
+basalt pipeline run --pipeline demo/01_ohlcv_bars.py --date 2026-02-01
+```
+
+Open schema-driven config UI:
+
+```bash
+basalt pipeline config demo/01_ohlcv_bars.py
+```
+
+List available analytics columns:
+
+```bash
+basalt analytics list --pipeline demo/01_ohlcv_bars.py
+```
+
+Explain one analytic column:
+
+```bash
+basalt analytics explain --pipeline demo/01_ohlcv_bars.py --column TradeTotalVolume
+```
+
+Run on BMLL instance:
+
+```bash
+basalt job run --pipeline demo/01_ohlcv_bars.py --instance_size 128
+```
+
+## Configuration Model
+
+The main schema is in `basalt/configuration.py`:
+
+- `AnalyticsConfig`: run-level settings.
+- `PassConfig`: pass-level settings and module list.
+- Module configs under each pass:
+  - `trade_analytics`, `l2_analytics`, `l3_analytics`, `execution_analytics`
+  - `iceberg_analytics`, `cbbo_analytics`, `cbbo_preprocess`
+  - `generic_analytics`, `reaggregate_analytics`
+  - `alpha101_analytics`, `event_analytics`, `correlation_analytics`
+  - `l3_characteristics_analytics`, `trade_characteristics_analytics`
 
 ## Testing
 
-Run the test suite:
+Run tests:
 
 ```bash
 python3 -m pytest
 ```
 
-Run scoped coverage for project modules only:
+Run scoped coverage (project modules only):
 
 ```bash
 coverage run --source=basalt,demo,main -m pytest && coverage report -m
 ```
 
-## Dagster Compatibility
+## Packaging
 
-The framework includes a Dagster compatibility layer that models the run as a
-cartesian product of universe partitions and date partitions. This allows
-Dagster to materialize a single (universe, date-range) partition or fan out
-across multiple MICs.
+The default build (`BASALT_DIST=core`) produces `bmll-basalt`.
 
-See `basalt/dagster/docs/dagster.md` for a full walkthrough, including:
-- single MIC + single date
-- multi-MIC fan-out with `build_partition_runs`
-- `on_result` callback for artifact handling
+Build commands (`bdist_wheel`, `bdist`, `sdist`) automatically rotate through:
 
-There is also a self-contained setup script:
-`basalt/dagster/demo/setup_dagster_demo.py`
+- `core` -> `bmll-basalt`
+- `dagster` -> `bmll-basalt-dagster`
+- `preprocessors` -> `bmll-basalt-preprocessors`
+- `characteristics` -> `bmll-basalt-characteristics`
+- `alpha101` -> `bmll-basalt-alpha101`
 
-## Extending the Pipeline
+These non-core packages are thin metapackages on top of `bmll-basalt`.
 
-The pipeline is designed for easy extension:
+## Dagster
 
-### Adding New Data Tables
-1.  Create a new class in `basalt/tables.py` that inherits from `DataTable`.
-2.  Implement its `load` and `post_load_process` methods.
-3.  Add an instance of your new table class to the `ALL_TABLES` dictionary in the same file.
-4.  Add the new table's name to the `TABLES_TO_LOAD` list in your `USER_CONFIG`.
+Dagster docs and demo are under:
 
-### Adding New Analytics
-1.  Create or extend an analytics module in `basalt/analytics/`.
-2.  Implement your analytics logic within a class that follows the pattern of the existing analytics modules (e.g., `TradeAnalytics`).
-3.  Add your new analytics class to the `modules` list within the `get_pipeline` function in `main.py`.
+- `basalt/dagster/docs/dagster.md`
+- `basalt/dagster/demo/setup_dagster_demo.py`
 
-Analytics modules can also use `@analytic_expression(...)` to register documentation from expression docstrings.
+Dagster plotting utilities are in `basalt.dagster.plotting`.

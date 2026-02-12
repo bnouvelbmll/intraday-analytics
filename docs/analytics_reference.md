@@ -1,6 +1,11 @@
 # Analytics Reference
 
-This is a reference manual for analytics currently supported by the framework. It describes what each module computes, required tables, and key configuration knobs. The internal dense row-generation module is intentionally omitted.
+Reference manual for currently supported analytics/preprocessor modules.
+For each module: purpose, required input tables, and key config knobs.
+
+Notes:
+- Dense row-generation internals are omitted intentionally.
+- Module names below match `register_analytics(...)` names used in pipeline config.
 
 Terminology:
 - ListingId: listing-level identifier.
@@ -13,14 +18,22 @@ Time bucket semantics (pass-level):
 
 ## Module Index
 
-- trade
-- l2 (last snapshot)
-- l2tw (time-weighted)
-- l3
-- execution
-- iceberg
-- cbbo
-- generic
+- `trade`
+- `retail_imbalance`
+- `l2` (last snapshot)
+- `l2tw` (time-weighted)
+- `l3`
+- `execution`
+- `iceberg`
+- `cbbo_analytics`
+- `cbbo_preprocess`
+- `reaggregate`
+- `generic`
+- `alpha101`
+- `events`
+- `correlation`
+- `l3_characteristics`
+- `trade_characteristics`
 
 ---
 
@@ -352,9 +365,73 @@ Notes:
 
 ---
 
+## cbbo_preprocess
+
+Purpose: build a combined multi-venue L2-style book keyed by `InstrumentId` (or
+`PrimaryListingId`) to feed downstream analytics.
+
+Required tables:
+- l2
+- reference join fields (via `needs_ref=True`)
+
+Key config:
+- `CBBOPreprocessConfig.index_by`
+- `CBBOPreprocessConfig.top_n`
+- `CBBOPreprocessConfig.continuous_only`
+- `CBBOPreprocessConfig.output_mic_columns`
+- `CBBOPreprocessConfig.output_timebucket` / timestamp options
+
+---
+
+## reaggregate
+
+Purpose: aggregate a previous pass output on alternate grouping keys (for
+example index-level or instrument-level aggregation).
+
+Required tables:
+- none directly (reads a `source_pass` output from context)
+
+Key config:
+- `ReaggregateAnalyticsConfig.source_pass`
+- `ReaggregateAnalyticsConfig.group_df_context_key` or `group_df_pass`
+- `ReaggregateAnalyticsConfig.join_column`, `group_column`, `group_by`
+- `ReaggregateAnalyticsConfig.resample_rule`
+
+---
+
+## alpha101
+
+Purpose: compute a supported subset of WorldQuant 101 formulaic alphas from a
+previous pass output.
+
+Required tables:
+- none directly (reads from `source_pass`)
+
+Key config:
+- `Alpha101AnalyticsConfig.alpha_ids`
+- `Alpha101AnalyticsConfig.window_multiplier`
+- OHLCV column mapping fields (`open_col`, `high_col`, `low_col`, `close_col`, ...)
+
+---
+
+## events / correlation / characteristics
+
+Purpose:
+- `events`: event-window style analytics.
+- `correlation`: rolling/cross-series correlation analytics.
+- `l3_characteristics` and `trade_characteristics`: feature extraction modules
+  specialized for L3 and trades.
+
+These modules are enabled/configured from their pass-level config entries in
+`PassConfig`.
+
+---
+
 ## Output conventions
 
-- Output column names are determined by the metric configurations (some modules use explicit output name patterns).
+- Output column names are determined by module config and output name patterns.
 - Results are sorted by ListingId and TimeBucket during final write.
 
-For full configuration options, see the Pydantic configs in `basalt/analytics/*` and `basalt/configuration.py`.
+For full config fields, see:
+- `basalt/configuration.py`
+- module configs under `basalt/analytics/` and `basalt/preprocessors/`
