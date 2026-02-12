@@ -37,6 +37,7 @@ def _build_all_dists() -> None:
         "preprocessors",
         "characteristics",
         "alpha101",
+        "visualization",
         "optimize",
         "objective_functions",
         "models",
@@ -66,6 +67,7 @@ subpackage_requirements = {
     "preprocessors": [],
     "characteristics": [],
     "alpha101": [],
+    "visualization": ["streamlit", "plotly"],
     "optimize": [],
     "objective_functions": [],
     "models": [],
@@ -88,6 +90,7 @@ if dist == "core":
             "basalt.preprocessors*",
             "basalt.analytics.characteristics*",
             "basalt.analytics.alpha101*",
+            "basalt.visualization*",
             "basalt.optimize*",
             "basalt.objective_functions*",
             "basalt.models*",
@@ -167,6 +170,24 @@ elif dist == "alpha101":
         include=(
             "basalt.analytics.alpha101",
             "basalt.analytics.alpha101.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "visualization":
+    name = "bmll-basalt-visualization"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "visualization=basalt.visualization:get_basalt_plugin",
+        ],
+        "basalt.cli": [
+            "viz=basalt.visualization.cli_ext:get_cli_extension",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.visualization",
+            "basalt.visualization.*",
         )
     )
     install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]

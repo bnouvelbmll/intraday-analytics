@@ -19,6 +19,7 @@ long date ranges via batching, shredding, and process isolation.
 - `basalt/`: core framework package and CLI.
 - `basalt/dagster/`: Dagster integration and Dagster-specific plotting helpers.
 - `basalt/mcp/`: MCP server and shared run-configuration/monitoring APIs.
+- `basalt/visualization/`: Streamlit dataset explorer and modular finance plot panels.
 - `basalt/optimize/`: experiment search and parameter optimization helpers.
 - `basalt/objective_functions/`: reusable model-evaluation objective functions.
 - `basalt/models/`: model adapters/training utilities (sklearn/autogluon/pymc).
@@ -142,6 +143,14 @@ Visualize latest benchmark summary:
 python3 scripts/visualize_benchmark_results.py --results-dir benchmark_results
 ```
 
+Demo: connect an LLM to Basalt MCP server (stdio):
+
+```bash
+python3 scripts/mcp_llm_demo.py --show-tools
+python3 scripts/mcp_llm_demo.py --provider none --query "what can I run?"
+python3 scripts/mcp_llm_demo.py --provider local-dspy --start-sglang
+```
+
 Validate DB<->Pascal name conversion against an external schema catalog:
 
 ```bash
@@ -161,6 +170,7 @@ Build commands (`bdist_wheel`, `bdist`, `sdist`) automatically rotate through:
 - `alpha101` -> `bmll-basalt-alpha101`
 - `talib` -> `bmll-basalt-talib`
 - `mcp` -> `bmll-basalt-mcp`
+- `visualization` -> `bmll-basalt-visualization`
 - `optimize` -> `bmll-basalt-optimize`
 - `objective_functions` -> `bmll-basalt-objective-functions`
 - `models` -> `bmll-basalt-models`
@@ -174,6 +184,21 @@ MCP package:
 - MCP CLI only exposes server entrypoint: `basalt mcp serve` (stdio transport by default).
 - MCP tools include: `configure_job`, `run_job`, `recent_runs`, `success_rate`, `materialized_partitions`, `optimize_run`, `optimize_summary`.
 - Equivalent operations remain available via standard CLI hierarchies (`pipeline`, `job`, `dagster`, `optimize`) instead of the `mcp` namespace.
+
+Visualization package is modular:
+
+- Install `bmll-basalt-visualization` to enable `basalt viz run ...`.
+- Launch explorer from a pipeline config:
+  - `basalt viz run --pipeline demo/02_multi_pass.py`
+- Optional secure access/tunneling:
+  - password-gated UI: `basalt viz run --pipeline demo/02_multi_pass.py --auth_mode password --access_password '***'`
+  - serveo tunnel: `basalt viz run --pipeline demo/02_multi_pass.py --tunnel serveo --ingress my-host.serveo.net`
+  - optional SSH forward helper from `archives/lobv`: `--ssh_forward_enabled True --authorized_keys /path/to/authorized_keys`
+- Explorer behavior:
+  - defaults to the last pass output dataset
+  - supports date-range and instrument filtering
+  - ranks wide numeric series with entropy/variation scoring
+  - enables modular plots only when required columns exist (OHLC, volume profiles, imbalance, aggressive sizes, LOB viewer)
 
 TA-Lib support is modular:
 
