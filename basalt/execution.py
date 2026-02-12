@@ -123,6 +123,8 @@ def _derive_tables_to_load(pass_config, user_tables):
         "trade_characteristics": TradeCharacteristicsAnalytics.REQUIRES,
     }
 
+    from .tables import ALL_TABLES
+
     tables = []
 
     def add_table(name):
@@ -133,9 +135,36 @@ def _derive_tables_to_load(pass_config, user_tables):
         for name in user_tables:
             add_table(name)
 
+    module_inputs = pass_config.module_inputs or {}
+    table_names = set(ALL_TABLES.keys())
+
     for module in pass_config.modules:
-        for name in module_requires.get(module, []):
-            add_table(name)
+        overrides = module_inputs.get(module)
+        requires = module_requires.get(module, [])
+        if overrides is None:
+            for name in requires:
+                add_table(name)
+            continue
+
+        if isinstance(overrides, str):
+            if len(requires) != 1:
+                raise ValueError(
+                    f"module_inputs for '{module}' must be a mapping when REQUIRES has multiple entries."
+                )
+            if overrides in table_names:
+                add_table(overrides)
+            continue
+
+        if isinstance(overrides, dict):
+            for name in requires:
+                source = overrides.get(name, name)
+                if source in table_names:
+                    add_table(source)
+            continue
+
+        raise ValueError(
+            f"module_inputs for '{module}' must be a string or mapping."
+        )
 
     return tables
 
@@ -318,7 +347,13 @@ class ProcessInterval(Process):
                 lf_dict[table_name] = lf
 
         if not lf_dict:
-            logging.warning(f"No data found for {current_date}")
+            has_overrides = bool(self.pass_config.module_inputs)
+            if not has_overrides or self.config.TABLES_TO_LOAD:
+                logging.warning(f"No data found for {current_date}")
+                return
+            process_batch_task(
+                0, self.config.TEMP_DIR, current_date, self.config, pipe
+            )
             return
 
         group_map = _resolve_batch_group_map(self.pass_config, ref)
@@ -365,6 +400,11 @@ class ProcessInterval(Process):
         logging.info("🚚 Starting S3 Shredding (Spawned Process)...")
 
         tables_to_load_names = self.config.TABLES_TO_LOAD
+        if not tables_to_load_names and self.pass_config.module_inputs:
+            process_batch_task(
+                0, self.config.TEMP_DIR, current_date, self.config, pipe
+            )
+            return
         s3_file_lists = {
             name: get_files_for_date_range(
                 current_date,

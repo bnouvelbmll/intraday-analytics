@@ -12,6 +12,26 @@ logger = logging.getLogger(__name__)
 from .analytics_base import BaseAnalytics, BaseTWAnalytics
 
 
+def _resolve_module_inputs(pass_config: PassConfig, module: BaseAnalytics) -> dict[str, str]:
+    overrides = pass_config.module_inputs or {}
+    module_key = getattr(module, "name", None)
+    if not module_key or module_key not in overrides:
+        return {}
+    entry = overrides.get(module_key)
+    requires = list(getattr(module, "REQUIRES", []) or [])
+    if isinstance(entry, str):
+        if len(requires) != 1:
+            raise ValueError(
+                f"module_inputs for '{module_key}' must be a mapping when REQUIRES has multiple entries."
+            )
+        return {requires[0]: entry}
+    if isinstance(entry, dict):
+        return {str(k): str(v) for k, v in entry.items()}
+    raise ValueError(
+        f"module_inputs for '{module_key}' must be a string or mapping."
+    )
+
+
 class AnalyticsPipeline:
     """
     Orchestrates the execution of a series of analytics modules for a single pass.
@@ -57,19 +77,31 @@ class AnalyticsPipeline:
                         k for k in join_keys_override if k != "TimeBucket"
                     ]
 
+            module_inputs = _resolve_module_inputs(self.pass_config, module)
+
             # Provide the necessary data tables to the module
-            for key in self.config.TABLES_TO_LOAD:
-                if (
-                    (key in module.REQUIRES) or (key in ["marketstate"])
-                ) and key in tables_for_sym:
-                    if hasattr(tables_for_sym[key], "lazy"):
-                        setattr(module, key, tables_for_sym[key].lazy())
+            for req in module.REQUIRES:
+                source = module_inputs.get(req, req)
+                data = None
+                if source in tables_for_sym:
+                    data = tables_for_sym[source]
+                elif source in self.context:
+                    data = self.context[source]
+                if data is not None:
+                    if hasattr(data, "lazy"):
+                        setattr(module, req, data.lazy())
                     else:
-                        setattr(module, key, tables_for_sym[key])
+                        setattr(module, req, data)
+
+            if "marketstate" in tables_for_sym and "marketstate" not in module.REQUIRES:
+                data = tables_for_sym["marketstate"]
+                setattr(module, "marketstate", data.lazy() if hasattr(data, "lazy") else data)
 
             # Ensure all required tables are present
             for r in module.REQUIRES:
-                assert getattr(module, r) is not None, f"{r} is not loaded"
+                if getattr(module, r) is None:
+                    source = module_inputs.get(r, r)
+                    raise AssertionError(f"{r} is not loaded (source='{source}')")
 
             # Compute the analytics for the module
             lf_result = module.compute()

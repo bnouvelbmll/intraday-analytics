@@ -9,6 +9,8 @@ import shutil
 import os
 
 from basalt.utils import create_date_batches, ffill_with_shifts
+from basalt.configuration import PassConfig
+from basalt.execution import _derive_tables_to_load
 from basalt.batching import (
     HeuristicBatchingStrategy,
     SymbolSizeEstimator,
@@ -458,6 +460,17 @@ class TestAnalyticsModuleOutputs(unittest.TestCase):
 
                 self.assertIn("TimeBucket", result_df.columns)
                 self.assertIn("ListingId", result_df.columns)
+
+
+class TestModuleInputs(unittest.TestCase):
+    def test_derive_tables_to_load_respects_module_inputs_context_override(self):
+        pass_cfg = PassConfig(
+            name="pass1",
+            modules=["l2"],
+            module_inputs={"l2": "pass0"},
+        )
+        tables = _derive_tables_to_load(pass_cfg, user_tables=[])
+        self.assertNotIn("l2", tables)
 
 
 if __name__ == "__main__":

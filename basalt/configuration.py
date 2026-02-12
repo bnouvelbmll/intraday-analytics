@@ -161,6 +161,14 @@ class PassConfig(BaseModel):
         None,
         description="Optional per-pass output target override.",
     )
+    module_inputs: Dict[str, Union[str, Dict[str, str]]] = Field(
+        default_factory=dict,
+        description=(
+            "Optional module input overrides. Example: "
+            "{'l2': 'cbbo_pass'} or {'execution': {'trades': 'pass1'}}."
+        ),
+        json_schema_extra={"section": "Advanced"},
+    )
     extra_outputs: List[OutputTarget] = Field(
         default_factory=list,
         description="Optional additional output targets for this pass.",

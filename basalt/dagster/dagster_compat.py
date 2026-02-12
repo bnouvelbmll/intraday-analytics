@@ -2111,11 +2111,31 @@ def _table_from_asset_key(asset_key) -> str | None:
 
 def _required_tables_for_pass(pass_config: dict) -> set[str]:
     modules = pass_config.get("modules", []) if isinstance(pass_config, dict) else []
+    module_inputs = pass_config.get("module_inputs", {}) if isinstance(pass_config, dict) else {}
     module_requires = _module_requires_map()
+    from basalt.tables import ALL_TABLES
+    table_names = set(ALL_TABLES.keys())
     required = set()
     for module in modules:
-        for table in module_requires.get(module, []):
-            required.add(table)
+        overrides = module_inputs.get(module)
+        requires = module_requires.get(module, [])
+        if overrides is None:
+            for table in requires:
+                required.add(table)
+            continue
+        if isinstance(overrides, str):
+            if len(requires) == 1 and overrides in table_names:
+                required.add(overrides)
+            continue
+        if isinstance(overrides, dict):
+            for table in requires:
+                source = overrides.get(table, table)
+                if source in table_names:
+                    required.add(source)
+            continue
+        raise ValueError(
+            f"module_inputs for '{module}' must be a string or mapping."
+        )
     return required
 
 

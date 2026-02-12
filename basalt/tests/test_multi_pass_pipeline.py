@@ -168,6 +168,39 @@ class TestMultiPassPipeline(unittest.TestCase):
         )
         self.assertFalse(os.path.exists(expected_out_pass2))
 
+    def test_module_inputs_override_uses_context(self):
+        pass_config = PassConfig(
+            name="pass2",
+            modules=["l2"],
+            module_inputs={"l2": "pass1"},
+        )
+        config = self.config.model_copy(update={"TABLES_TO_LOAD": [], "PASSES": [pass_config]})
+
+        class DummyL2(BaseAnalytics):
+            REQUIRES = ["l2"]
+
+            def __init__(self):
+                super().__init__("l2")
+
+            def compute(self, **kwargs) -> pl.LazyFrame:
+                return (
+                    self.l2.lazy()
+                    .select(["ListingId", "TimeBucket"])
+                    .with_columns(pl.lit(1).alias("Dummy"))
+                )
+
+        context = {
+            "pass1": pl.DataFrame(
+                {
+                    "ListingId": ["A"],
+                    "TimeBucket": [pd.Timestamp("2025-01-01 10:00:00")],
+                }
+            )
+        }
+        pipe = AnalyticsPipeline([DummyL2()], config, pass_config, context)
+        out = pipe.run_on_multi_tables()
+        assert out["Dummy"][0] == 1
+
 
 if __name__ == "__main__":
     unittest.main()
