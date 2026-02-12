@@ -15,6 +15,9 @@ SUBPACKAGES = [
     "preprocessors",
     "characteristics",
     "alpha101",
+    "optimize",
+    "objective_functions",
+    "models",
 ]
 
 
@@ -69,6 +72,9 @@ def main() -> int:
                     "import basalt.preprocessors; "
                     "import basalt.analytics.characteristics; "
                     "import basalt.analytics.alpha101; "
+                    "import basalt.optimize; "
+                    "import basalt.objective_functions; "
+                    "import basalt.models; "
                     "print('ok')"
                 ),
             ],

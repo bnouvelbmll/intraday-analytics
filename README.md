@@ -19,6 +19,9 @@ long date ranges via batching, shredding, and process isolation.
 - `basalt/`: core framework package and CLI.
 - `basalt/dagster/`: Dagster integration and Dagster-specific plotting helpers.
 - `basalt/mcp/`: MCP server and shared run-configuration/monitoring APIs.
+- `basalt/optimize/`: experiment search and parameter optimization helpers.
+- `basalt/objective_functions/`: reusable model-evaluation objective functions.
+- `basalt/models/`: model adapters/training utilities (sklearn/autogluon/pymc).
 - `basalt/analytics/`: analytics implementations (trade, l2, l3, execution, etc).
 - `basalt/preprocessors/`: preprocessors (iceberg, cbbo preprocess, aggressive trades).
 - `demo/`: runnable pipeline examples.
@@ -36,6 +39,9 @@ Optional extras:
 
 ```bash
 pip install -e '.[dagster]'
+pip install -e '.[optimize]'
+pip install -e '.[objective_functions]'
+pip install -e '.[models]'
 pip install -e '.[all]'
 ```
 
@@ -154,6 +160,9 @@ Build commands (`bdist_wheel`, `bdist`, `sdist`) automatically rotate through:
 - `alpha101` -> `bmll-basalt-alpha101`
 - `talib` -> `bmll-basalt-talib`
 - `mcp` -> `bmll-basalt-mcp`
+- `optimize` -> `bmll-basalt-optimize`
+- `objective_functions` -> `bmll-basalt-objective-functions`
+- `models` -> `bmll-basalt-models`
 
 These non-core packages are standalone subpackage wheels that depend on
 `bmll-basalt`.
@@ -169,6 +178,34 @@ TA-Lib support is modular:
 - Core package excludes `basalt.analytics.talib`.
 - Install `bmll-basalt-talib` to enable TA-Lib indicator metadata wiring in the config UI.
 - TA-Lib indicator parameters are configured with `talib_indicators[].parameters` (JSON object).
+
+Optimize package is modular:
+
+- Install `bmll-basalt-optimize` to enable `basalt optimize run ...`.
+- `basalt optimize run` performs search-space driven configuration optimization and writes `trials.jsonl` + `summary.json`.
+- Executor mode: `--executor direct|bmll|ec2` currently supports trial-specific config dispatch.
+- `direct` computes scores (`--score_fn module:function` required).
+- `bmll`/`ec2` submit distributed trials and log submission ids; scoring is not computed in-process.
+
+Objective-functions package is modular:
+
+- Install `bmll-basalt-objective-functions` for reusable evaluation utilities.
+- Main classes: `ModelObjectiveEvaluator`, `DatasetSplit`, and objectives such as `DirectionalAccuracyObjective`, `MeanAbsoluteErrorObjective`, `MeanSquaredErrorObjective`.
+- Use `make_optimization_score_fn(...)` to plug evaluator outputs into `basalt optimize` score functions.
+- Uncertainty-aware models are supported through:
+  - `predict_interval(X) -> (pred, lower, upper)` or dict payload.
+  - `predict_with_confidence(X) -> (pred, confidence)` or dict payload.
+  - `predict(X)` returning dict with `pred`/`predictions` plus optional `lower`, `upper`, `confidence`.
+
+Models package is modular:
+
+- Install `bmll-basalt-models` for training/serialization adapters.
+- Included adapters:
+  - `SklearnModel` (generic sklearn-style estimator wrapper)
+  - `AutoGluonTabularModel`
+  - `PyMCModel` (hook-based adapter for user-defined PyMC training/predict functions)
+- Use `train_model(...)` and `evaluate_model_with_objectives(...)` for the direct bridge to objective functions.
+- Use `make_model_objective_score_fn(...)` to connect models + objective-functions into `basalt optimize`.
 
 Integration checks for packaging are in `integrations/package/README.md`.
 

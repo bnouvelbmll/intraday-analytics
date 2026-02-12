@@ -79,6 +79,9 @@ CLI extensions are discoverable through entry point group `basalt.cli`.
   - `bmll-basalt-preprocessors`
   - `bmll-basalt-characteristics`
   - `bmll-basalt-alpha101`
+  - `bmll-basalt-optimize`
+  - `bmll-basalt-objective-functions`
+  - `bmll-basalt-models`
 
 Build rotation is controlled by `BASALT_DIST` in `setup.py`.
 

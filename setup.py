@@ -37,6 +37,9 @@ def _build_all_dists() -> None:
         "preprocessors",
         "characteristics",
         "alpha101",
+        "optimize",
+        "objective_functions",
+        "models",
         "talib",
         "mcp",
         "aws_ec2",
@@ -63,6 +66,9 @@ subpackage_requirements = {
     "preprocessors": [],
     "characteristics": [],
     "alpha101": [],
+    "optimize": [],
+    "objective_functions": [],
+    "models": [],
     "talib": ["TA-Lib"],
     "mcp": ["fastmcp"],
     "aws_ec2": [],
@@ -82,6 +88,9 @@ if dist == "core":
             "basalt.preprocessors*",
             "basalt.analytics.characteristics*",
             "basalt.analytics.alpha101*",
+            "basalt.optimize*",
+            "basalt.objective_functions*",
+            "basalt.models*",
             "basalt.executors*",
             "basalt.analytics.talib*",
             "basalt.mcp*",
@@ -161,6 +170,57 @@ elif dist == "alpha101":
         )
     )
     install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "optimize":
+    name = "bmll-basalt-optimize"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "optimize=basalt.optimize:get_basalt_plugin",
+        ],
+        "basalt.cli": [
+            "optimize=basalt.optimize.cli_ext:get_cli_extension",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.optimize",
+            "basalt.optimize.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "objective_functions":
+    name = "bmll-basalt-objective-functions"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "objective_functions=basalt.objective_functions:get_basalt_plugin",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.objective_functions",
+            "basalt.objective_functions.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "models":
+    name = "bmll-basalt-models"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "models=basalt.models:get_basalt_plugin",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.models",
+            "basalt.models.*",
+        )
+    )
+    install_requires = [
+        "bmll-basalt>=" + VERSION,
+        "bmll-basalt-objective-functions>=" + VERSION,
+    ] + subpackage_requirements[dist]
 elif dist in {"aws_ec2", "kubernetes"}:
     name = f"bmll-basalt-{dist}"
     extras_require = {}

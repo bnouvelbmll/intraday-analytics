@@ -8,6 +8,7 @@ from typing import Callable, Optional
 import inspect
 import subprocess
 import sys
+import json
 
 import fire
 import yaml
@@ -476,11 +477,18 @@ def run_cli(
     universe: Optional[str] = None,
     config_file: Optional[str] = None,
     config_precedence: str = "yaml_overrides",
+    user_config_json: Optional[str] = None,
 ) -> None:
     """
     Run a standard CLI flow using a base USER_CONFIG and a default universe.
     """
-    user_config = resolve_user_config(user_config, config_file, config_precedence)
+    if user_config_json:
+        payload = json.loads(user_config_json)
+        if not isinstance(payload, dict):
+            raise ValueError("user_config_json must decode to a JSON object.")
+        user_config = payload
+    else:
+        user_config = resolve_user_config(user_config, config_file, config_precedence)
     config_overrides = {}
     if date:
         config_overrides["START_DATE"] = date
