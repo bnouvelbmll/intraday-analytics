@@ -10,10 +10,8 @@ API path and prints a comparison of stored events.
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 import time
-from pathlib import Path
 from typing import Iterable
 
 from dagster import (
@@ -30,16 +28,12 @@ from dagster._core.storage.event_log.sql_event_log import SqlEventLogStorage
 from dagster._serdes import deserialize_value
 from sqlalchemy import select
 
-# Allow importing from repo root when run from scripts/
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
-
-from scripts.s3_bulk_sync_db import (  # noqa: E402
+from basalt.dagster.scripts.s3_bulk_sync_db import (
     _build_event,
     _insert_events,
     _update_asset_indexes,
 )
-from basalt.dagster.dagster_compat import (  # noqa: E402
+from basalt.dagster.dagster_compat import (
     build_input_source_assets,
 )
 

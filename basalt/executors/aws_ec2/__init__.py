@@ -22,3 +22,11 @@ __all__ = [
     "ec2_install",
     "get_cli_extension",
 ]
+
+
+def get_basalt_plugin():
+    return {
+        "name": "aws_ec2",
+        "provides": ["aws ec2 executor"],
+        "cli_extensions": ["ec2"],
+    }

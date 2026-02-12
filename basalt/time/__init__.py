@@ -3,11 +3,11 @@ Temporal modules for dense/sparse timeline transformations.
 """
 
 from .dense import DenseAnalytics, DenseAnalyticsConfig
-from .events import EventAnalytics, EventAnalyticsConfig
+from .external_events import ExternalEventsAnalytics, ExternalEventsAnalyticsConfig
 
 __all__ = [
     "DenseAnalytics",
     "DenseAnalyticsConfig",
-    "EventAnalytics",
-    "EventAnalyticsConfig",
+    "ExternalEventsAnalytics",
+    "ExternalEventsAnalyticsConfig",
 ]

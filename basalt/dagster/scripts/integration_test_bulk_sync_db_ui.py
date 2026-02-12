@@ -14,7 +14,6 @@ import signal
 import socket
 import subprocess
 import select
-import sys
 import tempfile
 import time
 from pathlib import Path
@@ -23,11 +22,9 @@ from urllib.request import Request, urlopen
 from dagster import AssetKey, AssetMaterialization, DagsterInstance, MultiPartitionKey
 from dagster._core.instance.utils import RUNLESS_JOB_NAME, RUNLESS_RUN_ID
 
-# Allow importing from repo root when run from scripts/
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
-from scripts.s3_bulk_sync_db import (  # noqa: E402
+from basalt.dagster.scripts.s3_bulk_sync_db import (
     _build_event,
     _insert_events,
     _update_asset_indexes,

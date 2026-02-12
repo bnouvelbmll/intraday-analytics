@@ -11,6 +11,7 @@ from basalt.cli import (
 from basalt import schema_utils
 from basalt import config_ui
 from basalt.analytics_explain import main as analytics_explain_main
+from basalt.plugins import list_plugins_payload
 
 
 def _disable_fire_pager() -> None:
@@ -235,6 +236,12 @@ class K8SCLI:
         return _k8s_install(*args, **kwargs)
 
 
+class PluginsCLI:
+    @staticmethod
+    def list():
+        return list_plugins_payload()
+
+
 def main():
     _disable_fire_pager()
     if _help_requested():
@@ -245,6 +252,7 @@ def main():
         "job": JobCLI,
         "ec2": EC2CLI,
         "k8s": K8SCLI,
+        "plugins": PluginsCLI,
     }
     root.update(_load_cli_extensions())
     fire.Fire(root)

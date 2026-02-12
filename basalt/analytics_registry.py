@@ -6,6 +6,7 @@ import importlib
 import pkgutil
 
 from basalt.analytics_base import BaseAnalytics
+from basalt.plugins import get_plugin_analytics_packages, get_plugin_module_config_models
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ def discover_analytics():
     ):
         importlib.import_module(mod.name)
 
-    for pkg_name in ("basalt.preprocessors", "basalt.analytics.characteristics", "basalt.analytics.alpha101"):
+    for pkg_name in get_plugin_analytics_packages():
         try:
             pkg = importlib.import_module(pkg_name)
         except Exception:
@@ -51,17 +52,30 @@ def discover_analytics():
             importlib.import_module(mod.name)
 
     importlib.import_module("basalt.time.dense")
-    importlib.import_module("basalt.time.events")
+    importlib.import_module("basalt.time.external_events")
     _DISCOVERED = True
 
 
 def build_module_registry(pass_config, ref) -> Dict[str, Callable[[], BaseAnalytics]]:
     discover_analytics()
     registry: Dict[str, Callable[[], BaseAnalytics]] = {}
+    extension_models = get_plugin_module_config_models()
 
     for name, entry in _REGISTRY.items():
         if entry.config_attr:
-            cfg = getattr(pass_config, entry.config_attr)
+            cfg = getattr(pass_config, entry.config_attr, None)
+            if cfg is None and hasattr(pass_config, "extension_configs"):
+                ext = pass_config.extension_configs or {}
+                raw_cfg = ext.get(entry.config_attr, ext.get(name))
+                if raw_cfg is not None:
+                    model = extension_models.get(entry.config_attr) or extension_models.get(name)
+                    if model is not None and hasattr(model, "model_validate"):
+                        try:
+                            cfg = model.model_validate(raw_cfg)
+                        except Exception:
+                            cfg = raw_cfg
+                    else:
+                        cfg = raw_cfg
         else:
             cfg = None
 

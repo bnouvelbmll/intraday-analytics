@@ -78,10 +78,14 @@ The main schema is in `basalt/configuration.py`:
 - `PassConfig`: pass-level settings and module list.
 - Module configs under each pass:
   - `trade_analytics`, `l2_analytics`, `l3_analytics`, `execution_analytics`
-  - `iceberg_analytics`, `cbbo_analytics`, `cbbo_preprocess`
+  - `iceberg_analytics`, `cbbo_analytics`, `cbbo_preprocess`, `cbbofroml3_preprocess`
   - `generic_analytics`, `reaggregate_analytics`
-  - `alpha101_analytics`, `event_analytics`, `correlation_analytics`
+  - `alpha101_analytics`, `observed_events_analytics`, `external_event_analytics`, `correlation_analytics`
   - `l3_characteristics_analytics`, `trade_characteristics_analytics`
+
+`cbbofroml3_preprocess` time settings:
+- `time_index="event"`: event-indexed output; `time_bucket_seconds` is ignored.
+- `time_index="timebucket"`: bucketed output; `time_bucket_seconds` is required and used.
 
 ## Testing
 
@@ -97,6 +101,18 @@ Run scoped coverage (project modules only):
 coverage run --source=basalt,demo,main -m pytest && coverage report -m
 ```
 
+Run coverage by package/subpackage:
+
+```bash
+python3 scripts/coverage_by_package.py
+```
+
+Reuse existing `.coverage` data (no test rerun):
+
+```bash
+python3 scripts/coverage_by_package.py --skip-tests
+```
+
 ## Packaging
 
 The default build (`BASALT_DIST=core`) produces `bmll-basalt`.
@@ -108,8 +124,18 @@ Build commands (`bdist_wheel`, `bdist`, `sdist`) automatically rotate through:
 - `preprocessors` -> `bmll-basalt-preprocessors`
 - `characteristics` -> `bmll-basalt-characteristics`
 - `alpha101` -> `bmll-basalt-alpha101`
+- `talib` -> `bmll-basalt-talib`
 
-These non-core packages are thin metapackages on top of `bmll-basalt`.
+These non-core packages are standalone subpackage wheels that depend on
+`bmll-basalt`.
+
+TA-Lib support is modular:
+
+- Core package excludes `basalt.analytics.talib`.
+- Install `bmll-basalt-talib` to enable TA-Lib indicator metadata wiring in the config UI.
+- TA-Lib indicator parameters are configured with `talib_indicators[].parameters` (JSON object).
+
+Integration checks for packaging are in `integrations/package/README.md`.
 
 ## Dagster
 

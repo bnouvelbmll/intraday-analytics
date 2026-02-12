@@ -98,25 +98,35 @@ class TestConfiguration(unittest.TestCase):
         cfg = PassConfig(name="pass1", modules=["trade"], timeline_mode="dense")
         self.assertEqual(cfg.timeline_mode, PassTimelineMode.DENSE)
         self.assertEqual(cfg.modules[0], "dense")
-        self.assertNotIn("events", cfg.modules)
+        self.assertNotIn("external_events", cfg.modules)
         self.assertTrue(cfg.dense_analytics.ENABLED)
 
     def test_timeline_mode_event_adds_events_module(self):
         cfg = PassConfig(name="pass1", modules=["trade"], timeline_mode="event")
         self.assertEqual(cfg.timeline_mode, PassTimelineMode.EVENT)
-        self.assertIn("events", cfg.modules)
+        self.assertIn("external_events", cfg.modules)
         self.assertNotIn("dense", cfg.modules)
         self.assertFalse(cfg.dense_analytics.ENABLED)
 
     def test_sparse_timeline_removes_dense_and_events(self):
         cfg = PassConfig(
             name="pass1",
-            modules=["trade", "dense", "events"],
+            modules=["trade", "dense", "external_events"],
             timeline_mode="sparse_digitised",
         )
         self.assertNotIn("dense", cfg.modules)
-        self.assertNotIn("events", cfg.modules)
+        self.assertNotIn("external_events", cfg.modules)
         self.assertFalse(cfg.dense_analytics.ENABLED)
+
+    def test_legacy_events_keys_are_migrated(self):
+        cfg = PassConfig(
+            name="pass1",
+            modules=["trade", "events"],
+            event_analytics={"ENABLED": True},
+        )
+        self.assertIn("external_events", cfg.modules)
+        self.assertNotIn("events", cfg.modules)
+        self.assertTrue(cfg.external_event_analytics.ENABLED)
 
 
 if __name__ == "__main__":

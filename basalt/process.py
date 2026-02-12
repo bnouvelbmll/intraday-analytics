@@ -213,7 +213,10 @@ def aggregate_and_write_final_output(
                 try:
                     dt = DeltaTable(final_s3_path)
                     partition_values = (
-                        df_to_write.select(partition_cols).unique().to_dicts()
+                        df_to_write.select(partition_cols)
+                        .unique()
+                        .collect()
+                        .to_dicts()
                     )
                     for vals in partition_values:
                         predicate = " AND ".join(
@@ -260,7 +263,10 @@ def aggregate_and_write_final_output(
                     and output_target.sql_if_exists != "replace"
                 ):
                     partition_values = (
-                        df_to_write.select(partition_cols).unique().to_dicts()
+                        df_to_write.select(partition_cols)
+                        .unique()
+                        .collect()
+                        .to_dicts()
                     )
                     if partition_values:
                         try:

@@ -429,7 +429,7 @@ def dagster_sync(
     Run the bulk S3 -> Dagster event sync (direct DB insertion).
     """
     repo_root = Path(__file__).resolve().parents[1]
-    script_path = repo_root / "scripts" / "s3_bulk_sync_db.py"
+    script_path = repo_root / "basalt" / "dagster" / "scripts" / "s3_bulk_sync_db.py"
     if not script_path.exists():
         raise FileNotFoundError(f"Bulk sync script not found: {script_path}")
     cmd = [

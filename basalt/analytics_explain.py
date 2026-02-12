@@ -15,21 +15,31 @@ from basalt.analytics.l3 import L3AnalyticsConfig
 from basalt.analytics.trade import TradeAnalyticsConfig
 from basalt.analytics.execution import ExecutionAnalyticsConfig
 from basalt.analytics.cbbo import CBBOAnalyticsConfig
-from basalt.preprocessors.iceberg import IcebergAnalyticsConfig
 from basalt.analytics.generic import GenericAnalyticsConfig
 from basalt.time.dense import DenseAnalyticsConfig
+from basalt.plugins import get_plugin_module_configs
 
 
-MODULE_CONFIG_MAP: dict[str, tuple[str, type[BaseModel]]] = {
-    "trade": ("trade_analytics", TradeAnalyticsConfig),
-    "l2": ("l2_analytics", L2AnalyticsConfig),
-    "l3": ("l3_analytics", L3AnalyticsConfig),
-    "execution": ("execution_analytics", ExecutionAnalyticsConfig),
-    "cbbo_analytics": ("cbbo_analytics", CBBOAnalyticsConfig),
-    "iceberg": ("iceberg_analytics", IcebergAnalyticsConfig),
-    "generic": ("generic_analytics", GenericAnalyticsConfig),
-    "dense": ("dense_analytics", DenseAnalyticsConfig),
-}
+def _module_config_map() -> dict[str, tuple[str, type[BaseModel]]]:
+    mapping: dict[str, tuple[str, type[BaseModel]]] = {
+        "trade": ("trade_analytics", TradeAnalyticsConfig),
+        "l2": ("l2_analytics", L2AnalyticsConfig),
+        "l3": ("l3_analytics", L3AnalyticsConfig),
+        "execution": ("execution_analytics", ExecutionAnalyticsConfig),
+        "cbbo_analytics": ("cbbo_analytics", CBBOAnalyticsConfig),
+        "generic": ("generic_analytics", GenericAnalyticsConfig),
+        "dense": ("dense_analytics", DenseAnalyticsConfig),
+    }
+    for spec in get_plugin_module_configs():
+        module = spec.get("module")
+        config_key = spec.get("config_key") or module
+        model = spec.get("model")
+        if not isinstance(module, str) or not isinstance(config_key, str):
+            continue
+        if not isinstance(model, type) or not issubclass(model, BaseModel):
+            continue
+        mapping[module] = (config_key, model)
+    return mapping
 
 
 def _load_yaml_user_config(pipeline: str) -> dict:
@@ -90,10 +100,20 @@ def explain_column(
         normalized = module_key
         if module_key in {"l2_last", "l2_tw"}:
             normalized = "l2"
-        config_attr, model = MODULE_CONFIG_MAP.get(normalized, (None, None))
+        module_config_map = _module_config_map()
+        config_attr, model = module_config_map.get(normalized, (None, None))
         module_config = None
-        if config_attr and hasattr(pass_cfg, config_attr):
-            module_config = getattr(pass_cfg, config_attr)
+        if config_attr:
+            if hasattr(pass_cfg, config_attr):
+                module_config = getattr(pass_cfg, config_attr)
+            else:
+                ext = getattr(pass_cfg, "extension_configs", {}) or {}
+                raw = ext.get(config_attr, ext.get(normalized))
+                if isinstance(raw, dict) and model:
+                    try:
+                        module_config = model.model_validate(raw)
+                    except Exception:
+                        module_config = None
         metric_doc = _apply_docs(module_key, column)
         payload: dict[str, Any] = {
             "column": column,
@@ -111,7 +131,8 @@ def explain_column(
         normalized = module_hint
         if module_hint in {"l2_last", "l2_tw"}:
             normalized = "l2"
-        config_attr, model = MODULE_CONFIG_MAP.get(normalized, (None, None))
+        module_config_map = _module_config_map()
+        config_attr, model = module_config_map.get(normalized, (None, None))
         module_config = None
         if config.PASSES:
             for pass_cfg in config.PASSES:
@@ -119,6 +140,14 @@ def explain_column(
                     continue
                 if config_attr and hasattr(pass_cfg, config_attr):
                     module_config = getattr(pass_cfg, config_attr)
+                    break
+                ext = getattr(pass_cfg, "extension_configs", {}) or {}
+                raw = ext.get(config_attr, ext.get(normalized))
+                if isinstance(raw, dict) and model:
+                    try:
+                        module_config = model.model_validate(raw)
+                    except Exception:
+                        module_config = None
                     break
         metric_doc = _apply_docs(module_hint, column)
         payload = {

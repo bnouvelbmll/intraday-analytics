@@ -13,7 +13,6 @@ from .analytics.trade import (
     TradeImpactConfig,
 )
 from .analytics.execution import ExecutionAnalytics
-from .preprocessors.iceberg import IcebergAnalytics
 from .analytics_base import (
     ANALYTIC_DOCS,
     apply_overrides,
@@ -35,12 +34,28 @@ from .analytics.execution import (
     TradeBreakdownConfig,
     ExecutionDerivedConfig,
 )
-from .preprocessors.iceberg import IcebergAnalyticsConfig, IcebergMetricConfig
 from .analytics.cbbo import CBBOAnalytics, CBBOAnalyticsConfig
-from .analytics.alpha101.alpha101 import Alpha101Analytics, Alpha101AnalyticsConfig
-from .time.events import EventAnalyticsConfig
+from .time.external_events import ExternalEventsAnalyticsConfig
+from .analytics.observed_events import ObservedEventsAnalyticsConfig
 from .analytics.correlation import CorrelationAnalyticsConfig
 import pandas as pd
+
+try:
+    from .preprocessors.iceberg import (
+        IcebergAnalytics,
+        IcebergAnalyticsConfig,
+        IcebergMetricConfig,
+    )
+except Exception:
+    IcebergAnalytics = None
+    IcebergAnalyticsConfig = None
+    IcebergMetricConfig = None
+
+try:
+    from .analytics.alpha101.alpha101 import Alpha101Analytics, Alpha101AnalyticsConfig
+except Exception:
+    Alpha101Analytics = None
+    Alpha101AnalyticsConfig = None
 
 
 def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfig:
@@ -225,38 +240,44 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
         derived_metrics=[ExecutionDerivedConfig(variant="TradeImbalance")],
     )
 
-    iceberg_config = IcebergAnalyticsConfig(
-        metrics=[
-            IcebergMetricConfig(
-                measures=[
-                    "ExecutionVolume",
-                    "ExecutionCount",
-                    "AverageSize",
-                    "RevealedPeakCount",
-                    "OrderImbalance",
-                    "AveragePeakCount",
-                ],
-                sides=["Total"],
-            )
-        ],
-        enable_peak_linking=False,
-        trade_match_enabled=False,
-    )
+    iceberg_config = None
+    if IcebergAnalyticsConfig is not None and IcebergMetricConfig is not None:
+        iceberg_config = IcebergAnalyticsConfig(
+            metrics=[
+                IcebergMetricConfig(
+                    measures=[
+                        "ExecutionVolume",
+                        "ExecutionCount",
+                        "AverageSize",
+                        "RevealedPeakCount",
+                        "OrderImbalance",
+                        "AveragePeakCount",
+                    ],
+                    sides=["Total"],
+                )
+            ],
+            enable_peak_linking=False,
+            trade_match_enabled=False,
+        )
 
     cbbo_config = CBBOAnalyticsConfig(
         measures=["TimeAtCBB", "TimeAtCBO", "QuantityAtCBB", "QuantityAtCBO"],
         quantity_aggregations=["TWMean", "Min", "Max", "Median"],
     )
 
-    pass1 = PassConfig(
+    pass1_kwargs = dict(
         name="pass1",
         l2_analytics=l2_config,
         l3_analytics=l3_config,
         trade_analytics=trade_config,
         execution_analytics=exec_config,
-        iceberg_analytics=iceberg_config,
         cbbo_analytics=cbbo_config,
     )
+    if iceberg_config is not None:
+        pass1_kwargs["extension_configs"] = {
+            "iceberg_analytics": iceberg_config.model_dump()
+        }
+    pass1 = PassConfig(**pass1_kwargs)
 
     return AnalyticsConfig(PASSES=[pass1])
 
@@ -443,14 +464,17 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
 
     # --- Iceberg ---
     try:
-        iceberg_cfg = pass_config.iceberg_analytics.model_copy(
-            update={"enable_peak_linking": False, "trade_match_enabled": False}
-        )
-        iceberg_analytics = IcebergAnalytics(iceberg_cfg)
-        iceberg_analytics.l3 = l3_dummy
-        iceberg_analytics.trades = trades_dummy
-        iceberg_df = iceberg_analytics.compute()
-        output_columns["iceberg"] = iceberg_df.collect_schema().names()
+        if IcebergAnalytics is not None:
+            ext_cfg = (pass_config.extension_configs or {}).get("iceberg_analytics")
+            if isinstance(ext_cfg, dict) and IcebergAnalyticsConfig is not None:
+                iceberg_cfg = IcebergAnalyticsConfig.model_validate(ext_cfg).model_copy(
+                    update={"enable_peak_linking": False, "trade_match_enabled": False}
+                )
+                iceberg_analytics = IcebergAnalytics(iceberg_cfg)
+                iceberg_analytics.l3 = l3_dummy
+                iceberg_analytics.trades = trades_dummy
+                iceberg_df = iceberg_analytics.compute()
+                output_columns["iceberg"] = iceberg_df.collect_schema().names()
     except Exception as e:
         output_columns["iceberg_error"] = [str(e)]
 
@@ -466,15 +490,28 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
 
     # --- Alpha101 ---
     try:
-        alpha_cfg = Alpha101AnalyticsConfig()
-        alpha_cols = [f"Alpha{idx:03d}" for idx in alpha_cfg.alpha_ids]
-        output_columns["alpha101"] = ["ListingId", "TimeBucket", *alpha_cols]
+        if Alpha101AnalyticsConfig is not None:
+            alpha_cfg = Alpha101AnalyticsConfig()
+            alpha_cols = [f"Alpha{idx:03d}" for idx in alpha_cfg.alpha_ids]
+            output_columns["alpha101"] = ["ListingId", "TimeBucket", *alpha_cols]
     except Exception as e:
         output_columns["alpha101_error"] = [str(e)]
 
-    # --- Events ---
+    # --- External events timeline ---
     try:
-        output_columns["events"] = [
+        output_columns["external_events"] = [
+            "ListingId",
+            "TimeBucket",
+            "EventAnchorTime",
+            "EventContextIndex",
+            "EventDeltaSeconds",
+        ]
+    except Exception as e:
+        output_columns["external_events_error"] = [str(e)]
+
+    # --- Observed events ---
+    try:
+        output_columns["observed_events"] = [
             "ListingId",
             "TimeBucket",
             "EventType",
@@ -482,7 +519,7 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
             "IndicatorValue",
         ]
     except Exception as e:
-        output_columns["events_error"] = [str(e)]
+        output_columns["observed_events_error"] = [str(e)]
 
     # --- Correlation ---
     try:
@@ -516,6 +553,8 @@ def _filter_schema_for_pass1(config: AnalyticsConfig | PassConfig, schema: Dict[
         "execution": ["execution"],
         "iceberg": ["iceberg"],
         "cbbo_analytics": ["cbbo_analytics"],
+        "external_events": ["external_events"],
+        "observed_events": ["observed_events"],
     }
 
     keys = []

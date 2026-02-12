@@ -4,9 +4,10 @@
 Operational recommendations for contributors working on `basalt` core and subpackages.
 
 ## Key Principles
-- Keep core modular: `basalt` should remain functional without optional subpackages.
-- Prefer explicit dataflow: pass-to-pass dependencies should be visible through `module_inputs`.
+- Keep core modular: `basalt` should remain functional without optional subpackages. Documentations, tests and configs should leave with each subpackage.
 - Treat time shaping as orchestration, not analytics logic.
+- When you add new config modules make sure that only revelant options are displayed when some parameters depends on previous choices
+- Prefer explicit dataflow: pass-to-pass dependencies should be visible through `module_inputs`.
 
 ## Time And Pass Design
 - Use `PassConfig.timeline_mode` to control timeline behavior:
@@ -23,8 +24,7 @@ Operational recommendations for contributors working on `basalt` core and subpac
 
 ## Packaging
 - Keep optional execution backends in optional distributions:
-  - `basalt.executors.aws_ec2`
-  - `basalt.executors.kubernetes`
+  - `aws_ec2`, `kubernetes`, `datster`
 - Avoid hard dependency from core import path to optional backends.
 
 ## Tests And Quality

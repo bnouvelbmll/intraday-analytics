@@ -1565,7 +1565,13 @@ def build_s3_input_sync_asset(
                 raise RuntimeError(
                     "Missing repo_root for db bulk sync (set BMLL_REPO_ROOT)."
                 )
-            script_path = os.path.join(root, "scripts", "s3_bulk_sync_db.py")
+            script_path = os.path.join(
+                root,
+                "basalt",
+                "dagster",
+                "scripts",
+                "s3_bulk_sync_db.py",
+            )
             if not os.path.exists(script_path):
                 raise RuntimeError(f"Bulk sync script not found: {script_path}")
 

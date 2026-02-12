@@ -10,27 +10,22 @@ from basalt.analytics_base import BaseAnalytics
 from basalt.analytics_registry import register_analytics
 
 
-class EventAnalyticsConfig(BaseModel):
+class ObservedEventsAnalyticsConfig(BaseModel):
     """
     Event detection on derived indicators (SMA / EWMA).
 
     Emits sparse rows when local minima/maxima are detected on an indicator.
     Intended to run as a dedicated pass (sparse output).
-
-    Warning:
-    This module changes the timeline to event timestamps. Time-weighted metrics
-    (for example TWAP-style analytics) may become unintuitive on event-driven
-    rows, because gaps between events are irregular and context-dependent.
     """
 
     model_config = ConfigDict(
         json_schema_extra={
             "ui": {
-                "module": "events",
+                "module": "observed_events",
                 "tier": "post",
-                "desc": "Postprocessing: event rows (local min/max on SMA/EWMA).",
+                "desc": "Postprocessing: observed events (local min/max on SMA/EWMA).",
                 "outputs": ["EventType", "IndicatorValue"],
-                "schema_keys": ["events"],
+                "schema_keys": ["observed_events"],
             }
         }
     )
@@ -63,13 +58,13 @@ class EventAnalyticsConfig(BaseModel):
     )
 
 
-@register_analytics("events", config_attr="event_analytics")
-class EventAnalytics(BaseAnalytics):
+@register_analytics("observed_events", config_attr="observed_events_analytics")
+class ObservedEventsAnalytics(BaseAnalytics):
     REQUIRES: List[str] = []
 
-    def __init__(self, config: EventAnalyticsConfig):
+    def __init__(self, config: ObservedEventsAnalyticsConfig):
         super().__init__(
-            "events",
+            "observed_events",
             {},
             join_keys=["ListingId", "TimeBucket"],
             metric_prefix=config.metric_prefix,

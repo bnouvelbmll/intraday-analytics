@@ -3,6 +3,7 @@ from setuptools import find_packages, setup
 import os
 import sys
 import subprocess
+import shutil
 
 
 def _load_requirements(path: str) -> list[str]:
@@ -19,16 +20,12 @@ def _load_requirements(path: str) -> list[str]:
 
 
 core_requirements = _load_requirements("requirements.txt")
-
-extras = {
-    "dagster": ["dagster", "dagster-webserver"],
-    "characteristics": [],
-    "preprocessors": [],
-    "alpha101": [],
-    "aws_ec2": [],
-    "kubernetes": [],
-}
-extras["all"] = sorted({dep for deps in extras.values() for dep in deps})
+_OPTIONAL_CORE_REQ_PREFIXES = ("ta-lib",)
+core_requirements = [
+    req
+    for req in core_requirements
+    if not req.lower().startswith(_OPTIONAL_CORE_REQ_PREFIXES)
+]
 
 VERSION = "0.1.0"
 
@@ -40,6 +37,7 @@ def _build_all_dists() -> None:
         "preprocessors",
         "characteristics",
         "alpha101",
+        "talib",
         "aws_ec2",
         "kubernetes",
     ]
@@ -58,13 +56,36 @@ if (
 
 
 dist = os.environ.get("BASALT_DIST", "core")
+shutil.rmtree("build", ignore_errors=True)
+subpackage_requirements = {
+    "dagster": ["dagster", "dagster-webserver"],
+    "preprocessors": [],
+    "characteristics": [],
+    "alpha101": [],
+    "talib": ["TA-Lib"],
+    "aws_ec2": [],
+    "kubernetes": [],
+}
+extras = {
+    name: [f"bmll-basalt-{name}>={VERSION}"] for name in subpackage_requirements
+}
+extras["all"] = sorted({dep for deps in extras.values() for dep in deps})
 
 if dist == "core":
     name = "bmll-basalt"
     packages = find_packages(
         exclude=(
             "intraday_analytics*",
+            "basalt.dagster*",
+            "basalt.preprocessors*",
+            "basalt.analytics.characteristics*",
+            "basalt.analytics.alpha101*",
             "basalt.executors*",
+            "basalt.analytics.talib*",
+            "basalt.tests*",
+            "basalt.analytics.tests*",
+            "basalt.dagster.tests*",
+            "basalt.preprocessors.tests*",
         )
     )
     install_requires = core_requirements
@@ -73,10 +94,70 @@ if dist == "core":
         "console_scripts": [
             "basalt=basalt.basalt:main",
         ],
+    }
+elif dist == "dagster":
+    name = "bmll-basalt-dagster"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "dagster=basalt.dagster:get_basalt_plugin",
+        ],
         "basalt.cli": [
             "dagster=basalt.dagster.cli_ext:get_cli_extension",
         ],
     }
+    packages = find_packages(
+        include=(
+            "basalt.dagster",
+            "basalt.dagster.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "preprocessors":
+    name = "bmll-basalt-preprocessors"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "preprocessors=basalt.preprocessors:get_basalt_plugin",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.preprocessors",
+            "basalt.preprocessors.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "characteristics":
+    name = "bmll-basalt-characteristics"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "characteristics=basalt.analytics.characteristics:get_basalt_plugin",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.analytics.characteristics",
+            "basalt.analytics.characteristics.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "alpha101":
+    name = "bmll-basalt-alpha101"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "alpha101=basalt.analytics.alpha101:get_basalt_plugin",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.analytics.alpha101",
+            "basalt.analytics.alpha101.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
 elif dist in {"aws_ec2", "kubernetes"}:
     name = f"bmll-basalt-{dist}"
     extras_require = {}
@@ -89,6 +170,9 @@ elif dist in {"aws_ec2", "kubernetes"}:
             )
         )
         entry_points = {
+            "basalt.plugins": [
+                "aws_ec2=basalt.executors.aws_ec2:get_basalt_plugin",
+            ],
             "basalt.cli": [
                 "ec2=basalt.executors.aws_ec2:get_cli_extension",
             ],
@@ -102,11 +186,29 @@ elif dist in {"aws_ec2", "kubernetes"}:
             )
         )
         entry_points = {
+            "basalt.plugins": [
+                "kubernetes=basalt.executors.kubernetes:get_basalt_plugin",
+            ],
             "basalt.cli": [
                 "k8s=basalt.executors.kubernetes:get_cli_extension",
             ],
         }
-    install_requires = ["bmll-basalt>=" + VERSION] + extras.get(dist, [])
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "talib":
+    name = "bmll-basalt-talib"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "talib=basalt.analytics.talib:get_basalt_plugin",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.analytics.talib",
+            "basalt.analytics.talib.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
 else:
     name = f"bmll-basalt-{dist}"
     extras_require = {}
@@ -123,7 +225,7 @@ setup(
         "Transformations) intraday analytics pipeline"
     ),
     packages=packages,
-    include_package_data=True,
+    include_package_data=False,
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points=entry_points,

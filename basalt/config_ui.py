@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import json
 from pathlib import Path
 from typing import Any, Optional, Union, get_args, get_origin
 import random
@@ -26,13 +27,17 @@ from textual.widgets import (
     TextArea,
 )
 from rich.panel import Panel
+from rich.text import Text
 
 from basalt.configuration import AnalyticsConfig, PassConfig, OutputTarget
 from basalt.tables import ALL_TABLES
+from basalt.plugins import get_plugin_module_configs, get_plugin_module_config_models
 from basalt.analytics.generic import (
     TalibIndicatorConfig,
     GenericAnalyticsConfig,
     TALIB_AVAILABLE,
+    list_talib_functions,
+    get_talib_function_metadata,
 )
 from basalt.schema_utils import get_output_schema, get_full_output_schema
 from basalt.analytics.l3 import L3AdvancedConfig
@@ -219,6 +224,30 @@ def _parse_yaml(text: str) -> Any:
     return yaml.safe_load(text)
 
 
+def _talib_function_help(name: str) -> str:
+    meta = get_talib_function_metadata(name)
+    if not meta:
+        return "No TA-Lib metadata available for this function."
+    lines = [f"{meta.get('description') or name}"]
+    group = meta.get("group")
+    if group:
+        lines.append(f"Group: {group}")
+    hint = meta.get("hint")
+    if hint:
+        lines.append(f"Hint: {hint}")
+    params = meta.get("parameters") or []
+    if params:
+        param_bits = ", ".join(
+            f"{p.get('name')}={p.get('default')}" for p in params if isinstance(p, dict)
+        )
+        if param_bits:
+            lines.append(f"Parameters: {param_bits}")
+    outputs = meta.get("output_names") or []
+    if outputs:
+        lines.append("Outputs: " + ", ".join(str(x) for x in outputs))
+    return "\n".join(lines)
+
+
 class RotatingText(Static):
     def __init__(self, items: list[str], prefix: str = "Metrics: ", sep: str = " • "):
         super().__init__("")
@@ -380,17 +409,12 @@ class ModelEditor(Screen):
         if annotation is bool:
             widget = Checkbox(value=bool(value))
         elif self.model_cls is TalibIndicatorConfig and name == "name":
-            if TALIB_AVAILABLE:
-                import talib
-
-                options = sorted(talib.get_functions())
-                if not options:
-                    widget = Input(value="" if value is None else str(value))
-                else:
-                    current = value if value in options else options[0]
-                    widget = Select([(o, o) for o in options], value=current)
-            else:
+            options = list_talib_functions() if TALIB_AVAILABLE else []
+            if not options:
                 widget = Input(value="" if value is None else str(value))
+            else:
+                current = value if value in options else options[0]
+                widget = Select([(o, o) for o in options], value=current)
         elif (union_lit := _literal_from_union(annotation)) is not None:
             # If the type allows a list of literals, render as multi-select checkboxes
             if (union_list_lit := _list_literal_from_union(annotation)) is not None:
@@ -446,6 +470,15 @@ class ModelEditor(Screen):
             widget = TextArea(text=_yaml_from_value(value), language="yaml")
             widget.styles.height = 4
             self._column_pick_map[f"pick_{name}"] = name
+        elif self.model_cls is TalibIndicatorConfig and name == "parameters":
+            initial = "{}" if value in (None, PydanticUndefined) else value
+            text = (
+                json.dumps(initial, indent=2, sort_keys=True)
+                if isinstance(initial, dict)
+                else _yaml_from_value(initial)
+            )
+            widget = TextArea(text=text, language="json")
+            widget.styles.height = 6
         elif annotation in (int, float, str):
             widget = Input(value="" if value is None else str(value))
         elif _is_list_of_basemodel(annotation) is not None:
@@ -485,6 +518,19 @@ class ModelEditor(Screen):
                         "Default: module-specific naming (leave empty to use default).",
                         classes="help",
                     )
+            if self.model_cls is TalibIndicatorConfig and name == "name":
+                selected = value
+                if isinstance(widget, Select):
+                    selected = widget.value
+                yield Static(
+                    Text(_talib_function_help(str(selected or ""))),
+                    classes="help",
+                )
+            if self.model_cls is TalibIndicatorConfig and name == "parameters":
+                yield Label(
+                    "JSON object passed as TA-Lib kwargs (e.g. {\"fastperiod\": 12, \"slowperiod\": 26}).",
+                    classes="help",
+                )
 
     def _should_render_field(self, name: str, annotation) -> bool:
         field_info = self.model_cls.model_fields.get(name)  # type: ignore[attr-defined]
@@ -957,6 +1003,48 @@ _MODULE_META_CACHE: Optional[tuple[dict, dict, dict]] = None
 _MODULE_REQUIRES_CACHE: Optional[dict[str, list[str]]] = None
 
 
+def _module_model_for_field(field_name: str):
+    if field_name.startswith("extension:"):
+        key = field_name.split(":", 1)[1]
+        return get_plugin_module_config_models().get(key)
+    field = PassConfig.model_fields.get(field_name)  # type: ignore[attr-defined]
+    if field is None:
+        return None
+    return _unwrap_optional(field.annotation)
+
+
+def _get_module_config_data(pass_data: dict, field_name: str) -> dict:
+    if field_name.startswith("extension:"):
+        key = field_name.split(":", 1)[1]
+        ext = pass_data.get("extension_configs", {})
+        if hasattr(ext, "model_dump"):
+            ext = ext.model_dump()
+        if not isinstance(ext, dict):
+            ext = {}
+        cfg = ext.get(key, {})
+    else:
+        cfg = pass_data.get(field_name, {})
+    if hasattr(cfg, "model_dump"):
+        cfg = cfg.model_dump()
+    if not isinstance(cfg, dict):
+        return {}
+    return dict(cfg)
+
+
+def _set_module_config_data(pass_data: dict, field_name: str, value: dict) -> None:
+    if field_name.startswith("extension:"):
+        key = field_name.split(":", 1)[1]
+        ext = pass_data.get("extension_configs", {})
+        if hasattr(ext, "model_dump"):
+            ext = ext.model_dump()
+        if not isinstance(ext, dict):
+            ext = {}
+        ext[key] = value
+        pass_data["extension_configs"] = ext
+        return
+    pass_data[field_name] = value
+
+
 def _module_meta() -> tuple[dict, dict, dict]:
     global _MODULE_META_CACHE
     if _MODULE_META_CACHE is not None:
@@ -996,6 +1084,46 @@ def _module_meta() -> tuple[dict, dict, dict]:
         if ui.get("tier"):
             meta["tier"] = ui["tier"]
         field_map.setdefault(module_name, []).append(field_name)
+        keys = ui.get("schema_keys") or []
+        if module_name not in schema_keys:
+            schema_keys[module_name] = []
+        for key in keys:
+            if key not in schema_keys[module_name]:
+                schema_keys[module_name].append(key)
+
+    for spec in get_plugin_module_configs():
+        module_name = spec.get("module")
+        config_key = spec.get("config_key") or module_name
+        model_cls = spec.get("model")
+        if not isinstance(module_name, str) or not module_name:
+            continue
+        if not isinstance(config_key, str) or not config_key:
+            continue
+        if not _is_basemodel(model_cls):
+            continue
+        ui = (
+            getattr(model_cls, "model_config", {})
+            .get("json_schema_extra", {})
+            .get("ui")
+        )
+        if not isinstance(ui, dict):
+            continue
+        meta = module_info.setdefault(
+            module_name,
+            {
+                "desc": "",
+                "columns": [],
+                "tier": "extension",
+            },
+        )
+        if ui.get("desc") and not meta["desc"]:
+            meta["desc"] = ui["desc"]
+        outputs = ui.get("outputs")
+        if outputs and not meta["columns"]:
+            meta["columns"] = list(outputs)
+        if ui.get("tier"):
+            meta["tier"] = ui["tier"]
+        field_map.setdefault(module_name, []).append(f"extension:{config_key}")
         keys = ui.get("schema_keys") or []
         if module_name not in schema_keys:
             schema_keys[module_name] = []
@@ -1063,10 +1191,7 @@ def _module_source_config_specs(module_key: str) -> list[tuple[str, str, str]]:
     _, field_map, _ = _module_meta()
     specs: list[tuple[str, str, str]] = []
     for field_name in field_map.get(module_key, []):
-        field = PassConfig.model_fields.get(field_name)  # type: ignore[attr-defined]
-        if field is None:
-            continue
-        model_cls = _unwrap_optional(field.annotation)
+        model_cls = _module_model_for_field(field_name)
         model_fields = getattr(model_cls, "model_fields", {})
         for key in model_fields:
             label: Optional[str] = None
@@ -1082,10 +1207,7 @@ def _module_source_config_specs(module_key: str) -> list[tuple[str, str, str]]:
 
 
 def _module_source_default(field_name: str, config_key: str) -> Optional[str]:
-    field = PassConfig.model_fields.get(field_name)  # type: ignore[attr-defined]
-    if field is None:
-        return None
-    model_cls = _unwrap_optional(field.annotation)
+    model_cls = _module_model_for_field(field_name)
     model_fields = getattr(model_cls, "model_fields", {})
     source_field = model_fields.get(config_key)
     if source_field is None:
@@ -1106,11 +1228,7 @@ def _module_source_default(field_name: str, config_key: str) -> Optional[str]:
 def _module_source_config_pairs(pass_data: dict, module_key: str) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     for field_name, config_key, input_name in _module_source_config_specs(module_key):
-        cfg = pass_data.get(field_name, {})
-        if hasattr(cfg, "model_dump"):
-            cfg = cfg.model_dump()
-        if not isinstance(cfg, dict):
-            cfg = {}
+        cfg = _get_module_config_data(pass_data, field_name)
         source = cfg.get(config_key)
         if not isinstance(source, str) or not source:
             source = _module_source_default(field_name, config_key)
@@ -1204,7 +1322,7 @@ def _derive_timeline_mode(pass_data: dict) -> str:
     if isinstance(mode, str) and mode:
         return mode
     modules = set(pass_data.get("modules", []) or [])
-    if "events" in modules:
+    if "external_events" in modules or "events" in modules:
         return "event"
     if "dense" in modules:
         return "dense"
@@ -1219,6 +1337,72 @@ def _timeline_mode_label(mode: str) -> str:
         "event": "event",
     }
     return labels.get(mode, mode)
+
+
+def _external_events_preview(pass_data: dict, axis_width: int = 51) -> str:
+    cfg = pass_data.get("external_event_analytics", {}) if isinstance(pass_data, dict) else {}
+    if hasattr(cfg, "model_dump"):
+        cfg = cfg.model_dump()
+    if not isinstance(cfg, dict):
+        cfg = {}
+    radius = float(cfg.get("radius_seconds", 0.0) or 0.0)
+    directions = str(cfg.get("directions", "both") or "both")
+    extra = int(cfg.get("extra_observations", 0) or 0)
+    scale = float(cfg.get("scale_factor", 1.0) or 1.0)
+    if radius <= 0 or extra <= 0:
+        return "External events context: anchors only (no before/after context)."
+    try:
+        from basalt.time.external_events import ExternalEventsAnalytics
+
+        offsets = ExternalEventsAnalytics.build_context_offsets(
+            radius_seconds=radius,
+            directions=directions,
+            extra_observations=extra,
+            scale_factor=scale,
+        )
+    except Exception:
+        return (
+            "External events context: "
+            f"radius={radius:g}s, directions={directions}, extra={extra}, scale_factor={scale:g}."
+        )
+
+    offsets_sorted = sorted(offsets, key=lambda x: x[1])
+    values = " ".join(f"{delta:g}s" for _, delta in offsets_sorted)
+    span = max(abs(radius), 1e-9)
+    width = max(21, axis_width)
+    if width % 2 == 0:
+        width -= 1
+    axis = [" "] * width
+    center = width // 2
+    for _, delta in offsets_sorted:
+        pos = int(round((delta / span) * center)) + center
+        pos = max(0, min(width - 1, pos))
+        axis[pos] = "."
+    # Keep the event anchor visible even when delta=0 is also a sampled point.
+    axis[center] = "|"
+    scale_txt = "arithmetic" if scale <= 1.0 else f"geometric(base={scale:g})"
+    return (
+        f"External events context [{directions}, radius={radius:g}s, extra={extra}, {scale_txt}]\n"
+        f"[{''.join(axis)}]\n"
+        f"{values}"
+    )
+
+
+def _render_external_events_preview(pass_data: dict, axis_width: int = 51) -> Text:
+    raw = _external_events_preview(pass_data, axis_width=axis_width)
+    lines = raw.splitlines()
+    if len(lines) < 3:
+        return Text(raw)
+    rendered = Text()
+    rendered.append(lines[0], style="bold")
+    rendered.append("\n")
+    rendered.append(lines[1], style="bold cyan")
+    rendered.append("\n")
+    rendered.append(lines[2], style="dim")
+    for extra in lines[3:]:
+        rendered.append("\n")
+        rendered.append(extra, style="dim")
+    return rendered
 
 
 class PassListEditor(Screen):
@@ -1290,10 +1474,28 @@ class PassListEditor(Screen):
             if hasattr(self.app, "_refresh_summary"):
                 self.app._refresh_summary()
         elif button_id == "add":
-            self._open_pass_editor()
+            self._ensure_unlocked(self._open_pass_editor)
         elif button_id.startswith("edit_"):
             idx = int(button_id.split("_", 1)[1])
-            self._edit_pass(idx)
+            self._ensure_unlocked(lambda: self._edit_pass(idx))
+
+    def _ensure_unlocked(self, action) -> None:
+        if not self.pass_readonly:
+            action()
+            return
+
+        def _on_confirm():
+            self.pass_readonly = False
+            if self.on_readonly_change:
+                self.on_readonly_change(False)
+            action()
+
+        self.app.push_screen(
+            ConfirmScreen(
+                "Passes are in read-only mode. Editing will change the process. Continue?",
+                on_confirm=_on_confirm,
+            )
+        )
 
     def _open_pass_editor(self) -> None:
         def _on_save(updated):
@@ -1358,6 +1560,7 @@ class PassEditor(Screen):
         self._full_schema_counts: Optional[dict[str, int]] = None
         self._module_edit_map: dict[str, str] = {}
         self._render_token = 0
+        self._timeline_render_token = 0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -1410,7 +1613,7 @@ class PassEditor(Screen):
                     ("Sparse original (TimeBucket=timestamp)", "sparse_original"),
                     ("Sparse digitised (TimeBucket=ceil timestamp)", "sparse_digitised"),
                     ("Dense", "dense"),
-                    ("Event", "event"),
+                    ("External events", "event"),
                 ],
                 value=default_timeline,
             )
@@ -1460,7 +1663,7 @@ class PassEditor(Screen):
                 "modules",
                 "module_inputs",
                 "dense_analytics",
-                "event_analytics",
+                "external_event_analytics",
                 "generic_analytics",
                 "quality_checks",
             }
@@ -1481,13 +1684,9 @@ class PassEditor(Screen):
             def _on_save(module_inputs: dict, config_updates: dict[str, dict[str, str]]):
                 self.data["module_inputs"] = module_inputs
                 for field_name, patch in config_updates.items():
-                    existing = self.data.get(field_name, {})
-                    if hasattr(existing, "model_dump"):
-                        existing = existing.model_dump()
-                    if not isinstance(existing, dict):
-                        existing = {}
+                    existing = _get_module_config_data(self.data, field_name)
                     existing.update(patch)
-                    self.data[field_name] = existing
+                    _set_module_config_data(self.data, field_name, existing)
 
             screen = ModuleInputsEditor(
                 pass_data=self.data,
@@ -1497,7 +1696,7 @@ class PassEditor(Screen):
             )
             self.app.push_screen(screen)
             return
-        if button_id == "edit_dense":
+        if button_id.startswith("edit_dense"):
             def _on_save(updated):
                 self.data["dense_analytics"] = updated
             current = self.data.get("dense_analytics", {})
@@ -1512,17 +1711,17 @@ class PassEditor(Screen):
             )
             self.app.push_screen(screen)
             return
-        if button_id == "edit_event":
+        if button_id.startswith("edit_event"):
             def _on_save(updated):
-                self.data["event_analytics"] = updated
-            current = self.data.get("event_analytics", {})
-            event_model = PassConfig.model_fields["event_analytics"].annotation  # type: ignore[assignment]
+                self.data["external_event_analytics"] = updated
+            current = self.data.get("external_event_analytics", {})
+            event_model = PassConfig.model_fields["external_event_analytics"].annotation  # type: ignore[assignment]
             screen = ModelEditor(
                 event_model,
                 current
                 if isinstance(current, dict)
                 else getattr(current, "model_dump", lambda: {})(),
-                title="PassConfig.event_analytics",
+                title="PassConfig.external_event_analytics",
                 on_save=_on_save,
             )
             self.app.push_screen(screen)
@@ -1576,7 +1775,7 @@ class PassEditor(Screen):
 
         selected_modules = [key for key, cb in self.widgets["modules"] if cb.value]
         selected_modules = [
-            m for m in selected_modules if m not in {"dense", "events"}
+            m for m in selected_modules if m not in {"dense", "external_events"}
         ]
         pass_type = self.widgets["pass_type"].value
         timeline_mode = self.widgets["timeline_mode"].value or "dense"
@@ -1605,23 +1804,55 @@ class PassEditor(Screen):
                 dense_cfg = {}
             dense_cfg["ENABLED"] = True
             self.data["dense_analytics"] = dense_cfg
-            selected_modules = [m for m in selected_modules if m != "events"]
+            selected_modules = [m for m in selected_modules if m != "external_events"]
         elif timeline_mode == "event":
-            selected_modules.append("events")
+            selected_modules.append("external_events")
             dense_cfg = self.data.get("dense_analytics", {})
             if not isinstance(dense_cfg, dict):
                 dense_cfg = {}
             dense_cfg["ENABLED"] = False
             self.data["dense_analytics"] = dense_cfg
-            event_cfg = self.data.get("event_analytics", {})
+            event_cfg = self.data.get("external_event_analytics", {})
             if not isinstance(event_cfg, dict):
                 event_cfg = {}
+            try:
+                event_cfg["radius_seconds"] = float(
+                    self.widgets.get("ext_radius_seconds").value
+                )
+            except Exception:
+                self.status.update(
+                    "external_event_analytics.radius_seconds must be a number"
+                )
+                return
+            event_cfg["directions"] = (
+                self.widgets.get("ext_directions").value
+                if self.widgets.get("ext_directions")
+                else event_cfg.get("directions", "both")
+            )
+            try:
+                event_cfg["extra_observations"] = int(
+                    self.widgets.get("ext_extra_observations").value
+                )
+            except Exception:
+                self.status.update(
+                    "external_event_analytics.extra_observations must be an integer"
+                )
+                return
+            try:
+                event_cfg["scale_factor"] = float(
+                    self.widgets.get("ext_scale_factor").value
+                )
+            except Exception:
+                self.status.update(
+                    "external_event_analytics.scale_factor must be a number"
+                )
+                return
             event_cfg["ENABLED"] = True
-            self.data["event_analytics"] = event_cfg
+            self.data["external_event_analytics"] = event_cfg
             selected_modules = [m for m in selected_modules if m != "dense"]
         else:
             selected_modules = [
-                m for m in selected_modules if m not in {"dense", "events"}
+                m for m in selected_modules if m not in {"dense", "external_events"}
             ]
             dense_cfg = self.data.get("dense_analytics", {})
             if not isinstance(dense_cfg, dict):
@@ -1653,22 +1884,136 @@ class PassEditor(Screen):
         self._render_timeline_controls()
         self._render_modules()
 
+    def on_resize(self) -> None:
+        if self.widgets.get("timeline_mode") is None:
+            return
+        if self.widgets["timeline_mode"].value != "event":
+            return
+        self.call_after_refresh(self._update_external_events_preview_from_widgets)
+
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "pass_type":
             self.call_after_refresh(self._render_modules)
         if event.select.id == "timeline_mode":
             self.call_after_refresh(self._render_timeline_controls)
+        if event.select.id == "ext_directions":
+            self._update_external_events_preview_from_widgets()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id in {
+            "ext_radius_seconds",
+            "ext_extra_observations",
+            "ext_scale_factor",
+        }:
+            self._update_external_events_preview_from_widgets()
 
     def _render_timeline_controls(self) -> None:
         controls = self.widgets.get("timeline_controls")
         if controls is None or not controls.is_attached:
             return
         controls.remove_children()
+        self._timeline_render_token += 1
+        suffix = str(self._timeline_render_token)
         mode = self.widgets.get("timeline_mode").value if self.widgets.get("timeline_mode") else "dense"
         if mode == "dense":
-            controls.mount(Button("Edit dense timeline config", id="edit_dense"))
+            controls.mount(
+                Button(
+                    "Edit dense timeline config",
+                    id=f"edit_dense_{suffix}",
+                )
+            )
         elif mode == "event":
-            controls.mount(Button("Edit event timeline config", id="edit_event"))
+            cfg = self.data.get("external_event_analytics", {})
+            if hasattr(cfg, "model_dump"):
+                cfg = cfg.model_dump()
+            if not isinstance(cfg, dict):
+                cfg = {}
+            radius = Input(value=str(cfg.get("radius_seconds", 0.0)), id="ext_radius_seconds")
+            directions = Select(
+                [("Both", "both"), ("Backward only", "backward"), ("Forward only", "forward")],
+                value=cfg.get("directions", "both"),
+                id="ext_directions",
+            )
+            extra = Input(
+                value=str(cfg.get("extra_observations", 0)),
+                id="ext_extra_observations",
+            )
+            scale = Input(value=str(cfg.get("scale_factor", 1.0)), id="ext_scale_factor")
+            self.widgets["ext_radius_seconds"] = radius
+            self.widgets["ext_directions"] = directions
+            self.widgets["ext_extra_observations"] = extra
+            self.widgets["ext_scale_factor"] = scale
+            controls.mount(Label("Radius (seconds)"))
+            controls.mount(radius)
+            controls.mount(Label("Directions"))
+            controls.mount(directions)
+            controls.mount(Label("Extra observations per enabled direction"))
+            controls.mount(extra)
+            controls.mount(Label("Scale factor (1=arithmetic, >1=geometric base)"))
+            controls.mount(scale)
+            preview = Static(
+                _render_external_events_preview(
+                    self.data, axis_width=self._preview_axis_width()
+                ),
+                classes="help",
+                id="ext_preview",
+            )
+            self.widgets["ext_preview"] = preview
+            controls.mount(preview)
+
+    def _preview_axis_width(self) -> int:
+        preview = self.widgets.get("ext_preview")
+        if preview is not None and getattr(preview, "is_attached", False):
+            width = int(getattr(preview.size, "width", 0) or 0)
+            if width > 0:
+                return max(21, width - 2)
+        controls = self.widgets.get("timeline_controls")
+        if controls is not None and getattr(controls, "is_attached", False):
+            width = int(getattr(controls.size, "width", 0) or 0)
+            if width > 0:
+                return max(21, width - 4)
+        return 51
+
+    def _update_external_events_preview_from_widgets(self) -> None:
+        if self.widgets.get("timeline_mode") is None:
+            return
+        if self.widgets["timeline_mode"].value != "event":
+            return
+        cfg = self.data.get("external_event_analytics", {})
+        if hasattr(cfg, "model_dump"):
+            cfg = cfg.model_dump()
+        if not isinstance(cfg, dict):
+            cfg = {}
+        parse_errors: list[str] = []
+        try:
+            cfg["radius_seconds"] = float(self.widgets["ext_radius_seconds"].value)
+        except Exception:
+            parse_errors.append("radius must be numeric")
+        if self.widgets.get("ext_directions") is not None:
+            cfg["directions"] = self.widgets["ext_directions"].value or "both"
+        try:
+            cfg["extra_observations"] = int(self.widgets["ext_extra_observations"].value)
+        except Exception:
+            parse_errors.append("extra observations must be an integer")
+        try:
+            cfg["scale_factor"] = float(self.widgets["ext_scale_factor"].value)
+        except Exception:
+            parse_errors.append("scale factor must be numeric")
+        self.data["external_event_analytics"] = cfg
+        preview = self.widgets.get("ext_preview")
+        if preview is not None and getattr(preview, "is_attached", False):
+            axis_width = self._preview_axis_width()
+            rendered = _render_external_events_preview(
+                {"external_event_analytics": cfg},
+                axis_width=axis_width,
+            )
+            if parse_errors:
+                rendered.append("\n")
+                rendered.append(
+                    f"Input warning: {', '.join(parse_errors)}",
+                    style="bold yellow",
+                )
+            preview.update(rendered)
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         if self.widgets.get("modules_box") is None:
@@ -1707,7 +2052,7 @@ class PassEditor(Screen):
         module_info, _, _ = _module_meta()
 
         for key, meta in module_info.items():
-            if key in {"dense", "events"}:
+            if key in {"dense", "external_events"}:
                 continue
             if meta["tier"] == "advanced" and not self.advanced_modules:
                 continue
@@ -1743,14 +2088,12 @@ class PassEditor(Screen):
             )
 
     def _open_module_editor(self, field_name: str) -> None:
-        current = self.data.get(field_name, {})
-        if not isinstance(current, dict):
-            current = {}
-        annotation = PassConfig.model_fields.get(field_name).annotation  # type: ignore[attr-defined]
+        current = _get_module_config_data(self.data, field_name)
+        annotation = _module_model_for_field(field_name)
         if _is_basemodel(annotation):
 
             def _on_save(updated):
-                self.data[field_name] = updated
+                _set_module_config_data(self.data, field_name, updated)
 
             screen = ModelEditor(
                 annotation,
@@ -1837,7 +2180,7 @@ def _module_metric_count(data: dict, module_key: str) -> Optional[int]:
             + len(cfg.get("derived_metrics", []))
         )
     if module_key == "iceberg":
-        cfg = data.get("iceberg_analytics", {}) or {}
+        cfg = _get_module_config_data(data, "extension:iceberg_analytics")
         if not isinstance(cfg, dict):
             return None
         return len(cfg.get("metrics", []))
@@ -1976,11 +2319,7 @@ class ModuleInputsEditor(Screen):
                     yield select
                     shown = True
                 for field_name, config_key, input_name in source_specs:
-                    cfg = self.pass_data.get(field_name, {})
-                    if hasattr(cfg, "model_dump"):
-                        cfg = cfg.model_dump()
-                    if not isinstance(cfg, dict):
-                        cfg = {}
+                    cfg = _get_module_config_data(self.pass_data, field_name)
                     current_source = cfg.get(config_key)
                     if not isinstance(current_source, str) or not current_source:
                         current_source = _module_source_default(field_name, config_key)

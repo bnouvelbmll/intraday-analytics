@@ -11,3 +11,11 @@ __all__ = [
     "k8s_install",
     "get_cli_extension",
 ]
+
+
+def get_basalt_plugin():
+    return {
+        "name": "kubernetes",
+        "provides": ["kubernetes executor"],
+        "cli_extensions": ["k8s"],
+    }

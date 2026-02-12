@@ -13,8 +13,8 @@ from .analytics_base import BaseAnalytics, BaseTWAnalytics
 
 
 def _order_modules_for_timeline(module_names: list[str]) -> list[str]:
-    time_modules = [m for m in module_names if m in {"dense", "events"}]
-    other_modules = [m for m in module_names if m not in {"dense", "events"}]
+    time_modules = [m for m in module_names if m in {"dense", "external_events"}]
+    other_modules = [m for m in module_names if m not in {"dense", "external_events"}]
     return time_modules + other_modules
 
 

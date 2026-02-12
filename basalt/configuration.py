@@ -8,14 +8,12 @@ from .analytics.trade import TradeAnalyticsConfig
 from .analytics.execution import ExecutionAnalyticsConfig
 from .analytics.generic import GenericAnalyticsConfig
 from .analytics.reaggregate import ReaggregateAnalyticsConfig
-from .preprocessors.iceberg import IcebergAnalyticsConfig
 from .analytics.cbbo import CBBOAnalyticsConfig
-from .preprocessors.cbbo_preprocess import CBBOPreprocessConfig
-from .analytics.characteristics.l3_characteristics import L3CharacteristicsConfig
-from .analytics.characteristics.trade_characteristics import TradeCharacteristicsConfig
-from .analytics.alpha101.alpha101 import Alpha101AnalyticsConfig
-from .time.events import EventAnalyticsConfig
+from .time.external_events import ExternalEventsAnalyticsConfig
+from .analytics.observed_events import ObservedEventsAnalyticsConfig
 from .analytics.correlation import CorrelationAnalyticsConfig
+from .plugins import get_plugin_module_config_models
+
 
 
 class QualityCheckConfig(BaseModel):
@@ -183,6 +181,14 @@ class PassConfig(BaseModel):
         ),
         json_schema_extra={"section": "Advanced"},
     )
+    extension_configs: Dict[str, Dict] = Field(
+        default_factory=dict,
+        description=(
+            "Plugin-provided module configs keyed by config key or module name "
+            "(e.g. {'iceberg_analytics': {...}})."
+        ),
+        json_schema_extra={"section": "Advanced"},
+    )
     extra_outputs: List[OutputTarget] = Field(
         default_factory=list,
         description="Optional additional output targets for this pass.",
@@ -196,33 +202,51 @@ class PassConfig(BaseModel):
     execution_analytics: ExecutionAnalyticsConfig = Field(
         default_factory=ExecutionAnalyticsConfig
     )
-    iceberg_analytics: IcebergAnalyticsConfig = Field(
-        default_factory=IcebergAnalyticsConfig
-    )
     cbbo_analytics: CBBOAnalyticsConfig = Field(default_factory=CBBOAnalyticsConfig)
-    cbbo_preprocess: CBBOPreprocessConfig = Field(
-        default_factory=CBBOPreprocessConfig
-    )
-    l3_characteristics_analytics: L3CharacteristicsConfig = Field(
-        default_factory=L3CharacteristicsConfig
-    )
-    trade_characteristics_analytics: TradeCharacteristicsConfig = Field(
-        default_factory=TradeCharacteristicsConfig
-    )
     generic_analytics: GenericAnalyticsConfig = Field(
         default_factory=GenericAnalyticsConfig
     )
     reaggregate_analytics: ReaggregateAnalyticsConfig = Field(
         default_factory=ReaggregateAnalyticsConfig
     )
-    alpha101_analytics: Alpha101AnalyticsConfig = Field(
-        default_factory=Alpha101AnalyticsConfig
+    external_event_analytics: ExternalEventsAnalyticsConfig = Field(
+        default_factory=ExternalEventsAnalyticsConfig
     )
-    event_analytics: EventAnalyticsConfig = Field(default_factory=EventAnalyticsConfig)
+    observed_events_analytics: ObservedEventsAnalyticsConfig = Field(
+        default_factory=ObservedEventsAnalyticsConfig
+    )
     correlation_analytics: CorrelationAnalyticsConfig = Field(
         default_factory=CorrelationAnalyticsConfig
     )
     quality_checks: QualityCheckConfig = Field(default_factory=QualityCheckConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_event_keys(cls, data):
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        known_fields = set(cls.model_fields.keys())  # type: ignore[attr-defined]
+        modules = out.get("modules")
+        if isinstance(modules, list):
+            out["modules"] = [
+                "external_events" if m == "events" else m for m in modules
+            ]
+        if "event_analytics" in out and "external_event_analytics" not in out:
+            out["external_event_analytics"] = out.get("event_analytics")
+        extension_configs = dict(out.get("extension_configs") or {})
+        for key in list(out.keys()):
+            if key in known_fields:
+                continue
+            value = out.get(key)
+            if not isinstance(value, dict):
+                continue
+            if key.endswith("_analytics") or key.endswith("_preprocess"):
+                extension_configs.setdefault(key, value)
+                out.pop(key, None)
+        if extension_configs:
+            out["extension_configs"] = extension_configs
+        return out
 
     @model_validator(mode="after")
     def propagate_pass_settings(self) -> "PassConfig":
@@ -230,7 +254,7 @@ class PassConfig(BaseModel):
         modules = list(dict.fromkeys(self.modules or []))
         mode = self.timeline_mode
         if mode is None:
-            if "events" in modules:
+            if "external_events" in modules:
                 mode = PassTimelineMode.EVENT
             elif "dense" in modules:
                 mode = PassTimelineMode.DENSE
@@ -239,19 +263,21 @@ class PassConfig(BaseModel):
             self.timeline_mode = mode
 
         if mode == PassTimelineMode.DENSE:
-            modules = [m for m in modules if m != "events"]
+            modules = [m for m in modules if m != "external_events"]
             modules = [m for m in modules if m != "dense"]
             modules.insert(0, "dense")
             self.dense_analytics.ENABLED = True
+            self.external_event_analytics.ENABLED = False
         elif mode == PassTimelineMode.EVENT:
             modules = [m for m in modules if m != "dense"]
-            modules = [m for m in modules if m != "events"]
-            modules.insert(0, "events")
+            modules = [m for m in modules if m != "external_events"]
+            modules.insert(0, "external_events")
             self.dense_analytics.ENABLED = False
-            self.event_analytics.ENABLED = True
+            self.external_event_analytics.ENABLED = True
         else:
-            modules = [m for m in modules if m not in {"dense", "events"}]
+            modules = [m for m in modules if m not in {"dense", "external_events"}]
             self.dense_analytics.ENABLED = False
+            self.external_event_analytics.ENABLED = False
         self.modules = modules
 
         self.dense_analytics.time_bucket_seconds = self.time_bucket_seconds
@@ -260,10 +286,38 @@ class PassConfig(BaseModel):
         self.l2_analytics.time_bucket_seconds = self.time_bucket_seconds
         self.l2_analytics.time_bucket_anchor = self.time_bucket_anchor
         self.l2_analytics.time_bucket_closed = self.time_bucket_closed
-        self.l3_characteristics_analytics.time_bucket_seconds = self.time_bucket_seconds
-        self.trade_characteristics_analytics.time_bucket_seconds = (
-            self.time_bucket_seconds
-        )
+        model_map = get_plugin_module_config_models()
+        updated_extensions: Dict[str, Dict] = {}
+        for key, cfg in (self.extension_configs or {}).items():
+            if not isinstance(cfg, dict):
+                continue
+            model = model_map.get(key)
+            if model is None:
+                updated_extensions[key] = dict(cfg)
+                continue
+            patched = dict(cfg)
+            model_fields = getattr(model, "model_fields", {})
+            if "time_bucket_seconds" in model_fields:
+                patched["time_bucket_seconds"] = patched.get(
+                    "time_bucket_seconds",
+                    int(self.time_bucket_seconds),
+                )
+            if "time_bucket_anchor" in model_fields:
+                patched["time_bucket_anchor"] = patched.get(
+                    "time_bucket_anchor",
+                    self.time_bucket_anchor,
+                )
+            if "time_bucket_closed" in model_fields:
+                patched["time_bucket_closed"] = patched.get(
+                    "time_bucket_closed",
+                    self.time_bucket_closed,
+                )
+            try:
+                patched = model.model_validate(patched).model_dump()
+            except Exception:
+                pass
+            updated_extensions[key] = patched
+        self.extension_configs = updated_extensions
         if self.sort_keys:
             if "TimeBucket" not in self.sort_keys:
                 self.sort_keys.append("TimeBucket")

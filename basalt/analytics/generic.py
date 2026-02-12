@@ -1,87 +1,52 @@
 import polars as pl
 import numpy as np
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Dict, Optional, Union, Literal
+from typing import Any, List, Dict, Optional, Union, Literal
 from basalt.analytics_base import BaseAnalytics
 from basalt.analytics_registry import register_analytics
 import logging
 
 try:
-    import talib
-
-    TALIB_AVAILABLE = True
-except ImportError:
+    from basalt.analytics.talib import (
+        TALIB_AVAILABLE,
+        TalibIndicatorConfig,
+        get_talib_function_metadata,
+        list_talib_functions,
+        talib,
+    )
+except Exception:
     TALIB_AVAILABLE = False
+    talib = None
 
+    class TalibIndicatorConfig(BaseModel):
+        """
+        Configuration for a single TA-Lib indicator.
 
-class TalibIndicatorConfig(BaseModel):
-    """
-    Configuration for a single TA-Lib indicator.
+        Fallback definition used when the optional `bmll-basalt-talib` package
+        is not installed.
+        """
 
-    Each entry defines the indicator name, input column, and optional parameters
-    used by the generic analytics postprocessing stage.
-    """
+        name: str = Field(..., description="TA-Lib indicator name (e.g., SMA, RSI).")
+        input_col: str = Field(..., description="Input column for the indicator.")
+        timeperiod: Optional[int] = Field(
+            14, description="Default timeperiod if not provided in parameters."
+        )
+        parameters: dict[str, Any] = Field(
+            default_factory=dict,
+            description="JSON kwargs passed to the TA-Lib function.",
+        )
+        output_col: Optional[str] = Field(
+            None, description="Optional output column name override."
+        )
+        output_index: int = Field(
+            0, description="Output index for multi-output TA-Lib functions."
+        )
 
-    name: str = Field(
-        ...,
-        description="TA-Lib indicator name (e.g., SMA, RSI).",
-        json_schema_extra={
-            "long_doc": "Name of the TA-Lib indicator to compute.\n"
-            "Examples: SMA, RSI, EMA, MACD.\n"
-            "Indicator must be supported by your TA-Lib installation.\n"
-            "Used in `GenericAnalytics.compute()` when applying indicators.\n"
-            "Some indicators require additional parameters (not currently exposed).\n"
-            "If an indicator is unsupported, computation may fail.\n"
-            "Use a single indicator per config entry.\n"
-            "Indicator outputs are added as new columns.\n"
-            "Naming can be overridden by output_col.",
-        },
-    )
-    input_col: str = Field(
-        ...,
-        description="Input column for the indicator (e.g., Close).",
-        json_schema_extra={
-            "long_doc": "Column from the source frame used as the indicator input.\n"
-            "Examples: Close, VWAP, Mid.\n"
-            "Must exist in the aggregated source data.\n"
-            "Used in `GenericAnalytics.compute()` when building indicator series.\n"
-            "If missing, indicator output will be null or error.\n"
-            "Ensure the column is produced by the source pass.\n"
-            "Input column affects indicator scale and meaning.\n"
-            "Changing input changes downstream interpretations.\n"
-            "Keep consistent across experiments.",
-        },
-    )
-    timeperiod: int = Field(
-        14,
-        description="Indicator time period (window length).",
-        json_schema_extra={
-            "long_doc": "Window length for the indicator computation.\n"
-            "Common default is 14 for many indicators.\n"
-            "Larger values smooth the indicator but lag more.\n"
-            "Smaller values respond quickly but are noisier.\n"
-            "Used by TA-Lib functions that accept a timeperiod.\n"
-            "If an indicator ignores timeperiod, this may be unused.\n"
-            "Use consistent periods across instruments for comparability.\n"
-            "Affects both output values and stability.\n"
-            "Changing this affects downstream signals.",
-        },
-    )
-    output_col: Optional[str] = Field(
-        None,
-        description="Optional output column name override.",
-        json_schema_extra={
-            "long_doc": "If set, overrides the default output column name.\n"
-            "Default names are derived from indicator name and input.\n"
-            "Use this to align with downstream expectations.\n"
-            "Avoid collisions with existing columns.\n"
-            "Used in `GenericAnalytics.compute()` when naming outputs.\n"
-            "If None, a default name is generated.\n"
-            "Changing the name affects downstream consumers.\n"
-            "Keep stable in production.\n"
-            "Useful when computing multiple indicators with same name.",
-        },
-    )
+    def list_talib_functions() -> list[str]:
+        return []
+
+    def get_talib_function_metadata(_name: str) -> dict[str, Any]:
+        return {}
 
 
 class GenericAnalyticsConfig(BaseModel):
@@ -286,15 +251,34 @@ class GenericAnalytics(BaseAnalytics):
                 lf = lf.sort(self.config.group_by)
 
                 for ind in self.config.talib_indicators:
-                    out_col = ind.output_col or f"{ind.name}_{ind.timeperiod}"
+                    default_suffix = (
+                        str(ind.timeperiod)
+                        if getattr(ind, "timeperiod", None) is not None
+                        else "raw"
+                    )
+                    out_col = ind.output_col or f"{ind.name}_{default_suffix}"
 
                     def compute_talib(
-                        s: pl.Series, name=ind.name, period=ind.timeperiod
+                        s: pl.Series,
+                        name=ind.name,
+                        period=ind.timeperiod,
+                        params=dict(getattr(ind, "parameters", {}) or {}),
+                        output_index=int(getattr(ind, "output_index", 0) or 0),
                     ) -> pl.Series:
                         try:
+                            if talib is None:
+                                return pl.Series([None] * len(s))
                             fn = getattr(talib, name)
+                            call_kwargs = dict(params)
+                            if period is not None and "timeperiod" not in call_kwargs:
+                                call_kwargs["timeperiod"] = period
                             # TA-Lib expects float64 numpy array
-                            res = fn(s.cast(pl.Float64).to_numpy(), timeperiod=period)
+                            res = fn(s.cast(pl.Float64).to_numpy(), **call_kwargs)
+                            if isinstance(res, (tuple, list)):
+                                if not res:
+                                    return pl.Series([None] * len(s))
+                                idx = max(0, min(output_index, len(res) - 1))
+                                res = res[idx]
                             return pl.Series(res)
                         except Exception as e:
                             logging.error(f"Error computing {name}: {e}")

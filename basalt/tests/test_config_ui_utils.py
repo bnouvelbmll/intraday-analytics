@@ -104,8 +104,46 @@ def test_pass_inputs_summary_includes_source_pass_modules():
 def test_derive_timeline_mode_from_config_or_modules():
     assert config_ui._derive_timeline_mode({"timeline_mode": "event"}) == "event"
     assert config_ui._derive_timeline_mode({"modules": ["trade", "dense"]}) == "dense"
-    assert config_ui._derive_timeline_mode({"modules": ["events"]}) == "event"
+    assert config_ui._derive_timeline_mode({"modules": ["external_events"]}) == "event"
     assert config_ui._derive_timeline_mode({"modules": ["trade"]}) == "dense"
+
+
+def test_external_events_preview_text():
+    text = config_ui._external_events_preview(
+        {
+            "external_event_analytics": {
+                "radius_seconds": 10.0,
+                "directions": "both",
+                "extra_observations": 2,
+                "scale_factor": 10.0,
+            }
+        }
+    )
+    assert "External events context [" in text
+    assert "|" in text
+    assert "0s" in text
+
+
+def test_talib_function_help_formats_metadata(monkeypatch):
+    monkeypatch.setattr(
+        config_ui,
+        "get_talib_function_metadata",
+        lambda _name: {
+            "description": "MACD",
+            "group": "Momentum Indicators",
+            "hint": "Moving Average Convergence/Divergence",
+            "parameters": [
+                {"name": "fastperiod", "default": 12},
+                {"name": "slowperiod", "default": 26},
+            ],
+            "output_names": ["macd", "macdsignal", "macdhist"],
+        },
+    )
+    text = config_ui._talib_function_help("MACD")
+    assert "MACD" in text
+    assert "Group: Momentum Indicators" in text
+    assert "fastperiod=12" in text
+    assert "Outputs: macd, macdsignal, macdhist" in text
 
 
 class _DummyApp(App):
