@@ -4,6 +4,8 @@ Basalt is a modular, multi-pass analytics framework for high-frequency market
 data (Trades, L2, L3, MarketState). It is optimized for large universes and
 long date ranges via batching, shredding, and process isolation.
 
+`BASALT` stands for `BMLL Advanced Statistical Analytics & Layered Transformations`.
+
 ## What It Does
 
 - Runs one or more analytics passes (`PassConfig`) over configurable time buckets.

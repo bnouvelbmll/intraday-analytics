@@ -79,7 +79,10 @@ else:
 setup(
     name=name,
     version=VERSION,
-    description="Basalt intraday analytics pipeline",
+    description=(
+        "BASALT (BMLL Advanced Statistical Analytics & Layered "
+        "Transformations) intraday analytics pipeline"
+    ),
     packages=packages,
     include_package_data=True,
     install_requires=install_requires,

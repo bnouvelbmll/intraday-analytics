@@ -4,6 +4,7 @@ import os
 import sys
 import fire
 
+from basalt import SUITE_FULL_NAME
 from basalt.cli import (
     bmll_job_install,
     bmll_job_run,
@@ -76,8 +77,13 @@ def _help_requested() -> bool:
     return any(arg in {"-h", "--help"} for arg in sys.argv)
 
 
+def _print_suite_header() -> None:
+    print(SUITE_FULL_NAME)
+
+
 def _pipeline_run(*, pipeline: str | None = None, **kwargs):
     if _help_requested():
+        _print_suite_header()
         print(
             "Usage: basalt pipeline run --pipeline <path_or_module> [options]\n"
             "Options are forwarded to the pipeline CLI (e.g. --start_date, --end_date, --batch_freq)."
@@ -104,6 +110,7 @@ def _job_run(*, pipeline: str | None = None, **kwargs):
     if _help_requested():
         from fire import helptext
 
+        _print_suite_header()
         print(helptext.HelpText(bmll_job_run))
         return None
     if pipeline and "config_file" not in kwargs:
@@ -176,6 +183,8 @@ class JobCLI:
 
 def main():
     _disable_fire_pager()
+    if _help_requested():
+        _print_suite_header()
     root = {
         "analytics": AnalyticsCLI,
         "pipeline": PipelineCLI,

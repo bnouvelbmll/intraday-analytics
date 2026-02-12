@@ -3,6 +3,8 @@
 This document describes the current architecture of Basalt: execution flow,
 module boundaries, and integration points.
 
+`BASALT` stands for `BMLL Advanced Statistical Analytics & Layered Transformations`.
+
 ## Core Principles
 
 1. Modularity: analytics/preprocessors are pluggable units selected per pass.
