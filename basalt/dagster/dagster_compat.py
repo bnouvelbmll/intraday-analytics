@@ -2146,8 +2146,8 @@ def _module_requires_map() -> dict[str, list[str]]:
     from .analytics.l3 import L3Analytics
     from .analytics.execution import ExecutionAnalytics
     from .analytics.generic import GenericAnalytics
-    from .characteristics.l3_characteristics import L3CharacteristicsAnalytics
-    from .characteristics.trade_characteristics import TradeCharacteristicsAnalytics
+    from .analytics.characteristics.l3_characteristics import L3CharacteristicsAnalytics
+    from .analytics.characteristics.trade_characteristics import TradeCharacteristicsAnalytics
     from .analytics.cbbo import CBBOAnalytics
     from .preprocessors.iceberg import IcebergAnalytics
 

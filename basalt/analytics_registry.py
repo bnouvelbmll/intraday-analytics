@@ -42,7 +42,7 @@ def discover_analytics():
     ):
         importlib.import_module(mod.name)
 
-    for pkg_name in ("basalt.preprocessors", "basalt.characteristics", "basalt.alpha101"):
+    for pkg_name in ("basalt.preprocessors", "basalt.analytics.characteristics", "basalt.analytics.alpha101"):
         try:
             pkg = importlib.import_module(pkg_name)
         except Exception:

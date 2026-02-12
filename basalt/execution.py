@@ -108,8 +108,8 @@ def _derive_tables_to_load(pass_config, user_tables):
     from .analytics.l3 import L3Analytics
     from .analytics.execution import ExecutionAnalytics
     from .analytics.generic import GenericAnalytics
-    from .characteristics.l3_characteristics import L3CharacteristicsAnalytics
-    from .characteristics.trade_characteristics import TradeCharacteristicsAnalytics
+    from .analytics.characteristics.l3_characteristics import L3CharacteristicsAnalytics
+    from .analytics.characteristics.trade_characteristics import TradeCharacteristicsAnalytics
 
     module_requires = {
         "dense": DenseAnalytics.REQUIRES,
