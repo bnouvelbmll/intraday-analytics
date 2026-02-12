@@ -25,6 +25,8 @@ extras = {
     "characteristics": [],
     "preprocessors": [],
     "alpha101": [],
+    "aws_ec2": [],
+    "kubernetes": [],
 }
 extras["all"] = sorted({dep for deps in extras.values() for dep in deps})
 
@@ -38,6 +40,8 @@ def _build_all_dists() -> None:
         "preprocessors",
         "characteristics",
         "alpha101",
+        "aws_ec2",
+        "kubernetes",
     ]
     for name in dist_names:
         env = os.environ.copy()
@@ -57,7 +61,12 @@ dist = os.environ.get("BASALT_DIST", "core")
 
 if dist == "core":
     name = "bmll-basalt"
-    packages = find_packages(exclude=("intraday_analytics*",))
+    packages = find_packages(
+        exclude=(
+            "intraday_analytics*",
+            "basalt.executors*",
+        )
+    )
     install_requires = core_requirements
     extras_require = extras
     entry_points = {
@@ -68,6 +77,36 @@ if dist == "core":
             "dagster=basalt.dagster.cli_ext:get_cli_extension",
         ],
     }
+elif dist in {"aws_ec2", "kubernetes"}:
+    name = f"bmll-basalt-{dist}"
+    extras_require = {}
+    if dist == "aws_ec2":
+        packages = find_packages(
+            include=(
+                "basalt.executors",
+                "basalt.executors.aws_ec2",
+                "basalt.executors.aws_ec2.*",
+            )
+        )
+        entry_points = {
+            "basalt.cli": [
+                "ec2=basalt.executors.aws_ec2:get_cli_extension",
+            ],
+        }
+    else:
+        packages = find_packages(
+            include=(
+                "basalt.executors",
+                "basalt.executors.kubernetes",
+                "basalt.executors.kubernetes.*",
+            )
+        )
+        entry_points = {
+            "basalt.cli": [
+                "k8s=basalt.executors.kubernetes:get_cli_extension",
+            ],
+        }
+    install_requires = ["bmll-basalt>=" + VERSION] + extras.get(dist, [])
 else:
     name = f"bmll-basalt-{dist}"
     extras_require = {}

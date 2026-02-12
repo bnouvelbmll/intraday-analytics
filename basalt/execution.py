@@ -87,10 +87,6 @@ def _resolve_batch_group_map(pass_config, ref: pl.DataFrame) -> dict | None:
         )
         return None
     return dict(zip(ref[SYMBOL_COL].to_list(), ref[group_key].to_list()))
-    try:
-        return pd.Timestamp(value).date().isoformat()
-    except Exception:
-        return value
 
 
 class _GetUniverseWrapper:
@@ -101,31 +97,17 @@ class _GetUniverseWrapper:
         return self._func(_coerce_to_iso_date(date_value))
 
 
-def _derive_tables_to_load(pass_config, user_tables):
-    from .dense_analytics import DenseAnalytics
-    from .analytics.trade import TradeAnalytics
-    from .analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
-    from .analytics.l3 import L3Analytics
-    from .analytics.execution import ExecutionAnalytics
-    from .analytics.generic import GenericAnalytics
-    from .analytics.characteristics.l3_characteristics import L3CharacteristicsAnalytics
-    from .analytics.characteristics.trade_characteristics import TradeCharacteristicsAnalytics
-
-    module_requires = {
-        "dense": DenseAnalytics.REQUIRES,
-        "trade": TradeAnalytics.REQUIRES,
-        "l2": L2AnalyticsLast.REQUIRES,
-        "l2tw": L2AnalyticsTW.REQUIRES,
-        "l3": L3Analytics.REQUIRES,
-        "execution": ExecutionAnalytics.REQUIRES,
-        "generic": GenericAnalytics.REQUIRES,
-        "l3_characteristics": L3CharacteristicsAnalytics.REQUIRES,
-        "trade_characteristics": TradeCharacteristicsAnalytics.REQUIRES,
-    }
-
+def _derive_tables_to_load(
+    pass_config,
+    user_tables,
+    known_context_sources: list[str] | None = None,
+):
+    from .analytics_registry import get_registered_entries
     from .tables import ALL_TABLES
 
+    entries = get_registered_entries()
     tables = []
+    known_context = set(known_context_sources or [])
 
     def add_table(name):
         if name not in tables:
@@ -137,13 +119,17 @@ def _derive_tables_to_load(pass_config, user_tables):
 
     module_inputs = pass_config.module_inputs or {}
     table_names = set(ALL_TABLES.keys())
-
-    for module in pass_config.modules:
+    for module in _resolve_module_names(pass_config):
+        entry = entries.get(module)
+        if not entry:
+            logging.warning("Module '%s' not found in analytics registry.", module)
+            continue
+        requires = list(getattr(entry.cls, "REQUIRES", []) or [])
         overrides = module_inputs.get(module)
-        requires = module_requires.get(module, [])
         if overrides is None:
             for name in requires:
-                add_table(name)
+                if name in table_names:
+                    add_table(name)
             continue
 
         if isinstance(overrides, str):
@@ -153,6 +139,8 @@ def _derive_tables_to_load(pass_config, user_tables):
                 )
             if overrides in table_names:
                 add_table(overrides)
+            elif overrides in known_context:
+                continue
             continue
 
         if isinstance(overrides, dict):
@@ -160,6 +148,8 @@ def _derive_tables_to_load(pass_config, user_tables):
                 source = overrides.get(name, name)
                 if source in table_names:
                     add_table(source)
+                elif source in known_context:
+                    continue
             continue
 
         raise ValueError(
@@ -645,6 +635,10 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
     try:
         for pass_config in config.PASSES:
             logging.info(f"🚀 Starting Pass {pass_config.name}")
+            if not pass_config.modules:
+                raise ValueError(
+                    f"Pass '{pass_config.name}' has no modules configured."
+                )
 
             batch_freq = pass_config.batch_freq or config.BATCH_FREQ
             date_batches = create_date_batches(
@@ -680,7 +674,9 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
                     f"🚀 Starting batch for dates: {sd.date()} -> {ed.date()} (Pass {pass_config.name})"
                 )
                 pass_tables_to_load = _derive_tables_to_load(
-                    pass_config, config.TABLES_TO_LOAD
+                    pass_config,
+                    config.TABLES_TO_LOAD,
+                    known_context_sources=[p.name for p in config.PASSES],
                 )
                 config = config.model_copy(
                     update={"TABLES_TO_LOAD": pass_tables_to_load}

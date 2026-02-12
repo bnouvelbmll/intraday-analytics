@@ -50,7 +50,8 @@ def discover_analytics():
         for mod in pkgutil.iter_modules(pkg.__path__, pkg.__name__ + "."):
             importlib.import_module(mod.name)
 
-    importlib.import_module("basalt.dense_analytics")
+    importlib.import_module("basalt.time.dense")
+    importlib.import_module("basalt.time.events")
     _DISCOVERED = True
 
 
@@ -91,3 +92,8 @@ def resolve_batch_group_by(module_names: list[str]) -> str | None:
             f"Multiple batch grouping keys requested: {sorted(group_keys)}"
         )
     return next(iter(group_keys))
+
+
+def get_registered_entries() -> Dict[str, AnalyticsEntry]:
+    discover_analytics()
+    return dict(_REGISTRY)

@@ -34,6 +34,80 @@ def test_counts_from_schema_uses_module_meta():
     assert counts.get("l2") == 3
 
 
+def test_input_source_choices_only_prior_passes():
+    config_data = {
+        "PASSES": [
+            {"name": "pass1"},
+            {"name": "pass2"},
+            {"name": "pass3"},
+        ]
+    }
+    choices = config_ui._input_source_choices(config_data, pass_index=2)
+    assert "pass1" in choices
+    assert "pass2" in choices
+    assert "pass3" not in choices
+
+
+def test_build_module_inputs_from_selection():
+    selected = {
+        ("l2", "l2"): "pass1",
+        ("execution", "trades"): "pass1",
+        ("execution", "l3"): "l3",
+    }
+    module_requires = {
+        "l2": ["l2"],
+        "execution": ["trades", "l3"],
+    }
+    out = config_ui._build_module_inputs_from_selection(selected, module_requires)
+    assert out["l2"] == "pass1"
+    assert out["execution"] == {"trades": "pass1", "l3": "l3"}
+
+
+def test_module_inputs_line_format():
+    line = config_ui._module_inputs_line(
+        {"module_inputs": {"l2": "pass1"}},
+        "l2",
+    )
+    assert "Inputs = [" in line
+    assert "(L2:pass1)" in line
+
+
+def test_module_inputs_line_uses_source_pass_defaults():
+    line = config_ui._module_inputs_line({"modules": ["generic"]}, "generic")
+    assert "Inputs = [" in line
+    assert "(DF:pass1)" in line
+
+
+def test_module_inputs_line_for_custom_module_from_module_inputs():
+    line = config_ui._module_inputs_line(
+        {"module_inputs": {"talib_metrics": "ohlcv_pass"}},
+        "talib_metrics",
+    )
+    assert "Inputs = [" in line
+    assert "(DF:ohlcv_pass)" in line
+
+
+def test_pass_inputs_summary_format():
+    summary = config_ui._pass_inputs_summary(
+        {"modules": ["l2"], "module_inputs": {"l2": "pass1"}}
+    )
+    assert "l2:[" in summary
+    assert "(L2:pass1)" in summary
+
+
+def test_pass_inputs_summary_includes_source_pass_modules():
+    summary = config_ui._pass_inputs_summary({"modules": ["generic"]})
+    assert "generic:[" in summary
+    assert "(DF:pass1)" in summary
+
+
+def test_derive_timeline_mode_from_config_or_modules():
+    assert config_ui._derive_timeline_mode({"timeline_mode": "event"}) == "event"
+    assert config_ui._derive_timeline_mode({"modules": ["trade", "dense"]}) == "dense"
+    assert config_ui._derive_timeline_mode({"modules": ["events"]}) == "event"
+    assert config_ui._derive_timeline_mode({"modules": ["trade"]}) == "dense"
+
+
 class _DummyApp(App):
     pass
 

@@ -19,7 +19,7 @@ from .analytics_base import (
     apply_overrides,
     default_hint_for_column,
 )
-from .dense_analytics import DenseAnalytics
+from .time.dense import DenseAnalytics
 from .analytics.l2 import (
     L2AnalyticsConfig,
     L2LiquidityConfig,
@@ -38,7 +38,7 @@ from .analytics.execution import (
 from .preprocessors.iceberg import IcebergAnalyticsConfig, IcebergMetricConfig
 from .analytics.cbbo import CBBOAnalytics, CBBOAnalyticsConfig
 from .analytics.alpha101.alpha101 import Alpha101Analytics, Alpha101AnalyticsConfig
-from .analytics.events import EventAnalyticsConfig
+from .time.events import EventAnalyticsConfig
 from .analytics.correlation import CorrelationAnalyticsConfig
 import pandas as pd
 

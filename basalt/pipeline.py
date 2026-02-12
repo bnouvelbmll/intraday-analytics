@@ -12,6 +12,12 @@ logger = logging.getLogger(__name__)
 from .analytics_base import BaseAnalytics, BaseTWAnalytics
 
 
+def _order_modules_for_timeline(module_names: list[str]) -> list[str]:
+    time_modules = [m for m in module_names if m in {"dense", "events"}]
+    other_modules = [m for m in module_names if m not in {"dense", "events"}]
+    return time_modules + other_modules
+
+
 def _resolve_module_inputs(pass_config: PassConfig, module: BaseAnalytics) -> dict[str, str]:
     overrides = pass_config.module_inputs or {}
     module_key = getattr(module, "name", None)
@@ -58,6 +64,10 @@ class AnalyticsPipeline:
         """
         Runs the analytics pipeline on a set of data tables for a single pass.
         """
+        if not self.modules:
+            raise ValueError(
+                f"Pass '{self.pass_config.name}' has no modules configured."
+            )
         base: pl.LazyFrame | None = None
         prev_specific_cols = {}
 
@@ -123,7 +133,17 @@ class AnalyticsPipeline:
                 base = lf_result
                 prev_specific_cols = module.specific_fill_cols
             else:
-                base = module.join(base, prev_specific_cols, self.config.DEFAULT_FFILL)
+                timeline_mode = getattr(self.pass_config, "timeline_mode", None)
+                if hasattr(timeline_mode, "value"):
+                    timeline_mode = timeline_mode.value
+                is_time_module = module.__class__.__module__.startswith("basalt.time.")
+                use_asof = bool(timeline_mode == "event" and not is_time_module)
+                base = module.join(
+                    base,
+                    prev_specific_cols,
+                    self.config.DEFAULT_FFILL,
+                    use_asof=use_asof,
+                )
                 if self.config.EAGER_EXECUTION:
                     base = base.collect().lazy()
                 prev_specific_cols.update(module.specific_fill_cols)
@@ -132,7 +152,7 @@ class AnalyticsPipeline:
         self.context[self.pass_config.name] = base.collect()
         return self.context[self.pass_config.name]
 
-    def save(self, df: pl.DataFrame, path: str, profile: bool = False):
+    def save(self, df: pl.DataFrame | pl.LazyFrame, path: str, profile: bool = False):
         """
         Saves the pipeline's output to a Parquet file.
 
@@ -143,12 +163,15 @@ class AnalyticsPipeline:
                             Overrides ENABLE_POLARS_PROFILING config if set to True.
         """
         should_profile = profile or self.config.ENABLE_POLARS_PROFILING
+        is_lazy = isinstance(df, pl.LazyFrame)
         if should_profile:
-            res = df.sort(["ListingId", "TimeBucket"]).profile(show_plot=True)
+            target = df if is_lazy else df.lazy()
+            res = target.sort(["ListingId", "TimeBucket"]).profile(show_plot=True)
             return res
-        df.sort(["ListingId", "TimeBucket"]).sink_parquet(
-            path, region="us-east-1"
-        )  # Ben;, region='us-east-1'
+        if is_lazy:
+            df.sort(["ListingId", "TimeBucket"]).sink_parquet(path)
+        else:
+            df.sort(["ListingId", "TimeBucket"]).write_parquet(path)
         return df
 
 
@@ -185,14 +208,21 @@ class AnalyticsRunner:
 
         # RUN SYMBOL BY SYMBOL
         if self.config.RUN_ONE_SYMBOL_AT_A_TIME:
+            symbols = set()
+            for df in batch_data.values():
+                if df is None:
+                    continue
+                cols = df.collect_schema().names() if hasattr(df, "collect_schema") else df.columns
+                if SYMBOL_COL not in cols:
+                    continue
+                if isinstance(df, pl.LazyFrame):
+                    sym_vals = df.select(SYMBOL_COL).collect()[SYMBOL_COL].to_list()
+                else:
+                    sym_vals = df[SYMBOL_COL].to_list()
+                symbols.update(sym_vals)
+
             for sym in sorted(
-                set().union(
-                    *[
-                        df.select(SYMBOL_COL).collect()[SYMBOL_COL].to_list()
-                        for df in batch_data.values()
-                        if len(df) > 0
-                    ]
-                )
+                symbols
             ):
                 tables_for_sym = {
                     name: df.filter(pl.col(SYMBOL_COL) == sym)
@@ -230,7 +260,7 @@ def create_pipeline(
 
     # Build the list of module instances for this pass
     modules = []
-    module_names = list(pass_config.modules)
+    module_names = _order_modules_for_timeline(list(pass_config.modules))
     if pass_config.trade_analytics.enable_retail_imbalance:
         if "retail_imbalance" not in module_names:
             module_names.append("retail_imbalance")
@@ -254,6 +284,12 @@ def create_pipeline(
             modules.append(factory())
         else:
             logging.warning(f"Module '{module_name}' not recognized in factory.")
+
+    if not modules:
+        raise ValueError(
+            f"Pass '{pass_config.name}' has no runnable modules. "
+            "Set PassConfig.modules with at least one registered module."
+        )
 
     config = kwargs.get("config")
     if config is None:

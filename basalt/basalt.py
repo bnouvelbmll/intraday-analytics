@@ -6,8 +6,6 @@ import fire
 
 from basalt import SUITE_FULL_NAME
 from basalt.cli import (
-    bmll_job_install,
-    bmll_job_run,
     run_cli,
 )
 from basalt import schema_utils
@@ -108,14 +106,50 @@ def _pipeline_run(*, pipeline: str | None = None, **kwargs):
 
 def _job_run(*, pipeline: str | None = None, **kwargs):
     if _help_requested():
-        from fire import helptext
-
         _print_suite_header()
-        print(helptext.HelpText(bmll_job_run))
+        print("Usage: basalt ec2 run --pipeline <path_or_module> [options]")
         return None
-    if pipeline and "config_file" not in kwargs:
-        kwargs["config_file"] = pipeline
-    return bmll_job_run(**kwargs)
+    return _ec2_run(pipeline=pipeline, **kwargs)
+
+
+def _ec2_run(*, pipeline: str | None = None, **kwargs):
+    try:
+        from basalt.executors.aws_ec2 import ec2_run
+    except Exception as exc:
+        raise SystemExit(
+            "EC2 executor is not installed. Install bmll-basalt-aws-ec2."
+        ) from exc
+    return ec2_run(pipeline=pipeline, **kwargs)
+
+
+def _ec2_install(*, pipeline: str | None = None, **kwargs):
+    try:
+        from basalt.executors.aws_ec2 import ec2_install
+    except Exception as exc:
+        raise SystemExit(
+            "EC2 executor is not installed. Install bmll-basalt-aws-ec2."
+        ) from exc
+    return ec2_install(pipeline=pipeline, **kwargs)
+
+
+def _k8s_run(*args, **kwargs):
+    try:
+        from basalt.executors.kubernetes import k8s_run
+    except Exception as exc:
+        raise SystemExit(
+            "Kubernetes executor is not installed. Install bmll-basalt-kubernetes."
+        ) from exc
+    return k8s_run(*args, **kwargs)
+
+
+def _k8s_install(*args, **kwargs):
+    try:
+        from basalt.executors.kubernetes import k8s_install
+    except Exception as exc:
+        raise SystemExit(
+            "Kubernetes executor is not installed. Install bmll-basalt-kubernetes."
+        ) from exc
+    return k8s_install(*args, **kwargs)
 
 
 def _load_cli_extensions() -> dict:
@@ -178,7 +212,27 @@ class JobCLI:
 
     @staticmethod
     def install(*args, **kwargs):
-        return bmll_job_install(*args, **kwargs)
+        return _ec2_install(*args, **kwargs)
+
+
+class EC2CLI:
+    @staticmethod
+    def run(*args, **kwargs):
+        return _ec2_run(*args, **kwargs)
+
+    @staticmethod
+    def install(*args, **kwargs):
+        return _ec2_install(*args, **kwargs)
+
+
+class K8SCLI:
+    @staticmethod
+    def run(*args, **kwargs):
+        return _k8s_run(*args, **kwargs)
+
+    @staticmethod
+    def install(*args, **kwargs):
+        return _k8s_install(*args, **kwargs)
 
 
 def main():
@@ -189,6 +243,8 @@ def main():
         "analytics": AnalyticsCLI,
         "pipeline": PipelineCLI,
         "job": JobCLI,
+        "ec2": EC2CLI,
+        "k8s": K8SCLI,
     }
     root.update(_load_cli_extensions())
     fire.Fire(root)

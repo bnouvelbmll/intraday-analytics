@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
 from typing import List, Dict, Optional, Literal, Union
 from enum import Enum
-from .dense_analytics import DenseAnalyticsConfig
+from .time.dense import DenseAnalyticsConfig
 from .analytics.l2 import L2AnalyticsConfig
 from .analytics.l3 import L3AnalyticsConfig
 from .analytics.trade import TradeAnalyticsConfig
@@ -14,7 +14,7 @@ from .preprocessors.cbbo_preprocess import CBBOPreprocessConfig
 from .analytics.characteristics.l3_characteristics import L3CharacteristicsConfig
 from .analytics.characteristics.trade_characteristics import TradeCharacteristicsConfig
 from .analytics.alpha101.alpha101 import Alpha101AnalyticsConfig
-from .analytics.events import EventAnalyticsConfig
+from .time.events import EventAnalyticsConfig
 from .analytics.correlation import CorrelationAnalyticsConfig
 
 
@@ -56,6 +56,13 @@ class BatchingStrategyType(str, Enum):
 class DenseOutputMode(str, Enum):
     ADAPTATIVE = "adaptative"
     UNIFORM = "uniform"
+
+
+class PassTimelineMode(str, Enum):
+    SPARSE_ORIGINAL = "sparse_original"
+    SPARSE_DIGITISED = "sparse_digitised"
+    DENSE = "dense"
+    EVENT = "event"
 
 
 class OutputType(str, Enum):
@@ -161,6 +168,13 @@ class PassConfig(BaseModel):
         None,
         description="Optional per-pass output target override.",
     )
+    timeline_mode: Optional[PassTimelineMode] = Field(
+        None,
+        description=(
+            "Output timeline mode: sparse_original, sparse_digitised, dense, or event."
+        ),
+        json_schema_extra={"section": "Core"},
+    )
     module_inputs: Dict[str, Union[str, Dict[str, str]]] = Field(
         default_factory=dict,
         description=(
@@ -213,6 +227,33 @@ class PassConfig(BaseModel):
     @model_validator(mode="after")
     def propagate_pass_settings(self) -> "PassConfig":
         """Propagate pass-level settings to sub-configs."""
+        modules = list(dict.fromkeys(self.modules or []))
+        mode = self.timeline_mode
+        if mode is None:
+            if "events" in modules:
+                mode = PassTimelineMode.EVENT
+            elif "dense" in modules:
+                mode = PassTimelineMode.DENSE
+            else:
+                mode = PassTimelineMode.DENSE
+            self.timeline_mode = mode
+
+        if mode == PassTimelineMode.DENSE:
+            modules = [m for m in modules if m != "events"]
+            modules = [m for m in modules if m != "dense"]
+            modules.insert(0, "dense")
+            self.dense_analytics.ENABLED = True
+        elif mode == PassTimelineMode.EVENT:
+            modules = [m for m in modules if m != "dense"]
+            modules = [m for m in modules if m != "events"]
+            modules.insert(0, "events")
+            self.dense_analytics.ENABLED = False
+            self.event_analytics.ENABLED = True
+        else:
+            modules = [m for m in modules if m not in {"dense", "events"}]
+            self.dense_analytics.ENABLED = False
+        self.modules = modules
+
         self.dense_analytics.time_bucket_seconds = self.time_bucket_seconds
         self.dense_analytics.time_bucket_anchor = self.time_bucket_anchor
         self.dense_analytics.time_bucket_closed = self.time_bucket_closed
@@ -463,11 +504,6 @@ class AnalyticsConfig(BaseModel):
     DEFAULT_FFILL: bool = Field(
         False,
         description="Forward-fill missing values when needed.",
-        json_schema_extra={"section": "Core"},
-    )
-    DENSE_OUTPUT: bool = Field(
-        True,
-        description="Emit dense output tables.",
         json_schema_extra={"section": "Core"},
     )
     MEMORY_PER_WORKER: int = Field(

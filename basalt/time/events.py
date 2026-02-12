@@ -16,6 +16,11 @@ class EventAnalyticsConfig(BaseModel):
 
     Emits sparse rows when local minima/maxima are detected on an indicator.
     Intended to run as a dedicated pass (sparse output).
+
+    Warning:
+    This module changes the timeline to event timestamps. Time-weighted metrics
+    (for example TWAP-style analytics) may become unintuitive on event-driven
+    rows, because gaps between events are irregular and context-dependent.
     """
 
     model_config = ConfigDict(

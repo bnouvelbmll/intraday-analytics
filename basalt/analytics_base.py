@@ -553,7 +553,11 @@ class BaseAnalytics(ABC):
         raise NotImplementedError
 
     def join(
-        self, base_df: pl.LazyFrame, other_specific_cols, default_ffill=False
+        self,
+        base_df: pl.LazyFrame,
+        other_specific_cols,
+        default_ffill: bool = False,
+        use_asof: bool = False,
     ) -> pl.LazyFrame:
         """
         Joins the computed analytics to a base DataFrame.
@@ -565,12 +569,59 @@ class BaseAnalytics(ABC):
         if self.df is None:
             raise ValueError(f"{self.name} has no computed data.")
 
-        r = dc(
-            base_df.join(
-                self.df, on=self.join_keys, how="full", suffix=f"_{self.name}"
-            ),
-            f"_{self.name}",
-        )
+        if use_asof and "TimeBucket" in self.join_keys:
+            by_cols = [c for c in self.join_keys if c != "TimeBucket"]
+            left = base_df
+            right = self.df
+            left_schema = left.collect_schema()
+            right_schema = right.collect_schema()
+            left_cast_cols = []
+            right_cast_cols = []
+            for c in by_cols + ["TimeBucket"]:
+                if c not in left_schema or c not in right_schema:
+                    continue
+                ldt = left_schema.get(c)
+                rdt = right_schema.get(c)
+                if ldt != rdt:
+                    int_types = {
+                        pl.Int8,
+                        pl.Int16,
+                        pl.Int32,
+                        pl.Int64,
+                        pl.UInt8,
+                        pl.UInt16,
+                        pl.UInt32,
+                        pl.UInt64,
+                    }
+                    if ldt in int_types and rdt in int_types:
+                        left_cast_cols.append(pl.col(c).cast(pl.Int64))
+                        right_cast_cols.append(pl.col(c).cast(pl.Int64))
+                    else:
+                        right_cast_cols.append(pl.col(c).cast(ldt))
+            if left_cast_cols:
+                left = left.with_columns(left_cast_cols)
+            if right_cast_cols:
+                right = right.with_columns(right_cast_cols)
+            sort_keys = by_cols + ["TimeBucket"] if by_cols else ["TimeBucket"]
+            left = left.sort(sort_keys)
+            right = right.sort(sort_keys)
+            r = dc(
+                left.join_asof(
+                    right,
+                    on="TimeBucket",
+                    by=by_cols if by_cols else None,
+                    strategy="backward",
+                    suffix=f"_{self.name}",
+                ),
+                f"_{self.name}",
+            )
+        else:
+            r = dc(
+                base_df.join(
+                    self.df, on=self.join_keys, how="full", suffix=f"_{self.name}"
+                ),
+                f"_{self.name}",
+            )
 
         ra = {}
         rccc = r.collect_schema().names()

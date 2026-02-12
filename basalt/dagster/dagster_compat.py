@@ -2140,7 +2140,7 @@ def _required_tables_for_pass(pass_config: dict) -> set[str]:
 
 
 def _module_requires_map() -> dict[str, list[str]]:
-    from .dense_analytics import DenseAnalytics
+    from basalt.time.dense import DenseAnalytics
     from .analytics.trade import TradeAnalytics
     from .analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
     from .analytics.l3 import L3Analytics

@@ -2,7 +2,7 @@ import unittest
 import polars as pl
 import pandas as pd
 import logging
-from basalt.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
+from basalt.time.dense import DenseAnalytics, DenseAnalyticsConfig
 from basalt.utils import SYMBOL_COL
 
 
@@ -50,7 +50,7 @@ class TestDenseAnalytics(unittest.TestCase):
 
         # We expect a warning log for Listing 2
         with self.assertLogs(
-            "basalt.dense_analytics", level="WARNING"
+            "basalt.time.dense", level="WARNING"
         ) as cm:
             result_lf = da.compute()
             result_df = result_lf.collect()
@@ -85,7 +85,7 @@ class TestDenseAnalytics(unittest.TestCase):
         da.marketstate = marketstate
 
         with self.assertLogs(
-            "basalt.dense_analytics", level="WARNING"
+            "basalt.time.dense", level="WARNING"
         ) as cm:
             result_lf = da.compute()
             result_df = result_lf.collect()

@@ -36,7 +36,7 @@ from basalt.analytics.l2 import L2AnalyticsLast, L2AnalyticsTW
 from basalt.analytics.trade import TradeAnalytics
 from basalt.analytics.l3 import L3Analytics
 from basalt.analytics.execution import ExecutionAnalytics
-from basalt.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
+from basalt.time.dense import DenseAnalytics, DenseAnalyticsConfig
 
 from basalt.configuration import AnalyticsConfig, PassConfig
 from basalt.dagster.dagster_compat import MICUniverse

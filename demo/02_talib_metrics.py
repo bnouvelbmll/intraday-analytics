@@ -19,7 +19,7 @@ from basalt.pipeline import AnalyticsPipeline
 from basalt.cli import run_cli
 from basalt.analytics.trade import TradeAnalytics
 from basalt.configuration import AnalyticsConfig, PassConfig
-from basalt.dense_analytics import DenseAnalytics
+from basalt.time.dense import DenseAnalytics
 from basalt.dagster.dagster_compat import CustomUniverse
 
 # --- Configuration ---
@@ -38,6 +38,7 @@ USER_CONFIG = {
             "time_bucket_seconds": 60,
             "name": "talib_pass",
             "modules": ["talib_metrics"],
+            "module_inputs": {"talib_metrics": "ohlcv_pass"},
         },
     ],
     "SKIP_EXISTING_OUTPUT": True,
@@ -77,20 +78,21 @@ class TALibAnalytics(BaseAnalytics):
     A custom analytics module to compute TA-Lib indicators.
     """
 
-    REQUIRES = []  # Depends on previous pass output, not raw tables
+    REQUIRES = ["df"]  # Consume an input frame mapped via module_inputs.
 
     def __init__(self):
-        super().__init__("talib")
+        super().__init__("talib_metrics")
 
     def compute(self) -> pl.LazyFrame:
         """
         Computes SMA and RSI using TA-Lib.
         """
         print("X")
-        source_df = self.context.get("ohlcv_pass")
+        source_df = self.df
         if source_df is None:
             raise ValueError(
-                "Source pass 'ohlcv_pass' not found in context. "
+                "Input dataframe not loaded. Configure module_inputs for "
+                "'talib_metrics', e.g. {'talib_metrics': 'ohlcv_pass'}. "
                 f"Available: {list(self.context.keys())}"
             )
 

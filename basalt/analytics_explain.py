@@ -17,7 +17,7 @@ from basalt.analytics.execution import ExecutionAnalyticsConfig
 from basalt.analytics.cbbo import CBBOAnalyticsConfig
 from basalt.preprocessors.iceberg import IcebergAnalyticsConfig
 from basalt.analytics.generic import GenericAnalyticsConfig
-from basalt.dense_analytics import DenseAnalyticsConfig
+from basalt.time.dense import DenseAnalyticsConfig
 
 
 MODULE_CONFIG_MAP: dict[str, tuple[str, type[BaseModel]]] = {

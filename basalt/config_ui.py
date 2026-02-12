@@ -28,12 +28,12 @@ from textual.widgets import (
 from rich.panel import Panel
 
 from basalt.configuration import AnalyticsConfig, PassConfig, OutputTarget
+from basalt.tables import ALL_TABLES
 from basalt.analytics.generic import (
     TalibIndicatorConfig,
     GenericAnalyticsConfig,
     TALIB_AVAILABLE,
 )
-from basalt.execution import _derive_tables_to_load
 from basalt.schema_utils import get_output_schema, get_full_output_schema
 from basalt.analytics.l3 import L3AdvancedConfig
 
@@ -929,17 +929,18 @@ class ConfigEditor(App):
             input_driver = data.get("PREPARE_DATA_MODE", "unknown")
             output_target = p.get("output") or data.get("OUTPUT_TARGET")
             output_driver = _format_output_driver(output_target, data)
-            tables = _tables_for_pass(p, data)
-            tables_str = ", ".join(tables) if tables else "none"
+            inputs_str = _pass_inputs_summary(p)
+            timeline_mode = _timeline_mode_label(_derive_timeline_mode(p))
             body = "\n".join(
                 [
                     f"Modules: {modules_str}",
                     f"Metrics: {metrics}",
                     f"Input driver: {input_driver}",
+                    f"Inputs: {inputs_str}",
                     f"Output driver: {output_driver}",
+                    f"Timeline mode: {timeline_mode}",
                     f"Time bucket: {int(p.get('time_bucket_seconds', 60))}s",
                     f"Grouping: {grouping_label}",
-                    f"Tables to load: {tables_str}",
                 ]
             )
             metrics_list = _pass_metric_list(p)
@@ -953,6 +954,7 @@ class ConfigEditor(App):
 
 
 _MODULE_META_CACHE: Optional[tuple[dict, dict, dict]] = None
+_MODULE_REQUIRES_CACHE: Optional[dict[str, list[str]]] = None
 
 
 def _module_meta() -> tuple[dict, dict, dict]:
@@ -1005,6 +1007,220 @@ def _module_meta() -> tuple[dict, dict, dict]:
     return _MODULE_META_CACHE
 
 
+def _module_requires_map() -> dict[str, list[str]]:
+    global _MODULE_REQUIRES_CACHE
+    if _MODULE_REQUIRES_CACHE is not None:
+        return _MODULE_REQUIRES_CACHE
+    try:
+        from basalt.analytics_registry import get_registered_entries
+
+        entries = get_registered_entries()
+        _MODULE_REQUIRES_CACHE = {
+            name: list(getattr(entry.cls, "REQUIRES", []) or [])
+            for name, entry in entries.items()
+        }
+    except Exception:
+        _MODULE_REQUIRES_CACHE = {}
+    return _MODULE_REQUIRES_CACHE
+
+
+def _module_inputs_line(pass_data: dict, module_key: str) -> str:
+    requires = _module_requires_map().get(module_key, [])
+    pairs = _module_input_pairs(pass_data, module_key, requires)
+    if not pairs:
+        return "Inputs: none"
+    return "Inputs = [" + ", ".join(
+        f"({req.upper()}:{source})" for req, source in pairs
+    ) + "]"
+
+
+def _module_input_pairs(
+    pass_data: dict,
+    module_key: str,
+    requires: Optional[list[str]] = None,
+) -> list[tuple[str, str]]:
+    reqs = (
+        requires if requires is not None else _module_requires_map().get(module_key, [])
+    )
+    if reqs:
+        module_inputs = pass_data.get("module_inputs", {})
+        entry = module_inputs.get(module_key) if isinstance(module_inputs, dict) else None
+        if isinstance(entry, str) and len(reqs) == 1:
+            return [(reqs[0], entry)]
+        if isinstance(entry, dict):
+            return [(req, str(entry.get(req, req))) for req in reqs]
+        return [(req, req) for req in reqs]
+    module_inputs = pass_data.get("module_inputs", {})
+    entry = module_inputs.get(module_key) if isinstance(module_inputs, dict) else None
+    if isinstance(entry, str):
+        return [("df", entry)]
+    if isinstance(entry, dict):
+        return [(str(req), str(source)) for req, source in entry.items()]
+    return _module_source_config_pairs(pass_data, module_key)
+
+
+def _module_source_config_specs(module_key: str) -> list[tuple[str, str, str]]:
+    _, field_map, _ = _module_meta()
+    specs: list[tuple[str, str, str]] = []
+    for field_name in field_map.get(module_key, []):
+        field = PassConfig.model_fields.get(field_name)  # type: ignore[attr-defined]
+        if field is None:
+            continue
+        model_cls = _unwrap_optional(field.annotation)
+        model_fields = getattr(model_cls, "model_fields", {})
+        for key in model_fields:
+            label: Optional[str] = None
+            if key == "source_pass":
+                label = "df"
+            elif key.endswith("_pass"):
+                label = key[: -len("_pass")]
+            elif key.endswith("_context_key"):
+                label = key[: -len("_context_key")]
+            if label:
+                specs.append((field_name, key, label))
+    return specs
+
+
+def _module_source_default(field_name: str, config_key: str) -> Optional[str]:
+    field = PassConfig.model_fields.get(field_name)  # type: ignore[attr-defined]
+    if field is None:
+        return None
+    model_cls = _unwrap_optional(field.annotation)
+    model_fields = getattr(model_cls, "model_fields", {})
+    source_field = model_fields.get(config_key)
+    if source_field is None:
+        return None
+    default = getattr(source_field, "default", None)
+    if isinstance(default, str) and default:
+        return default
+    default_factory = getattr(source_field, "default_factory", None)
+    if default_factory is None:
+        return None
+    try:
+        value = default_factory()
+    except Exception:
+        return None
+    return value if isinstance(value, str) and value else None
+
+
+def _module_source_config_pairs(pass_data: dict, module_key: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for field_name, config_key, input_name in _module_source_config_specs(module_key):
+        cfg = pass_data.get(field_name, {})
+        if hasattr(cfg, "model_dump"):
+            cfg = cfg.model_dump()
+        if not isinstance(cfg, dict):
+            cfg = {}
+        source = cfg.get(config_key)
+        if not isinstance(source, str) or not source:
+            source = _module_source_default(field_name, config_key)
+        if isinstance(source, str) and source:
+            pairs.append((input_name, source))
+
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for input_name, source in pairs:
+        key = input_name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((input_name, source))
+    return out
+
+
+def _module_source_config_updates(
+    selected: dict[tuple[str, str, str], str],
+) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    for (_module, field_name, config_key), source in selected.items():
+        if not source:
+            continue
+        out.setdefault(field_name, {})[config_key] = source
+    return out
+
+
+def _input_source_choices(config_data: dict, pass_index: Optional[int] = None) -> list[str]:
+    sources = list(ALL_TABLES.keys())
+    for idx, p in enumerate(config_data.get("PASSES", [])):
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name")
+        if not name:
+            continue
+        if pass_index is not None and idx >= pass_index:
+            continue
+        if name not in sources:
+            sources.append(name)
+    return sorted(sources)
+
+
+def _build_module_inputs_from_selection(
+    selected: dict[tuple[str, str], str],
+    module_requires: dict[str, list[str]],
+) -> dict:
+    out: dict[str, Any] = {}
+    for module, requires in module_requires.items():
+        if not requires:
+            extras = []
+            for (mod_name, req), source in selected.items():
+                if mod_name != module:
+                    continue
+                if not source:
+                    continue
+                if source == req:
+                    continue
+                extras.append((req, source))
+            if len(extras) == 1 and extras[0][0].lower() == "df":
+                out[module] = extras[0][1]
+            elif extras:
+                out[module] = {req: source for req, source in extras}
+            continue
+        chosen = {req: selected.get((module, req), req) for req in requires}
+        if len(requires) == 1:
+            req = requires[0]
+            if chosen[req] != req:
+                out[module] = chosen[req]
+            continue
+        if any(chosen[req] != req for req in requires):
+            out[module] = chosen
+    return out
+
+
+def _pass_inputs_summary(pass_data: dict) -> str:
+    modules = list(pass_data.get("modules", []) or [])
+    if not modules:
+        return "none"
+    parts = []
+    for module in modules:
+        line = _module_inputs_line(pass_data, module)
+        if line.endswith("none"):
+            continue
+        parts.append(f"{module}:{line.replace('Inputs = ', '')}")
+    return " | ".join(parts) if parts else "none"
+
+
+def _derive_timeline_mode(pass_data: dict) -> str:
+    mode = pass_data.get("timeline_mode")
+    if isinstance(mode, str) and mode:
+        return mode
+    modules = set(pass_data.get("modules", []) or [])
+    if "events" in modules:
+        return "event"
+    if "dense" in modules:
+        return "dense"
+    return "dense"
+
+
+def _timeline_mode_label(mode: str) -> str:
+    labels = {
+        "sparse_original": "sparse original",
+        "sparse_digitised": "sparse digitised",
+        "dense": "dense",
+        "event": "event",
+    }
+    return labels.get(mode, mode)
+
+
 class PassListEditor(Screen):
     def __init__(
         self,
@@ -1044,17 +1260,18 @@ class PassListEditor(Screen):
                 input_driver = self.config_data.get("PREPARE_DATA_MODE", "unknown")
                 output_target = p.get("output") or self.config_data.get("OUTPUT_TARGET")
                 output_driver = _format_output_driver(output_target, self.config_data)
-                tables = _tables_for_pass(p, self.config_data)
-                tables_str = ", ".join(tables) if tables else "none"
+                inputs_str = _pass_inputs_summary(p)
+                timeline_mode = _timeline_mode_label(_derive_timeline_mode(p))
                 body = "\n".join(
                     [
                         f"Modules: {modules_str}",
                         f"Metrics: {metrics}",
                         f"Input driver: {input_driver}",
+                        f"Inputs: {inputs_str}",
                         f"Output driver: {output_driver}",
+                        f"Timeline mode: {timeline_mode}",
                         f"Time bucket: {int(p.get('time_bucket_seconds', 60))}s",
                         f"Grouping: {grouping_label}",
-                        f"Tables to load: {tables_str}",
                     ]
                 )
                 metrics_list = _pass_metric_list(p)
@@ -1088,6 +1305,7 @@ class PassListEditor(Screen):
             {},
             "PassConfig",
             _on_save,
+            input_sources=_input_source_choices(self.config_data, pass_index=None),
             advanced_modules=self.advanced_modules,
             pass_readonly=self.pass_readonly,
             on_readonly_change=self.on_readonly_change,
@@ -1108,6 +1326,7 @@ class PassListEditor(Screen):
             current,
             "PassConfig",
             _on_save,
+            input_sources=_input_source_choices(self.config_data, pass_index=idx),
             advanced_modules=self.advanced_modules,
             pass_readonly=self.pass_readonly,
             on_readonly_change=self.on_readonly_change,
@@ -1121,6 +1340,7 @@ class PassEditor(Screen):
         data: dict,
         title: str,
         on_save,
+        input_sources: Optional[list[str]] = None,
         advanced_modules: bool = False,
         pass_readonly: bool = True,
         on_readonly_change=None,
@@ -1129,6 +1349,7 @@ class PassEditor(Screen):
         self.data = data
         self.title = title
         self.on_save = on_save
+        self.input_sources = input_sources or sorted(list(ALL_TABLES.keys()))
         self.advanced_modules = advanced_modules
         self.pass_readonly = pass_readonly
         self.on_readonly_change = on_readonly_change
@@ -1182,17 +1403,23 @@ class PassEditor(Screen):
             self.widgets["time_bucket_seconds"] = tbs
             yield tbs
 
-            dense_cfg = self.data.get("dense_analytics", {})
-            dense_enabled = True
-            if isinstance(dense_cfg, dict):
-                dense_enabled = dense_cfg.get("ENABLED", True)
-            else:
-                dense_enabled = getattr(dense_cfg, "ENABLED", True)
-            dense_label = (
-                "Dense output (enabled)" if dense_enabled else "Dense output (disabled)"
+            default_timeline = _derive_timeline_mode(self.data)
+            yield Label("Timeline mode")
+            timeline_mode = Select(
+                [
+                    ("Sparse original (TimeBucket=timestamp)", "sparse_original"),
+                    ("Sparse digitised (TimeBucket=ceil timestamp)", "sparse_digitised"),
+                    ("Dense", "dense"),
+                    ("Event", "event"),
+                ],
+                value=default_timeline,
             )
-            yield Label(dense_label)
-            yield Button("Edit dense output", id="edit_dense")
+            timeline_mode.id = "timeline_mode"
+            self.widgets["timeline_mode"] = timeline_mode
+            yield timeline_mode
+            timeline_controls = Vertical(id="timeline_controls")
+            self.widgets["timeline_controls"] = timeline_controls
+            yield timeline_controls
 
             yield Label("Modules (purpose and key outputs)")
             self.widgets["modules"] = []
@@ -1203,6 +1430,7 @@ class PassEditor(Screen):
 
             yield Label("Advanced options")
             yield Button("Edit full PassConfig", id="edit_full")
+            yield Button("Edit input mappings", id="edit_inputs")
         with Horizontal():
             yield Button("Save", id="save", variant="primary")
             yield Button("Cancel", id="cancel")
@@ -1228,8 +1456,11 @@ class PassEditor(Screen):
                 "time_bucket_anchor",
                 "time_bucket_closed",
                 "sort_keys",
+                "timeline_mode",
                 "modules",
+                "module_inputs",
                 "dense_analytics",
+                "event_analytics",
                 "generic_analytics",
                 "quality_checks",
             }
@@ -1240,6 +1471,30 @@ class PassEditor(Screen):
                 PassConfig, self.data, "PassConfig (Advanced)", _on_save
             )
             screen._allowed_fields = allowed
+            self.app.push_screen(screen)
+            return
+        if button_id == "edit_inputs":
+            selected_modules = [
+                key for key, cb in self.widgets.get("modules", []) if cb.value
+            ] or list(self.data.get("modules", []) or [])
+
+            def _on_save(module_inputs: dict, config_updates: dict[str, dict[str, str]]):
+                self.data["module_inputs"] = module_inputs
+                for field_name, patch in config_updates.items():
+                    existing = self.data.get(field_name, {})
+                    if hasattr(existing, "model_dump"):
+                        existing = existing.model_dump()
+                    if not isinstance(existing, dict):
+                        existing = {}
+                    existing.update(patch)
+                    self.data[field_name] = existing
+
+            screen = ModuleInputsEditor(
+                pass_data=self.data,
+                selected_modules=selected_modules,
+                input_sources=self.input_sources,
+                on_save=_on_save,
+            )
             self.app.push_screen(screen)
             return
         if button_id == "edit_dense":
@@ -1253,6 +1508,21 @@ class PassEditor(Screen):
                 if isinstance(current, dict)
                 else getattr(current, "model_dump", lambda: {})(),
                 title="PassConfig.dense_analytics",
+                on_save=_on_save,
+            )
+            self.app.push_screen(screen)
+            return
+        if button_id == "edit_event":
+            def _on_save(updated):
+                self.data["event_analytics"] = updated
+            current = self.data.get("event_analytics", {})
+            event_model = PassConfig.model_fields["event_analytics"].annotation  # type: ignore[assignment]
+            screen = ModelEditor(
+                event_model,
+                current
+                if isinstance(current, dict)
+                else getattr(current, "model_dump", lambda: {})(),
+                title="PassConfig.event_analytics",
                 on_save=_on_save,
             )
             self.app.push_screen(screen)
@@ -1305,7 +1575,11 @@ class PassEditor(Screen):
             return
 
         selected_modules = [key for key, cb in self.widgets["modules"] if cb.value]
+        selected_modules = [
+            m for m in selected_modules if m not in {"dense", "events"}
+        ]
         pass_type = self.widgets["pass_type"].value
+        timeline_mode = self.widgets["timeline_mode"].value or "dense"
         # enforce pass type constraints
         if pass_type == "pre":
             module_info, _, _ = _module_meta()
@@ -1324,11 +1598,44 @@ class PassEditor(Screen):
             # postprocessing = free
             pass
 
+        if timeline_mode == "dense":
+            selected_modules.append("dense")
+            dense_cfg = self.data.get("dense_analytics", {})
+            if not isinstance(dense_cfg, dict):
+                dense_cfg = {}
+            dense_cfg["ENABLED"] = True
+            self.data["dense_analytics"] = dense_cfg
+            selected_modules = [m for m in selected_modules if m != "events"]
+        elif timeline_mode == "event":
+            selected_modules.append("events")
+            dense_cfg = self.data.get("dense_analytics", {})
+            if not isinstance(dense_cfg, dict):
+                dense_cfg = {}
+            dense_cfg["ENABLED"] = False
+            self.data["dense_analytics"] = dense_cfg
+            event_cfg = self.data.get("event_analytics", {})
+            if not isinstance(event_cfg, dict):
+                event_cfg = {}
+            event_cfg["ENABLED"] = True
+            self.data["event_analytics"] = event_cfg
+            selected_modules = [m for m in selected_modules if m != "dense"]
+        else:
+            selected_modules = [
+                m for m in selected_modules if m not in {"dense", "events"}
+            ]
+            dense_cfg = self.data.get("dense_analytics", {})
+            if not isinstance(dense_cfg, dict):
+                dense_cfg = {}
+            dense_cfg["ENABLED"] = False
+            self.data["dense_analytics"] = dense_cfg
+
+        selected_modules = list(dict.fromkeys(selected_modules))
         self.data.update(
             {
                 "_pass_type": pass_type,
                 "name": self.widgets["name"].value or "pass",
                 "time_bucket_seconds": time_bucket,
+                "timeline_mode": timeline_mode,
                 "modules": selected_modules,
             }
         )
@@ -1343,11 +1650,25 @@ class PassEditor(Screen):
         self.app.pop_screen()
 
     def on_mount(self) -> None:
+        self._render_timeline_controls()
         self._render_modules()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "pass_type":
             self.call_after_refresh(self._render_modules)
+        if event.select.id == "timeline_mode":
+            self.call_after_refresh(self._render_timeline_controls)
+
+    def _render_timeline_controls(self) -> None:
+        controls = self.widgets.get("timeline_controls")
+        if controls is None or not controls.is_attached:
+            return
+        controls.remove_children()
+        mode = self.widgets.get("timeline_mode").value if self.widgets.get("timeline_mode") else "dense"
+        if mode == "dense":
+            controls.mount(Button("Edit dense timeline config", id="edit_dense"))
+        elif mode == "event":
+            controls.mount(Button("Edit event timeline config", id="edit_event"))
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         if self.widgets.get("modules_box") is None:
@@ -1386,6 +1707,8 @@ class PassEditor(Screen):
         module_info, _, _ = _module_meta()
 
         for key, meta in module_info.items():
+            if key in {"dense", "events"}:
+                continue
             if meta["tier"] == "advanced" and not self.advanced_modules:
                 continue
             if pass_type == "pre" and meta["tier"] != "pre":
@@ -1414,6 +1737,9 @@ class PassEditor(Screen):
             modules_box.mount(Label(f"  {meta['desc']}", classes="help"))
             modules_box.mount(
                 Label(f"  Outputs: {', '.join(meta['columns'])}", classes="help")
+            )
+            modules_box.mount(
+                Label(f"  {_module_inputs_line(self.data, key)}", classes="help")
             )
 
     def _open_module_editor(self, field_name: str) -> None:
@@ -1602,17 +1928,128 @@ def _format_output_driver(output_target: Any, config_data: dict) -> str:
     return f"{output_type} {template}".strip()
 
 
-def _tables_for_pass(pass_data: dict, config_data: dict) -> list[str]:
-    try:
-        pass_cfg = PassConfig.model_validate(pass_data)
-    except Exception:
-        return []
-    user_tables = config_data.get("TABLES_TO_LOAD")
-    tables = _derive_tables_to_load(pass_cfg, user_tables)
-    if "generic" in pass_cfg.modules and pass_cfg.generic_analytics.source_pass:
-        if "previous_pass" not in tables:
-            tables.append("previous_pass")
-    return tables
+class ModuleInputsEditor(Screen):
+    def __init__(
+        self,
+        *,
+        pass_data: dict,
+        selected_modules: list[str],
+        input_sources: list[str],
+        on_save,
+    ):
+        super().__init__()
+        self.pass_data = pass_data
+        self.selected_modules = selected_modules
+        self.input_sources = input_sources
+        self.on_save = on_save
+        self.widgets: dict[tuple[str, str], Select] = {}
+        self.source_widgets: dict[tuple[str, str, str], Select] = {}
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False)
+        yield Label("Input Mappings")
+        yield Label("Select source per required input (REQ:SOURCE).")
+        requires_map = _module_requires_map()
+        module_inputs = self.pass_data.get("module_inputs", {})
+        with VerticalScroll():
+            for module in self.selected_modules:
+                requires = requires_map.get(module, [])
+                source_specs = _module_source_config_specs(module)
+                yield Label(f"Module: {module}")
+                current_entry = (
+                    module_inputs.get(module) if isinstance(module_inputs, dict) else None
+                )
+                shown = False
+                for req in requires:
+                    current_source = req
+                    if isinstance(current_entry, str) and len(requires) == 1:
+                        current_source = current_entry
+                    elif isinstance(current_entry, dict):
+                        current_source = current_entry.get(req, req)
+                    options = [req] + [s for s in self.input_sources if s != req]
+                    select = Select(
+                        [(s, s) for s in options],
+                        value=current_source if current_source in options else req,
+                    )
+                    self.widgets[(module, req)] = select
+                    yield Label(f"{req.upper()} source")
+                    yield select
+                    shown = True
+                for field_name, config_key, input_name in source_specs:
+                    cfg = self.pass_data.get(field_name, {})
+                    if hasattr(cfg, "model_dump"):
+                        cfg = cfg.model_dump()
+                    if not isinstance(cfg, dict):
+                        cfg = {}
+                    current_source = cfg.get(config_key)
+                    if not isinstance(current_source, str) or not current_source:
+                        current_source = _module_source_default(field_name, config_key)
+                    if not isinstance(current_source, str) or not current_source:
+                        continue
+                    options = list(self.input_sources)
+                    if current_source not in options:
+                        options.append(current_source)
+                    select = Select(
+                        [(s, s) for s in options],
+                        value=current_source,
+                    )
+                    self.source_widgets[(module, field_name, config_key)] = select
+                    yield Label(f"{input_name.upper()} source")
+                    yield select
+                    shown = True
+                if not shown and isinstance(current_entry, str):
+                    options = list(self.input_sources)
+                    if current_entry not in options:
+                        options.append(current_entry)
+                    select = Select(
+                        [(s, s) for s in options],
+                        value=current_entry,
+                    )
+                    self.widgets[(module, "df")] = select
+                    yield Label("DF source")
+                    yield select
+                    shown = True
+                if not shown and isinstance(current_entry, dict):
+                    for req, current_source in current_entry.items():
+                        req = str(req)
+                        current_source = str(current_source)
+                        options = list(self.input_sources)
+                        if current_source not in options:
+                            options.append(current_source)
+                        select = Select(
+                            [(s, s) for s in options],
+                            value=current_source,
+                        )
+                        self.widgets[(module, req)] = select
+                        yield Label(f"{req.upper()} source")
+                        yield select
+        with Horizontal():
+            yield Button("Save", id="save", variant="primary")
+            yield Button("Cancel", id="cancel")
+        yield Footer()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel":
+            self.app.pop_screen()
+            return
+        if event.button.id != "save":
+            return
+
+        selection = {
+            key: widget.value for key, widget in self.widgets.items() if widget.value
+        }
+        module_requires = {
+            m: _module_requires_map().get(m, []) for m in self.selected_modules
+        }
+        module_inputs = _build_module_inputs_from_selection(selection, module_requires)
+        source_selection = {
+            key: widget.value
+            for key, widget in self.source_widgets.items()
+            if widget.value is not None
+        }
+        config_updates = _module_source_config_updates(source_selection)
+        self.on_save(module_inputs, config_updates)
+        self.app.pop_screen()
 
 
 class ModuleConfigPicker(Screen):

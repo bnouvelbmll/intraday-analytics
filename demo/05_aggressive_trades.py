@@ -11,7 +11,7 @@ import polars as pl
 
 from basalt.cli import run_cli
 from basalt.pipeline import AnalyticsPipeline
-from basalt.dense_analytics import DenseAnalytics
+from basalt.time.dense import DenseAnalytics
 from basalt.analytics.trade import TradeAnalytics
 from basalt.preprocessors.aggressive_trades import (
     AggressiveTradesTransform,

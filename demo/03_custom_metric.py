@@ -15,7 +15,7 @@ import polars as pl
 from basalt.analytics_base import BaseAnalytics
 from basalt.pipeline import AnalyticsPipeline
 from basalt.cli import run_cli
-from basalt.dense_analytics import DenseAnalytics
+from basalt.time.dense import DenseAnalytics
 from basalt.analytics.trade import TradeAnalytics
 from basalt.configuration import AnalyticsConfig, PassConfig
 from basalt.dagster.dagster_compat import CustomUniverse

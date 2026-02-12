@@ -404,7 +404,7 @@ class TestAnalyticsModuleOutputs(unittest.TestCase):
 
     def test_module_output_columns(self):
         """Verify that each analytics module includes TimeBucket and ListingId."""
-        from basalt.dense_analytics import (
+        from basalt.time.dense import (
             DenseAnalytics,
             DenseAnalyticsConfig,
         )
@@ -471,6 +471,14 @@ class TestModuleInputs(unittest.TestCase):
         )
         tables = _derive_tables_to_load(pass_cfg, user_tables=[])
         self.assertNotIn("l2", tables)
+
+    def test_derive_tables_to_load_uses_registry_for_preprocessors(self):
+        pass_cfg = PassConfig(
+            name="pass1",
+            modules=["cbbo_preprocess"],
+        )
+        tables = _derive_tables_to_load(pass_cfg, user_tables=[])
+        self.assertIn("l2", tables)
 
 
 if __name__ == "__main__":

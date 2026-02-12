@@ -4,8 +4,9 @@ from basalt.configuration import (
     AnalyticsConfig,
     PassConfig,
     PrepareDataMode,
+    PassTimelineMode,
 )
-from basalt.dense_analytics import DenseAnalyticsConfig
+from basalt.time.dense import DenseAnalyticsConfig
 from basalt.analytics.l2 import L2AnalyticsConfig
 
 
@@ -15,6 +16,8 @@ class TestConfiguration(unittest.TestCase):
         config = AnalyticsConfig(PASSES=[PassConfig(name="default")])
         self.assertEqual(config.PREPARE_DATA_MODE, PrepareDataMode.S3_SHREDDING)
         self.assertEqual(config.PASSES[0].time_bucket_seconds, 60)
+        self.assertEqual(config.PASSES[0].timeline_mode, PassTimelineMode.DENSE)
+        self.assertEqual(config.PASSES[0].modules, ["dense"])
 
     def test_invalid_prepare_data_mode(self):
         """Ensure invalid PREPARE_DATA_MODE raises ValidationError."""
@@ -90,6 +93,30 @@ class TestConfiguration(unittest.TestCase):
         self.assertIsInstance(pass_config.dense_analytics, DenseAnalyticsConfig)
         self.assertEqual(pass_config.dense_analytics.mode, "uniform")
         self.assertEqual(pass_config.dense_analytics.time_bucket_seconds, 10)
+
+    def test_timeline_mode_dense_adds_dense_module(self):
+        cfg = PassConfig(name="pass1", modules=["trade"], timeline_mode="dense")
+        self.assertEqual(cfg.timeline_mode, PassTimelineMode.DENSE)
+        self.assertEqual(cfg.modules[0], "dense")
+        self.assertNotIn("events", cfg.modules)
+        self.assertTrue(cfg.dense_analytics.ENABLED)
+
+    def test_timeline_mode_event_adds_events_module(self):
+        cfg = PassConfig(name="pass1", modules=["trade"], timeline_mode="event")
+        self.assertEqual(cfg.timeline_mode, PassTimelineMode.EVENT)
+        self.assertIn("events", cfg.modules)
+        self.assertNotIn("dense", cfg.modules)
+        self.assertFalse(cfg.dense_analytics.ENABLED)
+
+    def test_sparse_timeline_removes_dense_and_events(self):
+        cfg = PassConfig(
+            name="pass1",
+            modules=["trade", "dense", "events"],
+            timeline_mode="sparse_digitised",
+        )
+        self.assertNotIn("dense", cfg.modules)
+        self.assertNotIn("events", cfg.modules)
+        self.assertFalse(cfg.dense_analytics.ENABLED)
 
 
 if __name__ == "__main__":

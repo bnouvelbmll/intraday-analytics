@@ -1,6 +1,6 @@
 import polars as pl
 
-from basalt.analytics.events import EventAnalytics, EventAnalyticsConfig
+from basalt.time.events import EventAnalytics, EventAnalyticsConfig
 
 
 def test_event_analytics_local_extrema():

@@ -17,7 +17,7 @@ from basalt.batching import (
     HeuristicBatchingStrategy,
     SymbolSizeEstimator,
 )
-from basalt.dense_analytics import DenseAnalytics, DenseAnalyticsConfig
+from basalt.time.dense import DenseAnalytics, DenseAnalyticsConfig
 from basalt.analytics.l2 import (
     L2AnalyticsLast,
     L2AnalyticsTW,
