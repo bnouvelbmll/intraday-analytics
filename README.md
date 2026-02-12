@@ -72,13 +72,13 @@ cartesian product of universe partitions and date partitions. This allows
 Dagster to materialize a single (universe, date-range) partition or fan out
 across multiple MICs.
 
-See `docs/dagster.md` for a full walkthrough, including:
+See `basalt/dagster/docs/dagster.md` for a full walkthrough, including:
 - single MIC + single date
 - multi-MIC fan-out with `build_partition_runs`
 - `on_result` callback for artifact handling
 
 There is also a self-contained setup script:
-`scripts/setup_dagster_demo.sh`
+`basalt/dagster/demo/setup_dagster_demo.sh`
 
 ## Extending the Pipeline
 

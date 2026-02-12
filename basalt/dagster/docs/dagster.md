@@ -438,10 +438,10 @@ defs = Definitions(assets=[demo06_characteristics])
 ## Setup Script
 
 Two helper scripts are available:
-- `scripts/setup_dagster_demo.sh` (legacy, quick start)
-- `scripts/setup_dagster_demo.py` (configurable demo selector + schedules)
+- `basalt/dagster/demo/setup_dagster_demo.sh` (legacy, quick start)
+- `basalt/dagster/demo/setup_dagster_demo.py` (configurable demo selector + schedules)
 
-The shell script `scripts/setup_dagster_demo.sh`:
+The shell script `basalt/dagster/demo/setup_dagster_demo.sh`:
 - sets `DAGSTER_HOME=/home/bmll/user/my-dagster`
 - builds universe partitions from `bmll.reference.available_markets()` (Equity + IsAlive)
 - builds date partitions from `2015-01-01` to yesterday
@@ -449,11 +449,11 @@ The shell script `scripts/setup_dagster_demo.sh`:
 
 Example:
 ```bash
-BATCH_FREQ=W ./scripts/setup_dagster_demo.sh
+BATCH_FREQ=W ./basalt/dagster/demo/setup_dagster_demo.sh
 ```
 
 The Python script supports demo selection, schedules, and BMLL tags:
 ```bash
-python3 scripts/setup_dagster_demo.py --demo demo/01_ohlcv_bars.py --enable-schedules
-python3 scripts/setup_dagster_demo.py --demo demo/01_ohlcv_bars.py --mode bmll --bmll-backend --enable-schedules
+python3 basalt/dagster/demo/setup_dagster_demo.py --demo demo/01_ohlcv_bars.py --enable-schedules
+python3 basalt/dagster/demo/setup_dagster_demo.py --demo demo/01_ohlcv_bars.py --mode bmll --bmll-backend --enable-schedules
 ```

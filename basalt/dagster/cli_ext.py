@@ -173,4 +173,8 @@ class DagsterCLI:
 
 
 def get_cli_extension():
+    import importlib.util
+
+    if importlib.util.find_spec("dagster") is None:
+        return {}
     return {"dagster": DagsterCLI}
