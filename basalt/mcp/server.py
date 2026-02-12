@@ -110,6 +110,66 @@ def create_server():
             dagster_home=dagster_home,
         )
 
+    @mcp.tool()
+    def optimize_run(
+        pipeline: str,
+        search_space: dict | None = None,
+        search_space_file: str | None = None,
+        trials: int = 20,
+        executor: str = "direct",
+        score_fn: str | None = None,
+        maximize: bool = True,
+        seed: int = 0,
+        output_dir: str = "optimize_results",
+        tracker: str = "none",
+        tracker_project: str | None = None,
+        tracker_experiment: str | None = None,
+        tracker_run_name: str | None = None,
+        tracker_tags: dict | str | None = None,
+        tracker_uri: str | None = None,
+        tracker_mode: str | None = None,
+        model_factory: str | None = None,
+        dataset_builder: str | None = None,
+        objectives: str | None = None,
+        objective: str | None = None,
+        use_aggregate: bool = False,
+        search_generator: str | None = None,
+        instance_size: int | None = None,
+        delete_after: bool | None = None,
+    ) -> dict:
+        """Run optimize pipeline with optional model/objective and tracker integration."""
+        return service.optimize_run(
+            pipeline=pipeline,
+            search_space=search_space,
+            search_space_file=search_space_file,
+            trials=trials,
+            executor=executor,
+            score_fn=score_fn,
+            maximize=maximize,
+            seed=seed,
+            output_dir=output_dir,
+            tracker=tracker,
+            tracker_project=tracker_project,
+            tracker_experiment=tracker_experiment,
+            tracker_run_name=tracker_run_name,
+            tracker_tags=tracker_tags,
+            tracker_uri=tracker_uri,
+            tracker_mode=tracker_mode,
+            model_factory=model_factory,
+            dataset_builder=dataset_builder,
+            objectives=objectives,
+            objective=objective,
+            use_aggregate=use_aggregate,
+            search_generator=search_generator,
+            instance_size=instance_size,
+            delete_after=delete_after,
+        )
+
+    @mcp.tool()
+    def optimize_summary(output_dir: str = "optimize_results") -> dict:
+        """Read optimize summary and trials metadata from output directory."""
+        return service.optimize_summary(output_dir=output_dir)
+
     return mcp
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import importlib.util
+import json
 from typing import Any
 
 
@@ -30,6 +31,11 @@ def list_capabilities() -> dict[str, Any]:
             importlib.util.find_spec("basalt.dagster") is not None
             and importlib.util.find_spec("dagster") is not None
         ),
+        "optimize": importlib.util.find_spec("basalt.optimize") is not None,
+        "objective_functions": importlib.util.find_spec("basalt.objective_functions") is not None,
+        "models": importlib.util.find_spec("basalt.models") is not None,
+        "mlflow": importlib.util.find_spec("mlflow") is not None,
+        "wandb": importlib.util.find_spec("wandb") is not None,
         "fastmcp": importlib.util.find_spec("fastmcp") is not None,
     }
     return {"capabilities": available}
@@ -296,4 +302,93 @@ def success_rate(
         "successes": successes,
         "failures": failures,
         "success_rate": (successes / total) if total else None,
+    }
+
+
+def optimize_run(
+    *,
+    pipeline: str,
+    search_space: dict[str, Any] | None = None,
+    search_space_file: str | None = None,
+    trials: int = 20,
+    executor: str = "direct",
+    score_fn: str | None = None,
+    maximize: bool = True,
+    seed: int = 0,
+    output_dir: str = "optimize_results",
+    tracker: str = "none",
+    tracker_project: str | None = None,
+    tracker_experiment: str | None = None,
+    tracker_run_name: str | None = None,
+    tracker_tags: dict[str, Any] | str | None = None,
+    tracker_uri: str | None = None,
+    tracker_mode: str | None = None,
+    model_factory: str | None = None,
+    dataset_builder: str | None = None,
+    objectives: str | None = None,
+    objective: str | None = None,
+    use_aggregate: bool = False,
+    search_generator: str | None = None,
+    instance_size: int | None = None,
+    delete_after: bool | None = None,
+) -> dict[str, Any]:
+    from basalt.optimize.core import optimize_pipeline
+    from basalt.optimize.cli_ext import _load_search_space
+
+    resolved_space = _load_search_space(
+        search_space=search_space,
+        search_space_file=search_space_file,
+    )
+    result = optimize_pipeline(
+        pipeline=pipeline,
+        search_space=resolved_space,
+        trials=trials,
+        score_fn=score_fn,
+        maximize=maximize,
+        seed=seed,
+        output_dir=output_dir,
+        executor=executor,
+        instance_size=instance_size,
+        delete_after=delete_after,
+        tracker=tracker,
+        tracker_project=tracker_project,
+        tracker_experiment=tracker_experiment,
+        tracker_run_name=tracker_run_name,
+        tracker_tags=tracker_tags,
+        tracker_uri=tracker_uri,
+        tracker_mode=tracker_mode,
+        model_factory=model_factory,
+        dataset_builder=dataset_builder,
+        objectives=objectives,
+        objective=objective,
+        use_aggregate=use_aggregate,
+        search_generator=search_generator,
+    )
+    return {"optimize": _to_plain(result)}
+
+
+def optimize_summary(
+    *,
+    output_dir: str = "optimize_results",
+) -> dict[str, Any]:
+    out = Path(output_dir)
+    summary_file = out / "summary.json"
+    trials_file = out / "trials.jsonl"
+    if not summary_file.exists():
+        return {
+            "output_dir": str(out),
+            "exists": False,
+            "message": f"Missing summary file: {summary_file}",
+        }
+    summary = json.loads(summary_file.read_text(encoding="utf-8"))
+    total_trials = 0
+    if trials_file.exists():
+        with trials_file.open("r", encoding="utf-8") as fh:
+            for _ in fh:
+                total_trials += 1
+    return {
+        "output_dir": str(out),
+        "exists": True,
+        "summary": summary,
+        "trial_rows": total_trials,
     }

@@ -13,6 +13,19 @@ from basalt.mcp.cli_ext import get_cli_extension
 def test_mcp_cli_extension_registered():
     ext = get_cli_extension()
     assert "mcp" in ext
+    mcp_cli = ext["mcp"]
+    assert hasattr(mcp_cli, "serve")
+    for name in (
+        "capabilities",
+        "configure",
+        "run",
+        "recent_runs",
+        "success_rate",
+        "materialized_partitions",
+        "optimize_run",
+        "optimize_summary",
+    ):
+        assert not hasattr(mcp_cli, name)
 
 
 def test_configure_job_updates_bmll_jobs_defaults(tmp_path):
@@ -75,3 +88,29 @@ def test_recent_runs_ec2_and_success_rate(monkeypatch):
     assert stats["lookback"] == 3
     assert stats["successes"] == 2
     assert stats["failures"] == 1
+
+
+def test_optimize_run_and_summary(monkeypatch, tmp_path):
+    import basalt.optimize.core as core
+
+    def _fake_optimize_pipeline(**kwargs):
+        out_dir = tmp_path / "opt"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "summary.json").write_text('{"best":{"score":1.23}}', encoding="utf-8")
+        (out_dir / "trials.jsonl").write_text('{"trial_id":1}\n', encoding="utf-8")
+        return {"output_dir": str(out_dir), "best": {"score": 1.23}}
+
+    monkeypatch.setattr(core, "optimize_pipeline", _fake_optimize_pipeline)
+    monkeypatch.setattr(
+        "basalt.optimize.cli_ext._load_search_space",
+        lambda **kwargs: {"params": {}},
+    )
+    out = service.optimize_run(
+        pipeline="demo/01_ohlcv_bars.py",
+        search_space={"params": {}},
+        trials=1,
+    )
+    assert "optimize" in out
+    summary = service.optimize_summary(output_dir=str(tmp_path / "opt"))
+    assert summary["exists"] is True
+    assert summary["trial_rows"] == 1

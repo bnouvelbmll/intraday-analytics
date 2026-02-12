@@ -4,12 +4,14 @@ import copy
 import importlib
 import json
 import random
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from basalt.basalt import _load_pipeline_module
 from basalt.cli import run_cli, resolve_user_config
+from .tracking import create_tracker
 
 
 @dataclass
@@ -125,6 +127,45 @@ def _load_callable(target: str) -> Callable[..., Any]:
     return fn
 
 
+def _build_scorer(
+    *,
+    score_fn: str | None,
+    model_factory: str | None,
+    dataset_builder: str | None,
+    objectives: str | None,
+    objective: str | None,
+    use_aggregate: bool,
+) -> Callable[..., Any] | None:
+    if score_fn:
+        return _load_callable(score_fn)
+    if not (model_factory and dataset_builder and objectives):
+        return None
+    try:
+        from basalt.models.optimization import make_model_objective_score_fn
+    except Exception as exc:
+        raise RuntimeError(
+            "Model/objective scoring requires basalt models package. "
+            "Install bmll-basalt-models."
+        ) from exc
+
+    model_factory_fn = _load_callable(model_factory)
+    dataset_builder_fn = _load_callable(dataset_builder)
+    if ":" in objectives:
+        objectives_fn = _load_callable(objectives)
+        objective_list = objectives_fn()
+    else:
+        from basalt.objective_functions import objectives_from_names
+
+        objective_list = objectives_from_names(objectives)
+    return make_model_objective_score_fn(
+        dataset_builder=dataset_builder_fn,
+        model_factory=model_factory_fn,
+        objectives=objective_list,
+        objective=objective,
+        use_aggregate=use_aggregate,
+    )
+
+
 def _load_base_user_config(pipeline: str) -> tuple[dict[str, Any], Any]:
     module = _load_pipeline_module(pipeline)
     if not hasattr(module, "USER_CONFIG"):
@@ -207,6 +248,29 @@ def _dispatch_trial(
     raise ValueError(f"Unsupported executor '{executor}'.")
 
 
+def _generate_trial_params(
+    *,
+    trial_id: int,
+    search_space: dict[str, Any],
+    search_generator_fn: Callable[..., Any] | None,
+    rng: random.Random,
+    history: list[TrialResult],
+    base_config: dict[str, Any],
+) -> dict[str, Any]:
+    if search_generator_fn is None:
+        return sample_params(search_space, rng=rng)
+    payload = search_generator_fn(
+        trial_id=trial_id,
+        search_space=search_space,
+        rng=rng,
+        history=history,
+        base_config=base_config,
+    )
+    if not isinstance(payload, dict):
+        raise ValueError("search_generator must return a dict[path, value].")
+    return payload
+
+
 def optimize_pipeline(
     *,
     pipeline: str,
@@ -221,19 +285,65 @@ def optimize_pipeline(
     delete_after: bool | None = None,
     dagster_job: str | None = None,
     dagster_partition: str | None = None,
+    tracker: str = "none",
+    tracker_project: str | None = None,
+    tracker_experiment: str | None = None,
+    tracker_run_name: str | None = None,
+    tracker_tags: dict[str, Any] | str | None = None,
+    tracker_uri: str | None = None,
+    tracker_mode: str | None = None,
+    model_factory: str | None = None,
+    dataset_builder: str | None = None,
+    objectives: str | None = None,
+    objective: str | None = None,
+    use_aggregate: bool = False,
+    search_generator: str | None = None,
 ) -> dict[str, Any]:
     out_dir = Path(output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     base_cfg, module = _load_base_user_config(pipeline)
     executor = str(executor).strip().lower()
-    scorer = _load_callable(score_fn) if score_fn else None
+    scorer = _build_scorer(
+        score_fn=score_fn,
+        model_factory=model_factory,
+        dataset_builder=dataset_builder,
+        objectives=objectives,
+        objective=objective,
+        use_aggregate=use_aggregate,
+    )
     if executor == "direct" and scorer is None:
-        raise ValueError("score_fn is required when executor='direct'.")
+        raise ValueError(
+            "For executor='direct', provide score_fn or "
+            "(model_factory + dataset_builder + objectives)."
+        )
+    search_generator_fn = _load_callable(search_generator) if search_generator else None
     rng = random.Random(seed)
+    tracker_impl = create_tracker(
+        tracker=tracker,
+        tracker_project=tracker_project,
+        tracker_experiment=tracker_experiment,
+        tracker_run_name=tracker_run_name,
+        tracker_tags=tracker_tags,
+        tracker_uri=tracker_uri,
+        tracker_mode=tracker_mode,
+    )
+    tracker_impl.start(
+        pipeline=pipeline,
+        maximize=bool(maximize),
+        metadata={"executor": executor, "trials": int(trials)},
+    )
 
     all_results: list[TrialResult] = []
     for trial_id in range(1, int(trials) + 1):
-        params = sample_params(search_space, rng=rng)
+        started = time.perf_counter()
+        params = _generate_trial_params(
+            trial_id=trial_id,
+            search_space=search_space,
+            search_generator_fn=search_generator_fn,
+            rng=rng,
+            history=all_results,
+            base_config=base_cfg,
+        )
         cfg = apply_overrides(base_cfg, params)
         status = "ok"
         error = None
@@ -265,6 +375,7 @@ def optimize_pipeline(
             status = "error"
             error = str(exc)
             score = float("-inf") if maximize else float("inf")
+        duration_seconds = time.perf_counter() - started
 
         result = TrialResult(
             trial_id=trial_id,
@@ -275,6 +386,16 @@ def optimize_pipeline(
             executor_result=executor_result,
         )
         all_results.append(result)
+        tracker_impl.log_trial(
+            trial_id=trial_id,
+            status=status,
+            score=score,
+            params=params,
+            error=error,
+            executor=executor,
+            duration_seconds=duration_seconds,
+            executor_result=executor_result,
+        )
 
         with (out_dir / "trials.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(
@@ -301,6 +422,7 @@ def optimize_pipeline(
         "maximize": bool(maximize),
         "seed": int(seed),
         "executor": executor,
+        "tracker": str(getattr(tracker_impl, "name", tracker)),
         "best": (
             {
                 "trial_id": best.trial_id,
@@ -320,4 +442,5 @@ def optimize_pipeline(
     (out_dir / "summary.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
     )
+    tracker_impl.finish(payload)
     return payload

@@ -9,6 +9,7 @@ from basalt.objective_functions import (
     MeanSquaredErrorObjective,
     ModelObjectiveEvaluator,
     make_optimization_score_fn,
+    objectives_from_names,
 )
 
 
@@ -115,3 +116,11 @@ def test_confidence_uncertainty_summary():
     assert math.isclose(report.uncertainty["mean_confidence"], 0.8, rel_tol=1e-9)
     assert math.isclose(report.uncertainty["min_confidence"], 0.8, rel_tol=1e-9)
     assert math.isclose(report.uncertainty["max_confidence"], 0.8, rel_tol=1e-9)
+
+
+def test_objectives_from_names_variants():
+    objs = objectives_from_names("mae,rmse,direction")
+    names = [o.name for o in objs]
+    assert names == ["mae", "mse", "directional_accuracy"]
+    rmse_obj = objs[1]
+    assert getattr(rmse_obj, "root", False) is True

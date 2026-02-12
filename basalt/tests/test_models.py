@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 from basalt.models import SklearnModel, evaluate_model_with_objectives, train_model
+from basalt.models.autogluon_model import AutoGluonTabularModel
 from basalt.objective_functions import DatasetSplit, MeanAbsoluteErrorObjective
 
 
@@ -46,3 +47,15 @@ def test_train_and_objective_evaluation(tmp_path):
     )
     assert report.results[0].objective == "mae"
     assert math.isclose(report.results[0].score, 0.0, rel_tol=1e-9)
+
+
+def test_autogluon_predict_normalizes_list_input():
+    class _Predictor:
+        def predict(self, x):
+            assert hasattr(x, "columns")
+            return [1.0 for _ in range(len(x))]
+
+    model = AutoGluonTabularModel()
+    model.predictor = _Predictor()
+    out = model.predict([[1.0, 2.0], [3.0, 4.0]])
+    assert out == [1.0, 1.0]

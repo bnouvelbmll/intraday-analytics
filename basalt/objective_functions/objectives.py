@@ -77,3 +77,40 @@ class DirectionalAccuracyObjective:
             if sign_a == sign_b:
                 hits += 1
         return hits / float(len(yt))
+
+
+def objectives_from_names(
+    names: str | list[str],
+    *,
+    rmse: bool = False,
+) -> list[Objective]:
+    """
+    Build objective instances from a comma-separated string or list.
+
+    Supported names: `mae`, `mse`, `rmse`, `directional_accuracy`.
+    """
+    if isinstance(names, str):
+        items = [x.strip() for x in names.split(",") if x.strip()]
+    else:
+        items = [str(x).strip() for x in names if str(x).strip()]
+    out: list[Objective] = []
+    for name in items:
+        key = name.lower()
+        if key == "mae":
+            out.append(MeanAbsoluteErrorObjective())
+        elif key == "mse":
+            out.append(MeanSquaredErrorObjective(root=False))
+        elif key == "rmse":
+            out.append(MeanSquaredErrorObjective(root=True))
+        elif key in {"directional_accuracy", "direction", "dir_acc"}:
+            out.append(DirectionalAccuracyObjective())
+        else:
+            raise ValueError(
+                f"Unknown objective '{name}'. "
+                "Supported: mae,mse,rmse,directional_accuracy"
+            )
+    if rmse and not any(getattr(obj, "name", "") == "mse" for obj in out):
+        out.append(MeanSquaredErrorObjective(root=True))
+    if not out:
+        raise ValueError("At least one objective name is required.")
+    return out

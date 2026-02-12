@@ -11,6 +11,7 @@ from .objectives import (
     DirectionalAccuracyObjective,
     MeanAbsoluteErrorObjective,
     MeanSquaredErrorObjective,
+    objectives_from_names,
 )
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "DirectionalAccuracyObjective",
     "MeanAbsoluteErrorObjective",
     "MeanSquaredErrorObjective",
+    "objectives_from_names",
 ]
 
 

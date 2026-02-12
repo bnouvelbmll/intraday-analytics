@@ -31,7 +31,7 @@ class AutoGluonTabularModel:
         TabularPredictor = self._require_autogluon()
         import pandas as pd
 
-        if not hasattr(X, "copy"):
+        if not hasattr(X, "columns"):
             X = pd.DataFrame(X)
         train_df = X.copy()
         train_df[self.label] = list(y)
@@ -48,6 +48,10 @@ class AutoGluonTabularModel:
                 raise ValueError("Model is not fit and predictor_path is not set.")
             TabularPredictor = self._require_autogluon()
             self.predictor = TabularPredictor.load(self.predictor_path)
+        import pandas as pd
+
+        if not hasattr(X, "columns"):
+            X = pd.DataFrame(X)
         return self.predictor.predict(X)
 
     def save(self, path: str) -> str:

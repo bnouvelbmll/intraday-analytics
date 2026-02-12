@@ -26,6 +26,7 @@ long date ranges via batching, shredding, and process isolation.
 - `basalt/preprocessors/`: preprocessors (iceberg, cbbo preprocess, aggressive trades).
 - `demo/`: runnable pipeline examples.
 - `docs/`: architecture, batching, multi-pass, and reference docs.
+  - `docs/alpha_discovery_workflow.md`: step-by-step feature/alpha search workflow.
 
 ## Install
 
@@ -170,8 +171,9 @@ These non-core packages are standalone subpackage wheels that depend on
 MCP package:
 
 - Install `bmll-basalt-mcp` to enable `basalt mcp ...` CLI commands and MCP server tools.
-- Start server (stdio transport by default): `basalt mcp serve`.
-- The same capabilities are available via CLI: `configure`, `run`, `recent_runs`, `success_rate`, `materialized_partitions`.
+- MCP CLI only exposes server entrypoint: `basalt mcp serve` (stdio transport by default).
+- MCP tools include: `configure_job`, `run_job`, `recent_runs`, `success_rate`, `materialized_partitions`, `optimize_run`, `optimize_summary`.
+- Equivalent operations remain available via standard CLI hierarchies (`pipeline`, `job`, `dagster`, `optimize`) instead of the `mcp` namespace.
 
 TA-Lib support is modular:
 
@@ -184,13 +186,33 @@ Optimize package is modular:
 - Install `bmll-basalt-optimize` to enable `basalt optimize run ...`.
 - `basalt optimize run` performs search-space driven configuration optimization and writes `trials.jsonl` + `summary.json`.
 - Executor mode: `--executor direct|bmll|ec2` currently supports trial-specific config dispatch.
-- `direct` computes scores (`--score_fn module:function` required).
+- `direct` computes scores using either `--score_fn module:function` or the model/objective path below.
 - `bmll`/`ec2` submit distributed trials and log submission ids; scoring is not computed in-process.
+- Model/objective path (alternative to `score_fn`):
+  - `--model_factory module:function`
+  - `--dataset_builder module:function`
+  - `--objectives module:function` or direct names like `mae,directional_accuracy,rmse`
+  - optional: `--objective`, `--use_aggregate`
+- Built-in no-custom-code presets are available:
+  - `--model_factory basalt.optimize.presets:simple_linear_model_factory`
+  - `--model_factory basalt.optimize.presets:autogluon_fast_model_factory` (requires `autogluon`)
+  - `--dataset_builder basalt.optimize.presets:dataset_builder_from_last_pass_output`
+  - `--search_generator basalt.optimize.presets:history_guided_generator`
+- Custom search generators are supported:
+  - `--search_generator module:function`
+  - callable receives `trial_id`, `search_space`, `rng`, `history`, `base_config`
+  - returns override mapping `dict[path, value]` (for example Optuna-based generators)
+- Optional experiment tracking is supported:
+  - `--tracker none|mlflow|wandb`
+  - common metadata flags: `--tracker_project`, `--tracker_run_name`, `--tracker_tags`
+  - MLflow flags: `--tracker_experiment`, `--tracker_uri`
+  - Weights & Biases flag: `--tracker_mode` (for example `offline`)
 
 Objective-functions package is modular:
 
 - Install `bmll-basalt-objective-functions` for reusable evaluation utilities.
 - Main classes: `ModelObjectiveEvaluator`, `DatasetSplit`, and objectives such as `DirectionalAccuracyObjective`, `MeanAbsoluteErrorObjective`, `MeanSquaredErrorObjective`.
+- `objectives_from_names(...)` builds objective lists from names like `mae,rmse,directional_accuracy`.
 - Use `make_optimization_score_fn(...)` to plug evaluator outputs into `basalt optimize` score functions.
 - Uncertainty-aware models are supported through:
   - `predict_interval(X) -> (pred, lower, upper)` or dict payload.

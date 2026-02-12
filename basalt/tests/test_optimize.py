@@ -72,7 +72,7 @@ def test_optimize_direct_requires_score_fn(tmp_path):
         ),
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="score_fn is required"):
+    with pytest.raises(ValueError, match="provide score_fn or"):
         optimize_pipeline(
             pipeline=str(module_path),
             search_space={"params": {}},
@@ -127,3 +127,114 @@ def test_optimize_bmll_dispatch_without_score_fn(tmp_path, monkeypatch):
     assert calls and calls[0]["config_file"].endswith("demo_mod.py")
     payload = json.loads(calls[0]["user_config_json"])
     assert payload["A"] == 2
+
+
+def test_optimize_pipeline_uses_tracker(tmp_path, monkeypatch):
+    module_path = tmp_path / "demo_mod.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            USER_CONFIG = {"START_DATE": "2025-01-01", "END_DATE": "2025-01-01", "A": 1}
+            def get_universe(date):
+                return {"ListingId": [1], "MIC": ["X"]}
+            """
+        ),
+        encoding="utf-8",
+    )
+    tracker_calls = {"start": 0, "trial": 0, "finish": 0}
+
+    class _Tracker:
+        name = "mock"
+
+        def start(self, **kwargs):
+            tracker_calls["start"] += 1
+
+        def log_trial(self, **kwargs):
+            tracker_calls["trial"] += 1
+
+        def finish(self, summary):
+            tracker_calls["finish"] += 1
+
+    import basalt.optimize.core as core
+
+    monkeypatch.setattr(core, "create_tracker", lambda **kwargs: _Tracker())
+    out = optimize_pipeline(
+        pipeline=str(module_path),
+        search_space={"params": {"A": {"type": "choice", "values": [2]}}},
+        trials=1,
+        executor="bmll",
+        score_fn=None,
+        tracker="wandb",
+        output_dir=str(tmp_path / "out"),
+    )
+    assert out["tracker"] == "mock"
+    assert tracker_calls == {"start": 1, "trial": 1, "finish": 1}
+
+
+def test_optimize_pipeline_with_model_objective_and_generator(tmp_path):
+    module_path = tmp_path / "demo_mod.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            USER_CONFIG = {"START_DATE": "2025-01-01", "END_DATE": "2025-01-01", "A": 1}
+            def get_universe(date):
+                return {"ListingId": [1], "MIC": ["X"]}
+            """
+        ),
+        encoding="utf-8",
+    )
+    import basalt.optimize.core as core
+
+    original = core._run_pipeline_with_config
+    core._run_pipeline_with_config = lambda module, user_config: {"ok": True}
+    try:
+        out = optimize_pipeline(
+            pipeline=str(module_path),
+            search_space={"params": {"A": {"type": "choice", "values": [1, 2]}}},
+            trials=1,
+            executor="direct",
+            score_fn=None,
+            model_factory="basalt.tests.test_optimize_integration_helpers:model_factory",
+            dataset_builder="basalt.tests.test_optimize_integration_helpers:dataset_builder",
+            objectives="basalt.tests.test_optimize_integration_helpers:objectives",
+            search_generator="basalt.tests.test_optimize_integration_helpers:generator",
+            output_dir=str(tmp_path / "out"),
+        )
+    finally:
+        core._run_pipeline_with_config = original
+    assert out["successful_trials"] == 1
+    assert out["best"] is not None
+
+
+def test_optimize_pipeline_accepts_objective_names(tmp_path):
+    module_path = tmp_path / "demo_mod.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            USER_CONFIG = {"START_DATE": "2025-01-01", "END_DATE": "2025-01-01", "A": 1}
+            def get_universe(date):
+                return {"ListingId": [1], "MIC": ["X"]}
+            """
+        ),
+        encoding="utf-8",
+    )
+    import basalt.optimize.core as core
+
+    original = core._run_pipeline_with_config
+    core._run_pipeline_with_config = lambda module, user_config: {"ok": True}
+    try:
+        out = optimize_pipeline(
+            pipeline=str(module_path),
+            search_space={"params": {"A": {"type": "choice", "values": [1, 2]}}},
+            trials=1,
+            executor="direct",
+            score_fn=None,
+            model_factory="basalt.tests.test_optimize_integration_helpers:model_factory",
+            dataset_builder="basalt.tests.test_optimize_integration_helpers:dataset_builder",
+            objectives="mae,directional_accuracy",
+            output_dir=str(tmp_path / "out"),
+        )
+    finally:
+        core._run_pipeline_with_config = original
+    assert out["successful_trials"] == 1
+    assert out["best"] is not None
