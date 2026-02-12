@@ -11,6 +11,9 @@ from basalt.analytics.utils import apply_market_state_filter
 
 
 class CBBOPreprocessConfig(BaseModel):
+    """
+    Configuration for combining per-listing L2 books into a joint CBBO-style book.
+    """
     model_config = ConfigDict(
         json_schema_extra={
             "ui": {
@@ -23,7 +26,10 @@ class CBBOPreprocessConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable CBBO preprocessing for this pass.",
+    )
     index_by: Literal["InstrumentId", "PrimaryListingId"] = Field(
         "InstrumentId",
         description="Index output by InstrumentId or PrimaryListingId.",

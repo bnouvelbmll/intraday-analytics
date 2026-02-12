@@ -6,7 +6,7 @@ import polars as pl
 import pandas as pd
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
-from basalt.analytics_base import BaseAnalytics
+from basalt.analytics_base import BaseAnalytics, analytic_doc
 from basalt.analytics_registry import register_analytics
 
 
@@ -31,7 +31,10 @@ class ExternalEventsAnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable external-events timeline generation for this pass.",
+    )
     source_pass: str = Field(
         "pass1",
         description="Source pass or input table to use for event timestamps.",
@@ -117,6 +120,40 @@ class ExternalEventsAnalyticsConfig(BaseModel):
         if "scale_factor" not in out:
             out["scale_factor"] = 1.0 if dist == "arithmetic" else max(base, 1.0)
         return out
+
+
+@analytic_doc(
+    module="external_events",
+    pattern=r"^EventAnchorTime$",
+    template="Original event timestamp before context offsets are applied.",
+    unit="Timestamp",
+    description=(
+        "Anchor timestamp from the selected source event row; context rows are "
+        "generated around this anchor."
+    ),
+)
+@analytic_doc(
+    module="external_events",
+    pattern=r"^EventContextIndex$",
+    template="Relative context index around the anchor event.",
+    unit="Index",
+    description=(
+        "Discrete index where 0 is anchor, negative values are backward offsets, "
+        "and positive values are forward offsets."
+    ),
+)
+@analytic_doc(
+    module="external_events",
+    pattern=r"^EventDeltaSeconds$",
+    template="Signed time offset from anchor event in seconds.",
+    unit="Seconds",
+    description=(
+        "Time distance between context timestamp and EventAnchorTime; negative is "
+        "before anchor and positive is after anchor."
+    ),
+)
+def _register_external_events_docs():
+    return None
 
 
 @register_analytics("external_events", config_attr="external_event_analytics")

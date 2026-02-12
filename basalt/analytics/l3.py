@@ -32,7 +32,10 @@ class L3MetricConfig(CombinatorialMetricConfig):
     Basic L3 Event Analytics (Counts and Volumes).
     """
 
-    metric_type: Literal["L3_Generic"] = "L3_Generic"
+    metric_type: Literal["L3_Generic"] = Field(
+        "L3_Generic",
+        description="Internal metric family identifier for generic L3 analytics.",
+    )
 
     sides: Union[Side, List[Side]] = Field(
         ...,
@@ -106,7 +109,10 @@ class L3AdvancedConfig(CombinatorialMetricConfig):
     Advanced L3 Analytics (Fleeting Liquidity, Latency, etc.)
     """
 
-    metric_type: Literal["L3_Advanced"] = "L3_Advanced"
+    metric_type: Literal["L3_Advanced"] = Field(
+        "L3_Advanced",
+        description="Internal metric family identifier for advanced L3 analytics.",
+    )
 
     variant: Union[
         Literal[
@@ -187,7 +193,10 @@ class L3AnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable the L3 analytics module for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Prefix for L3 metric columns.",

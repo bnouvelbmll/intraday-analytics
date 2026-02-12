@@ -37,14 +37,49 @@ class DenseAnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
-    metric_prefix: Optional[str] = None
-    mode: Literal["adaptative", "uniform"] = "adaptative"
-    time_interval: Optional[List[str]] = None
-    time_bucket_seconds: Optional[float] = None
-    time_bucket_anchor: Literal["end", "start"] = "end"
-    time_bucket_closed: Literal["right", "left"] = "right"
-    symbol_cols: Optional[List[str]] = None
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable dense timeline generation for this pass.",
+    )
+    metric_prefix: Optional[str] = Field(
+        None,
+        description="Optional prefix for dense timeline output columns.",
+    )
+    mode: Literal["adaptative", "uniform"] = Field(
+        "adaptative",
+        description=(
+            "Timeline construction mode: 'adaptative' follows observed market "
+            "activity windows; 'uniform' uses a fixed interval grid."
+        ),
+    )
+    time_interval: Optional[List[str]] = Field(
+        None,
+        description=(
+            "For uniform mode, start/end local clock time as ['HH:MM:SS', "
+            "'HH:MM:SS']."
+        ),
+    )
+    time_bucket_seconds: Optional[float] = Field(
+        None,
+        description="Bucket size in seconds for generated dense time points.",
+    )
+    time_bucket_anchor: Literal["end", "start"] = Field(
+        "end",
+        description=(
+            "Bucket labeling anchor: 'end' labels by right boundary; 'start' "
+            "labels by left boundary."
+        ),
+    )
+    time_bucket_closed: Literal["right", "left"] = Field(
+        "right",
+        description=(
+            "Bucket boundary convention used by downstream alignment logic."
+        ),
+    )
+    symbol_cols: Optional[List[str]] = Field(
+        None,
+        description="Symbol columns used to generate one dense timeline per symbol group.",
+    )
 
 
 @register_analytics("dense", config_attr="dense_analytics", needs_ref=True)

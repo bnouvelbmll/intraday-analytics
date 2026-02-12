@@ -33,7 +33,10 @@ class CBBOfromL3PreprocessConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable CBBO-from-L3 preprocessing for this pass.",
+    )
     index_by: Literal["InstrumentId", "PrimaryListingId"] = Field(
         "InstrumentId",
         description="Index output by InstrumentId or PrimaryListingId.",

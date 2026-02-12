@@ -8,6 +8,14 @@ Operational recommendations for contributors working on `basalt` core and subpac
 - Treat time shaping as orchestration, not analytics logic.
 - When you add new config modules make sure that only revelant options are displayed when some parameters depends on previous choices
 - Prefer explicit dataflow: pass-to-pass dependencies should be visible through `module_inputs`.
+- Every `*Config` model must include:
+  - a class docstring explaining purpose and usage context,
+  - field-level `description=` for every field (including toggles and enum/literal choices),
+  - guidance text that helps users interpret allowed values and defaults.
+- Every analytic exposed to the explorer must publish complete docs metadata:
+  - regex pattern, unit, definition template, and non-empty description,
+  - use `@analytic_expression(..., unit=...)` + docstring or `AnalyticDoc(...)`,
+  - avoid undocumented outputs because schema explorer and explain tools rely on this metadata.
 
 ## Time And Pass Design
 - Use `PassConfig.timeline_mode` to control timeline behavior:

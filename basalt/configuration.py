@@ -21,7 +21,11 @@ class QualityCheckConfig(BaseModel):
     Post-processing quality checks for metric outputs.
     """
 
-    ENABLED: bool = False
+    ENABLED: bool = Field(
+        False,
+        description="Enable postprocessing data-quality checks on pass outputs.",
+        json_schema_extra={"section": "Advanced"},
+    )
     null_rate_max: float = Field(
         0.2,
         ge=0.0,
@@ -70,7 +74,13 @@ class OutputType(str, Enum):
 
 
 class OutputTarget(BaseModel):
-    type: OutputType = OutputType.PARQUET
+    type: OutputType = Field(
+        OutputType.PARQUET,
+        description=(
+            "Output backend type. Use 'parquet' for file output, 'delta' for "
+            "delta tables, or 'sql' for relational databases."
+        ),
+    )
     path_template: Optional[str] = Field(
         "s3://{bucket}/{prefix}/data/{datasetname}/{pass}/{universe}/{start_date}_{end_date}.parquet",
         description="Path template for parquet/delta outputs (supports {bucket}, {prefix}, {datasetname}, {universe}, {start_date}, {end_date}).",
@@ -153,15 +163,40 @@ class PassConfig(BaseModel):
     sub-configs. Passes are executed in order and can feed subsequent passes.
     """
 
-    name: str
-    time_bucket_seconds: float = Field(60, gt=0)
-    time_bucket_anchor: Literal["end", "start"] = "end"
-    time_bucket_closed: Literal["right", "left"] = "right"
-    sort_keys: Optional[List[str]] = None
+    name: str = Field(
+        ...,
+        description="Unique pass identifier used for dependencies and outputs.",
+    )
+    time_bucket_seconds: float = Field(
+        60,
+        gt=0,
+        description="Base bucket size (seconds) used by time-aware modules in this pass.",
+    )
+    time_bucket_anchor: Literal["end", "start"] = Field(
+        "end",
+        description=(
+            "Bucket labeling anchor: 'end' labels buckets by right boundary; "
+            "'start' labels by left boundary."
+        ),
+    )
+    time_bucket_closed: Literal["right", "left"] = Field(
+        "right",
+        description=(
+            "Bucket boundary convention: 'right' means (start, end], 'left' means "
+            "[start, end)."
+        ),
+    )
+    sort_keys: Optional[List[str]] = Field(
+        None,
+        description="Optional explicit output sort keys for this pass.",
+    )
     batch_freq: Optional[str] = Field(
         None, description="Override global BATCH_FREQ for this pass."
     )
-    modules: List[str] = Field(default_factory=list)
+    modules: List[str] = Field(
+        default_factory=list,
+        description="Ordered module names enabled for this pass.",
+    )
     output: Optional[OutputTarget] = Field(
         None,
         description="Optional per-pass output target override.",
@@ -195,30 +230,54 @@ class PassConfig(BaseModel):
     )
 
     ## Module specific config
-    dense_analytics: DenseAnalyticsConfig = Field(default_factory=DenseAnalyticsConfig)
-    l2_analytics: L2AnalyticsConfig = Field(default_factory=L2AnalyticsConfig)
-    l3_analytics: L3AnalyticsConfig = Field(default_factory=L3AnalyticsConfig)
-    trade_analytics: TradeAnalyticsConfig = Field(default_factory=TradeAnalyticsConfig)
-    execution_analytics: ExecutionAnalyticsConfig = Field(
-        default_factory=ExecutionAnalyticsConfig
+    dense_analytics: DenseAnalyticsConfig = Field(
+        default_factory=DenseAnalyticsConfig,
+        description="Configuration for the dense timeline module.",
     )
-    cbbo_analytics: CBBOAnalyticsConfig = Field(default_factory=CBBOAnalyticsConfig)
+    l2_analytics: L2AnalyticsConfig = Field(
+        default_factory=L2AnalyticsConfig,
+        description="Configuration for core L2 analytics.",
+    )
+    l3_analytics: L3AnalyticsConfig = Field(
+        default_factory=L3AnalyticsConfig,
+        description="Configuration for core L3 analytics.",
+    )
+    trade_analytics: TradeAnalyticsConfig = Field(
+        default_factory=TradeAnalyticsConfig,
+        description="Configuration for trade analytics.",
+    )
+    execution_analytics: ExecutionAnalyticsConfig = Field(
+        default_factory=ExecutionAnalyticsConfig,
+        description="Configuration for execution analytics.",
+    )
+    cbbo_analytics: CBBOAnalyticsConfig = Field(
+        default_factory=CBBOAnalyticsConfig,
+        description="Configuration for CBBO analytics.",
+    )
     generic_analytics: GenericAnalyticsConfig = Field(
-        default_factory=GenericAnalyticsConfig
+        default_factory=GenericAnalyticsConfig,
+        description="Configuration for generic postprocessing analytics.",
     )
     reaggregate_analytics: ReaggregateAnalyticsConfig = Field(
-        default_factory=ReaggregateAnalyticsConfig
+        default_factory=ReaggregateAnalyticsConfig,
+        description="Configuration for pass-output reaggregation.",
     )
     external_event_analytics: ExternalEventsAnalyticsConfig = Field(
-        default_factory=ExternalEventsAnalyticsConfig
+        default_factory=ExternalEventsAnalyticsConfig,
+        description="Configuration for external-events timeline mode.",
     )
     observed_events_analytics: ObservedEventsAnalyticsConfig = Field(
-        default_factory=ObservedEventsAnalyticsConfig
+        default_factory=ObservedEventsAnalyticsConfig,
+        description="Configuration for observed-events detection analytics.",
     )
     correlation_analytics: CorrelationAnalyticsConfig = Field(
-        default_factory=CorrelationAnalyticsConfig
+        default_factory=CorrelationAnalyticsConfig,
+        description="Configuration for correlation analytics.",
     )
-    quality_checks: QualityCheckConfig = Field(default_factory=QualityCheckConfig)
+    quality_checks: QualityCheckConfig = Field(
+        default_factory=QualityCheckConfig,
+        description="Postprocessing quality-check rules for this pass output.",
+    )
 
     @model_validator(mode="before")
     @classmethod

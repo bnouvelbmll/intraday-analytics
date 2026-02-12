@@ -73,7 +73,10 @@ class GenericAnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable the generic analytics module for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Prefix for generic metric columns.",

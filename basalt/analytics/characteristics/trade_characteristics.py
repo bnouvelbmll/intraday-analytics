@@ -2,7 +2,7 @@ import logging
 from typing import Optional, List
 
 import polars as pl
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from basalt.analytics_base import BaseAnalytics
 from basalt.analytics_registry import register_analytics
@@ -26,9 +26,21 @@ class TradeCharacteristicsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
-    metric_prefix: Optional[str] = None
-    time_bucket_seconds: Optional[float] = None
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable trade characteristics analytics for this pass.",
+    )
+    metric_prefix: Optional[str] = Field(
+        None,
+        description="Optional prefix added to trade characteristics output columns.",
+    )
+    time_bucket_seconds: Optional[float] = Field(
+        None,
+        description=(
+            "Fallback bucket size (seconds) used to derive TimeBucket from "
+            "TradeTimestamp when TimeBucket is missing."
+        ),
+    )
 
 
 @register_analytics(

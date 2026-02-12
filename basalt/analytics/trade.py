@@ -47,7 +47,10 @@ class TradeGenericConfig(CombinatorialMetricConfig):
     General Trade Statistics (Volume, Counts, Notionals, Prices).
     """
 
-    metric_type: Literal["Trade_Generic"] = "Trade_Generic"
+    metric_type: Literal["Trade_Generic"] = Field(
+        "Trade_Generic",
+        description="Internal metric family identifier for generic trade analytics.",
+    )
 
     sides: Union[SideWithTotal, List[SideWithTotal]] = Field(
         default="Total",
@@ -102,7 +105,10 @@ class TradeDiscrepancyConfig(CombinatorialMetricConfig):
     Calculates: 10000 * (TradePrice - ReferencePrice) / ReferencePrice
     """
 
-    metric_type: Literal["Trade_Discrepancy"] = "Trade_Discrepancy"
+    metric_type: Literal["Trade_Discrepancy"] = Field(
+        "Trade_Discrepancy",
+        description="Internal metric family identifier for trade discrepancy analytics.",
+    )
 
     references: Union[DiscrepancyReference, List[DiscrepancyReference]] = Field(
         ...,
@@ -167,7 +173,10 @@ class TradeFlagConfig(CombinatorialMetricConfig):
     Analytics filtered by specific trade flags (e.g., Negotiated, Odd Lot).
     """
 
-    metric_type: Literal["Trade_Flag"] = "Trade_Flag"
+    metric_type: Literal["Trade_Flag"] = Field(
+        "Trade_Flag",
+        description="Internal metric family identifier for trade-flag analytics.",
+    )
 
     flags: Union[TradeFlagType, List[TradeFlagType]] = Field(
         ...,
@@ -233,7 +242,10 @@ class TradeChangeConfig(CombinatorialMetricConfig):
     quantify microstructure shifts rather than absolute levels.
     """
 
-    metric_type: Literal["Trade_Change"] = "Trade_Change"
+    metric_type: Literal["Trade_Change"] = Field(
+        "Trade_Change",
+        description="Internal metric family identifier for trade-change analytics.",
+    )
 
     measures: Union[ImpactMeasure, List[ImpactMeasure]] = Field(
         ...,
@@ -281,7 +293,10 @@ class TradeImpactConfig(CombinatorialMetricConfig):
     the TimeBucket.
     """
 
-    metric_type: Literal["Trade_Impact"] = "Trade_Impact"
+    metric_type: Literal["Trade_Impact"] = Field(
+        "Trade_Impact",
+        description="Internal metric family identifier for trade-impact analytics.",
+    )
 
     variant: Union[
         Literal["EffectiveSpread", "RealizedSpread", "PriceImpact"], List[str]
@@ -383,7 +398,10 @@ class TradeAnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable the trade analytics module for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Prefix for trade metric columns.",

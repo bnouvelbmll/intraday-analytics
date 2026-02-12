@@ -39,6 +39,7 @@ AggregationMethod = Literal[
     "VWA",
     "Median",
     "NotionalWeighted",
+    "NotAggregated",
 ]
 
 ANALYTIC_HINTS: list[dict] = []
@@ -83,6 +84,12 @@ _ANALYTIC_DOC_KEYS: set[tuple] = set()
 
 
 def _register_analytic_doc(data: dict) -> None:
+    template = (data.get("template") or "").strip()
+    description = (data.get("description") or "").strip()
+    if template and not description:
+        data = dict(data)
+        data["description"] = template
+
     key = (
         data.get("module"),
         data.get("pattern"),
@@ -276,6 +283,18 @@ def default_hint_for_column(col: str, weight_col: str | None):
         return {"default_agg": "Last", "weight_col": None}
     if col == "MarketState":
         return {"default_agg": "Last", "weight_col": None}
+    if col in {
+        "EventType",
+        "Indicator",
+        "MetricX",
+        "MetricY",
+        "EventAnchorTime",
+        "EventContextIndex",
+    }:
+        # Label/identity fields are not safe to aggregate numerically.
+        # They can still be preserved by adding them to group_by keys
+        # in postprocessing modules (e.g. reaggregate/generic passes).
+        return {"default_agg": "NotAggregated", "weight_col": None}
     if (
         col.endswith("_right")
         or col.endswith("TimeBucketInt")

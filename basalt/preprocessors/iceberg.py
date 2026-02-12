@@ -31,7 +31,10 @@ class IcebergMetricConfig(CombinatorialMetricConfig):
     Iceberg Execution Analytics (Volumes, Counts, Average Size, Imbalance).
     """
 
-    metric_type: Literal["Iceberg"] = "Iceberg"
+    metric_type: Literal["Iceberg"] = Field(
+        "Iceberg",
+        description="Internal metric family identifier for iceberg analytics.",
+    )
 
     measures: Union[IcebergMeasure, List[IcebergMeasure]] = Field(
         ...,
@@ -89,7 +92,10 @@ class IcebergAnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable iceberg analytics for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Prefix for iceberg metric columns.",

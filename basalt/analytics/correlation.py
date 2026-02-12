@@ -6,7 +6,7 @@ import pandas as pd
 import polars as pl
 from pydantic import BaseModel, Field, ConfigDict
 
-from basalt.analytics_base import BaseAnalytics
+from basalt.analytics_base import BaseAnalytics, analytic_doc
 from basalt.analytics_registry import register_analytics
 
 
@@ -27,7 +27,10 @@ class CorrelationAnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable correlation analytics for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Optional prefix (not used for correlation rows).",
@@ -52,6 +55,34 @@ class CorrelationAnalyticsConfig(BaseModel):
         "rows",
         description="Output as rows (MetricX/MetricY/Corr) or embedded matrix.",
     )
+
+
+@analytic_doc(
+    module="correlation",
+    pattern=r"^MetricX$",
+    template="First metric name in the correlation pair.",
+    unit="Label",
+    description="Source metric identifier for the left axis of the pair.",
+)
+@analytic_doc(
+    module="correlation",
+    pattern=r"^MetricY$",
+    template="Second metric name in the correlation pair.",
+    unit="Label",
+    description="Source metric identifier for the right axis of the pair.",
+)
+@analytic_doc(
+    module="correlation",
+    pattern=r"^Corr$",
+    template="Pairwise correlation coefficient between MetricX and MetricY.",
+    unit="Correlation",
+    description=(
+        "Correlation coefficient in [-1, 1] computed per configured grouping "
+        "and method."
+    ),
+)
+def _register_correlation_docs():
+    return None
 
 
 @register_analytics("correlation", config_attr="correlation_analytics")

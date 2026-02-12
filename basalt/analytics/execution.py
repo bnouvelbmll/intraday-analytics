@@ -26,7 +26,10 @@ class L3ExecutionConfig(CombinatorialMetricConfig):
     Analytics derived from L3 execution events.
     """
 
-    metric_type: Literal["L3_Execution"] = "L3_Execution"
+    metric_type: Literal["L3_Execution"] = Field(
+        "L3_Execution",
+        description="Internal metric family identifier for L3 execution analytics.",
+    )
 
     sides: Union[Side, List[Side]] = Field(
         ...,
@@ -70,7 +73,10 @@ class TradeBreakdownConfig(CombinatorialMetricConfig):
     Analytics derived from Trades, broken down by Trade Type and Aggressor Side.
     """
 
-    metric_type: Literal["Trade_Breakdown"] = "Trade_Breakdown"
+    metric_type: Literal["Trade_Breakdown"] = Field(
+        "Trade_Breakdown",
+        description="Internal metric family identifier for trade-breakdown analytics.",
+    )
 
     trade_types: Union[TradeType, List[TradeType]] = Field(
         ...,
@@ -127,7 +133,10 @@ class ExecutionDerivedConfig(CombinatorialMetricConfig):
     Analytics derived from other execution analytics.
     """
 
-    metric_type: Literal["Execution_Derived"] = "Execution_Derived"
+    metric_type: Literal["Execution_Derived"] = Field(
+        "Execution_Derived",
+        description="Internal metric family identifier for derived execution analytics.",
+    )
 
     variant: Union[DerivedMetricVariant, List[DerivedMetricVariant]] = Field(
         ...,
@@ -170,7 +179,10 @@ class ExecutionAnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable the execution analytics module for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Prefix for execution metric columns.",

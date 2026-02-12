@@ -16,6 +16,7 @@ import polars as pl
 from pydantic import BaseModel, Field, ConfigDict
 
 from basalt.analytics_base import BaseAnalytics
+from basalt.analytics_base import analytic_doc
 from basalt.analytics_registry import register_analytics
 
 
@@ -51,7 +52,10 @@ class Alpha101AnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable Alpha101 analytics for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Prefix for alpha output columns.",
@@ -89,13 +93,48 @@ class Alpha101AnalyticsConfig(BaseModel):
             "Use to adapt daily formulas to intraday buckets.\n"
         },
     )
-    open_col: str = "Open"
-    high_col: str = "High"
-    low_col: str = "Low"
-    close_col: str = "Close"
-    volume_col: str = "Volume"
-    vwap_col: str = "VWAP"
-    notional_col: str = "Notional"
+    open_col: str = Field(
+        "Open",
+        description="Input column mapped to Open prices for alpha formulas.",
+    )
+    high_col: str = Field(
+        "High",
+        description="Input column mapped to High prices for alpha formulas.",
+    )
+    low_col: str = Field(
+        "Low",
+        description="Input column mapped to Low prices for alpha formulas.",
+    )
+    close_col: str = Field(
+        "Close",
+        description="Input column mapped to Close prices for alpha formulas.",
+    )
+    volume_col: str = Field(
+        "Volume",
+        description="Input column mapped to traded volume for alpha formulas.",
+    )
+    vwap_col: str = Field(
+        "VWAP",
+        description="Input column mapped to VWAP for alpha formulas that require it.",
+    )
+    notional_col: str = Field(
+        "Notional",
+        description="Input column mapped to notional value for alpha formulas that require it.",
+    )
+
+
+@analytic_doc(
+    module="alpha101",
+    pattern=r"^Alpha(?P<alpha_id>\d{3})$",
+    template="Cross-sectional alpha factor value for formula {alpha_id}.",
+    unit="Score",
+    description=(
+        "Dimensionless alpha score computed from adapted 101-formula expressions; "
+        "higher absolute values indicate stronger signal intensity."
+    ),
+)
+def _register_alpha101_docs():
+    return None
 
 
 def _scaled(window: int, multiplier: float) -> int:

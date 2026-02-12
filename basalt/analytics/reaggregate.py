@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Literal
+import logging
 
 import polars as pl
 from pydantic import BaseModel, Field, ConfigDict
@@ -11,6 +12,8 @@ from basalt.analytics_base import (
     default_hint_for_column,
 )
 from basalt.analytics_registry import register_analytics
+
+logger = logging.getLogger(__name__)
 
 
 class ReaggregateAnalyticsConfig(BaseModel):
@@ -52,7 +55,10 @@ class ReaggregateAnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable reaggregation analytics for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Prefix for reaggregated metric columns.",
@@ -123,10 +129,20 @@ class ReaggregateAnalyticsConfig(BaseModel):
     )
     weight_col: Optional[str] = Field(
         "TradeNotionalEUR",
-        description="Weight column for NotionalWeighted aggregations.",
+        description="Base weight column used for NotionalWeighted aggregations.",
         json_schema_extra={
             "long_doc": "Used when hints select NotionalWeighted aggregation.\n"
+            "By default, daily weights are derived from this column.\n"
             "If missing, falls back to mean aggregation.\n"
+        },
+    )
+    weight_mode: Literal["daily", "bucket"] = Field(
+        "daily",
+        description="Weight scope for NotionalWeighted: 'daily' (default) or 'bucket'.",
+        json_schema_extra={
+            "long_doc": "daily: derive one weight per join_column and trading day from weight_col.\n"
+            "bucket: use the per-row bucket value directly (legacy behavior).\n"
+            "daily is recommended to avoid unstable intraday weighting.\n"
         },
     )
 
@@ -186,6 +202,25 @@ class ReaggregateAnalytics(BaseAnalytics):
             )
 
         group_by = self.config.group_by or [self.config.group_column, "TimeBucket"]
+        if self.config.weight_col and self.config.weight_mode == "daily":
+            schema_cols = lf.collect_schema().names()
+            if (
+                self.config.weight_col in schema_cols
+                and self.config.join_column in schema_cols
+                and "TimeBucket" in schema_cols
+            ):
+                lf = lf.with_columns(
+                    __WeightDate=pl.col("TimeBucket").dt.date()
+                ).with_columns(
+                    __NotionalWeightDaily=pl.col(self.config.weight_col)
+                    .sum()
+                    .over([self.config.join_column, "__WeightDate"])
+                )
+            else:
+                logger.warning(
+                    "Reaggregate daily weights requested but required columns are missing; "
+                    "falling back to bucket weights."
+                )
         cols = lf.collect_schema().names()
 
         key_cols = {
@@ -198,7 +233,10 @@ class ReaggregateAnalytics(BaseAnalytics):
             "Ticker",
             "CurrencyCode",
         }
-        metric_cols = [c for c in cols if c not in key_cols]
+        # Any explicit grouping key should be treated as an identity column and
+        # excluded from metric aggregation (it will be preserved by group_by).
+        key_cols.update(group_by)
+        metric_cols = [c for c in cols if c not in key_cols and not c.startswith("__")]
 
         exprs: List[pl.Expr] = []
         for col in metric_cols:
@@ -208,6 +246,12 @@ class ReaggregateAnalytics(BaseAnalytics):
             )
             agg = hint["default_agg"]
             weight_col = hint["weight_col"]
+            if (
+                agg in {"NotionalWeighted", "VWA", "TWA"}
+                and self.config.weight_mode == "daily"
+                and "__NotionalWeightDaily" in cols
+            ):
+                weight_col = "__NotionalWeightDaily"
 
             if agg in {"Sum"}:
                 expr = pl.col(col).sum()
@@ -227,6 +271,8 @@ class ReaggregateAnalytics(BaseAnalytics):
                 expr = pl.col(col).std()
             elif agg in {"NotionalWeighted", "VWA", "TWA"} and weight_col and weight_col in cols:
                 expr = (pl.col(col) * pl.col(weight_col)).sum() / pl.col(weight_col).sum()
+            elif agg == "NotAggregated":
+                continue
             else:
                 expr = pl.col(col).mean()
 

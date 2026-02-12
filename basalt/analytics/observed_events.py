@@ -6,7 +6,7 @@ import pandas as pd
 import polars as pl
 from pydantic import BaseModel, Field, ConfigDict
 
-from basalt.analytics_base import BaseAnalytics
+from basalt.analytics_base import BaseAnalytics, analytic_doc
 from basalt.analytics_registry import register_analytics
 
 
@@ -30,7 +30,10 @@ class ObservedEventsAnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable observed-event detection for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Optional prefix (not used for event rows).",
@@ -56,6 +59,35 @@ class ObservedEventsAnalyticsConfig(BaseModel):
         default_factory=lambda: ["local_min", "local_max"],
         description="Which event types to emit.",
     )
+
+
+@analytic_doc(
+    module="observed_events",
+    pattern=r"^EventType$",
+    template="Detected event label (local minimum or local maximum).",
+    unit="Label",
+    description=(
+        "Categorical signal emitted by event detector for each selected timestamp."
+    ),
+)
+@analytic_doc(
+    module="observed_events",
+    pattern=r"^Indicator$",
+    template="Indicator family used for event detection.",
+    unit="Label",
+    description="Indicator source name used to compute event turning points.",
+)
+@analytic_doc(
+    module="observed_events",
+    pattern=r"^IndicatorValue$",
+    template="Indicator value at detected event timestamp.",
+    unit="Value",
+    description=(
+        "Numeric indicator magnitude (SMA/EWMA) at the emitted event row."
+    ),
+)
+def _register_observed_events_docs():
+    return None
 
 
 @register_analytics("observed_events", config_attr="observed_events_analytics")

@@ -40,7 +40,10 @@ class L2LiquidityConfig(CombinatorialMetricConfig):
     Configuration for L2 Liquidity analytics (at specific levels).
     """
 
-    metric_type: Literal["L2_Liquidity"] = "L2_Liquidity"
+    metric_type: Literal["L2_Liquidity"] = Field(
+        "L2_Liquidity",
+        description="Internal metric family identifier for L2 liquidity analytics.",
+    )
 
     sides: Union[Side, List[Side]] = Field(
         ...,
@@ -96,7 +99,10 @@ class L2SpreadConfig(CombinatorialMetricConfig):
     Configuration for Bid-Ask Spread analytics.
     """
 
-    metric_type: Literal["L2_Spread"] = "L2_Spread"
+    metric_type: Literal["L2_Spread"] = Field(
+        "L2_Spread",
+        description="Internal metric family identifier for L2 spread analytics.",
+    )
 
     variant: Union[Literal["Abs", "BPS"], List[Literal["Abs", "BPS"]]] = Field(
         default=["BPS"],
@@ -124,7 +130,10 @@ class L2ImbalanceConfig(CombinatorialMetricConfig):
     Formula: (Bid - Ask) / (Bid + Ask)
     """
 
-    metric_type: Literal["L2_Imbalance"] = "L2_Imbalance"
+    metric_type: Literal["L2_Imbalance"] = Field(
+        "L2_Imbalance",
+        description="Internal metric family identifier for L2 imbalance analytics.",
+    )
 
     levels: Union[int, List[int]] = Field(
         ...,
@@ -164,7 +173,10 @@ class L2VolatilityConfig(CombinatorialMetricConfig):
     Configuration for Price Volatility (Standard Deviation of log returns price series).
     """
 
-    metric_type: Literal["L2_Volatility"] = "L2_Volatility"
+    metric_type: Literal["L2_Volatility"] = Field(
+        "L2_Volatility",
+        description="Internal metric family identifier for L2 volatility analytics.",
+    )
 
     source: Union[Literal["Mid", "Bid", "Ask", "Last", "WeightedMid"], List[str]] = (
         Field(
@@ -184,7 +196,10 @@ class L2VolatilityConfig(CombinatorialMetricConfig):
         )
     )
 
-    aggregations: List[AggregationMethod] = ["Std"]
+    aggregations: List[AggregationMethod] = Field(
+        default_factory=lambda: ["Std"],
+        description="Aggregation operators applied to the volatility series per bucket.",
+    )
 
 
 class L2OHLCConfig(CombinatorialMetricConfig):
@@ -192,7 +207,10 @@ class L2OHLCConfig(CombinatorialMetricConfig):
     Configuration for OHLC bars computed from L2 price series.
     """
 
-    metric_type: Literal["L2_OHLC"] = "L2_OHLC"
+    metric_type: Literal["L2_OHLC"] = Field(
+        "L2_OHLC",
+        description="Internal metric family identifier for L2 OHLC analytics.",
+    )
 
     source: Union[Literal["Mid", "Bid", "Ask", "WeightedMid"], List[str]] = Field(
         default="Mid",
@@ -253,7 +271,10 @@ class L2AnalyticsConfig(BaseModel):
         }
     )
 
-    ENABLED: bool = True
+    ENABLED: bool = Field(
+        True,
+        description="Enable or disable the L2 analytics module for this pass.",
+    )
     metric_prefix: Optional[str] = Field(
         None,
         description="Prefix for L2 metric columns.",
@@ -269,9 +290,27 @@ class L2AnalyticsConfig(BaseModel):
             "Leave empty to keep default module naming.\n"
         },
     )
-    time_bucket_seconds: Optional[float] = None
-    time_bucket_anchor: Literal["end", "start"] = "end"
-    time_bucket_closed: Literal["right", "left"] = "right"
+    time_bucket_seconds: Optional[float] = Field(
+        None,
+        description=(
+            "Bucket size in seconds used by time-aware metrics (for example OHLC "
+            "prev_close and volatility alignment)."
+        ),
+    )
+    time_bucket_anchor: Literal["end", "start"] = Field(
+        "end",
+        description=(
+            "Bucket labeling anchor: 'end' labels bucket by its right boundary; "
+            "'start' labels by left boundary."
+        ),
+    )
+    time_bucket_closed: Literal["right", "left"] = Field(
+        "right",
+        description=(
+            "Bucket boundary convention: 'right' means (start, end], 'left' means "
+            "[start, end)."
+        ),
+    )
 
     liquidity: List[L2LiquidityConfig] = Field(
         default_factory=list,
@@ -351,7 +390,11 @@ class L2AnalyticsConfig(BaseModel):
         },
     )
 
-    levels: int = 10
+    levels: int = Field(
+        10,
+        ge=1,
+        description="Maximum L2 depth level expected in input snapshots.",
+    )
 
 
 # =============================
