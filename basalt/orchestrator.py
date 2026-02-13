@@ -1,5 +1,6 @@
 import os
 import pickle
+import time
 from multiprocessing import Process, get_context
 import logging
 import inspect
@@ -188,11 +189,68 @@ def _resolve_batch_group_map(pass_config, ref: pl.DataFrame) -> dict | None:
 
 
 class _GetUniverseWrapper:
-    def __init__(self, func):
+    def __init__(
+        self,
+        func,
+        *,
+        attempts: int = 4,
+        base_delay: float = 1.0,
+        factor: float = 2.0,
+        max_delay: float = 30.0,
+    ):
         self._func = func
+        self.attempts = int(max(1, attempts))
+        self.base_delay = float(max(0.0, base_delay))
+        self.factor = float(max(1.0, factor))
+        self.max_delay = float(max(0.0, max_delay))
+
+    @staticmethod
+    def _is_retryable_universe_error(exc: Exception) -> bool:
+        msg = str(exc).lower()
+        retryable_markers = (
+            "500",
+            "502",
+            "503",
+            "504",
+            "429",
+            "timeout",
+            "timed out",
+            "temporar",
+            "connection reset",
+            "connection aborted",
+            "name or service not known",
+            "dns",
+            "service unavailable",
+        )
+        return any(marker in msg for marker in retryable_markers)
 
     def __call__(self, date_value):
-        return self._func(_coerce_to_iso_date(date_value))
+        from .api_stats import api_call
+
+        date_str = _coerce_to_iso_date(date_value)
+        for attempt in range(self.attempts):
+            try:
+                return api_call(
+                    "get_universe",
+                    lambda: self._func(date_str),
+                    extra={"attempt": attempt + 1, "date": date_str},
+                )
+            except Exception as exc:
+                if attempt == self.attempts - 1 or not self._is_retryable_universe_error(
+                    exc
+                ):
+                    raise
+                delay = min(self.max_delay, self.base_delay * (self.factor**attempt))
+                logging.warning(
+                    "get_universe failed for date %s (attempt %s/%s): %s. "
+                    "Retrying in %.1fs.",
+                    date_str,
+                    attempt + 1,
+                    self.attempts,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
 
 
 def _derive_tables_to_load(

@@ -96,3 +96,43 @@ def test_derive_tables_to_load_invalid_override(monkeypatch):
     pass_cfg = PassConfig(name="p1", modules=["l2"], module_inputs={"l2": "l2"})
     with pytest.raises(ValueError, match="must be a mapping"):
         orch._derive_tables_to_load(pass_cfg, user_tables=[])
+
+
+def test_get_universe_wrapper_retries_retryable_errors(monkeypatch):
+    calls = {"count": 0}
+
+    def _fn(date):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise RuntimeError("HTTP 500 temporary failure")
+        return {"date": date}
+
+    monkeypatch.setattr(orch.time, "sleep", lambda _x: None)
+    stats_calls = []
+
+    def _api_call(name, fn, extra=None):
+        stats_calls.append((name, extra))
+        return fn()
+
+    monkeypatch.setattr("basalt.api_stats.api_call", _api_call)
+
+    wrapped = orch._GetUniverseWrapper(_fn, attempts=4, base_delay=0.01, factor=1.0)
+    out = wrapped("2026-01-02 00:00:00")
+    assert out == {"date": "2026-01-02"}
+    assert calls["count"] == 3
+    assert len(stats_calls) == 3
+    assert all(name == "get_universe" for name, _ in stats_calls)
+
+
+def test_get_universe_wrapper_does_not_retry_non_retryable_errors(monkeypatch):
+    calls = {"count": 0}
+
+    def _fn(_date):
+        calls["count"] += 1
+        raise ValueError("bad query")
+
+    monkeypatch.setattr("basalt.api_stats.api_call", lambda _n, fn, extra=None: fn())
+    wrapped = orch._GetUniverseWrapper(_fn, attempts=4, base_delay=0.01, factor=1.0)
+    with pytest.raises(ValueError, match="bad query"):
+        wrapped("2026-01-02")
+    assert calls["count"] == 1
