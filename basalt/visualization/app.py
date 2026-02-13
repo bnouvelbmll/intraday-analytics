@@ -10,8 +10,10 @@ import plotly.express as px
 import streamlit as st
 
 from basalt.visualization.data import (
+    derive_input_table_options,
     filter_frame,
     infer_dataset_options,
+    load_input_table_frame,
     load_dataset_frame,
     load_resolved_user_config,
 )
@@ -81,57 +83,97 @@ def main() -> None:
         return
 
     options = infer_dataset_options(config)
-    if not options:
-        st.warning("No pass outputs found in config.")
-        return
-    labels = [f"{o.pass_name} :: {o.path}" for o in options]
-    default_idx = next((i for i, o in enumerate(options) if o.is_default), len(options) - 1)
-    selected_idx = st.sidebar.selectbox("Dataset (pass output)", range(len(options)), index=default_idx, format_func=lambda i: labels[i])
-    selected = options[selected_idx]
-    st.sidebar.code(selected.path)
+    input_options = derive_input_table_options(config)
+    source_mode = st.sidebar.radio(
+        "Data Source",
+        options=["Pass Outputs", "Input Tables"],
+        index=0,
+    )
 
-    try:
-        frame = load_dataset_frame(selected.path)
-    except Exception as exc:
-        st.error(f"Failed to read dataset: {exc}")
-        return
+    frame = None
+    selected_meta = {}
 
-    if frame.is_empty():
+    with st.sidebar:
+        st.subheader("Filters")
+        cfg_start = str(config.get("START_DATE") or "")
+        cfg_end = str(config.get("END_DATE") or cfg_start)
+        if cfg_start:
+            default_start = pd.Timestamp(cfg_start).date()
+            default_end = pd.Timestamp(cfg_end).date()
+            date_range = st.date_input("Date range", value=(default_start, default_end))
+            if isinstance(date_range, tuple) and len(date_range) == 2:
+                date_start = str(date_range[0])
+                date_end = str(date_range[1])
+            else:
+                date_start = str(date_range)
+                date_end = str(date_range)
+        else:
+            date_start = None
+            date_end = None
+        instrument_value = None
+
+    if source_mode == "Pass Outputs":
+        if not options:
+            st.warning("No pass outputs found in config.")
+            return
+        labels = [f"{o.pass_name} :: {o.path}" for o in options]
+        default_idx = next((i for i, o in enumerate(options) if o.is_default), len(options) - 1)
+        selected_idx = st.sidebar.selectbox("Dataset (pass output)", range(len(options)), index=default_idx, format_func=lambda i: labels[i])
+        selected = options[selected_idx]
+        selected_meta = {"pass": selected.pass_name, "path": selected.path, "kind": "output"}
+        st.sidebar.code(selected.path)
+        try:
+            frame = load_dataset_frame(selected.path)
+        except Exception as exc:
+            st.error(f"Failed to read output dataset: {exc}")
+            return
+    else:
+        if not input_options:
+            st.warning("No input tables inferred from config/passes.")
+            return
+        labels = [
+            f"{row.table_name} (passes: {', '.join(row.from_passes) if row.from_passes else 'explicit/unknown'})"
+            for row in input_options
+        ]
+        selected_idx = st.sidebar.selectbox(
+            "Input table",
+            range(len(input_options)),
+            index=0,
+            format_func=lambda i: labels[i],
+        )
+        selected_input = input_options[selected_idx]
+        source_candidates = [str(x) for x in config.get("DATA_SOURCE_PATH") or ["bmll"]]
+        source = st.sidebar.selectbox("Input source mechanism", source_candidates, index=0)
+        if not date_start or not date_end:
+            st.error("START_DATE/END_DATE (or date range) are required for input table mode.")
+            return
+        selected_meta = {
+            "table": selected_input.table_name,
+            "source": source,
+            "kind": "input",
+        }
+        try:
+            frame = load_input_table_frame(
+                pipeline=args.pipeline,
+                config=config,
+                table_name=selected_input.table_name,
+                date_start=date_start,
+                date_end=date_end,
+                source=source,
+            )
+        except Exception as exc:
+            st.error(f"Failed to load input table: {exc}")
+            return
+
+    if frame is None or frame.is_empty():
         st.warning("Selected dataset is empty.")
         return
 
     instrument_col = next((c for c in ["ListingId", "InstrumentId", "PrimaryListingId", "BMLL_OBJECT_ID", "Ticker", "Symbol"] if c in frame.columns), None)
+    if instrument_col is not None:
+        values = frame[instrument_col].cast(str).unique().sort().to_list()
+        instrument_value = st.sidebar.selectbox("Instrument", values, index=0)
     time_col = next((c for c in ["TimeBucket", "Timestamp", "DateTime", "Date", "EventTime"] if c in frame.columns), None)
-
-    with st.sidebar:
-        st.subheader("Filters")
-        if time_col is not None:
-            ts = pd.to_datetime(frame[time_col].to_pandas(), errors="coerce")
-            ts = ts.dropna()
-            if not ts.empty:
-                min_date = ts.min().date()
-                max_date = ts.max().date()
-                date_range = st.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-                if isinstance(date_range, tuple) and len(date_range) == 2:
-                    date_start = str(date_range[0])
-                    date_end = str(date_range[1])
-                else:
-                    date_start = str(date_range)
-                    date_end = str(date_range)
-            else:
-                date_start = None
-                date_end = None
-        else:
-            st.info("No time column detected.")
-            date_start = None
-            date_end = None
-
-        if instrument_col is not None:
-            values = frame[instrument_col].cast(str).unique().sort().to_list()
-            instrument_value = st.selectbox("Instrument", values, index=0)
-        else:
-            st.info("No instrument-like column detected.")
-            instrument_value = None
 
     filtered, used_time_col, used_instrument_col = filter_frame(
         frame,
@@ -141,15 +183,16 @@ def main() -> None:
     )
 
     st.subheader("Selection Summary")
-    st.write(
-        {
-            "pass": selected.pass_name,
-            "rows": filtered.height,
-            "columns": filtered.width,
-            "time_column": used_time_col,
-            "instrument_column": used_instrument_col,
-        }
-    )
+    summary = {
+        "rows": filtered.height,
+        "columns": filtered.width,
+        "time_column": used_time_col,
+        "instrument_column": used_instrument_col,
+        "date_start": date_start,
+        "date_end": date_end,
+    }
+    summary.update(selected_meta)
+    st.write(summary)
     with st.expander("Resolved Config", expanded=False):
         st.code(json.dumps(config, indent=2, default=str))
 

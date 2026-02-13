@@ -7,11 +7,17 @@ import fire
 from basalt import SUITE_FULL_NAME
 from basalt.cli import (
     run_cli,
+    resolve_user_config,
 )
 from basalt import schema_utils
 from basalt import config_ui
 from basalt.analytics_explain import main as analytics_explain_main
 from basalt.plugins import list_plugins_payload
+from basalt.configuration import AnalyticsConfig
+from basalt.process import get_final_output_path
+from basalt.orchestrator import _derive_tables_to_load
+from basalt.tables import ALL_TABLES
+import pandas as pd
 
 
 def _disable_fire_pager() -> None:
@@ -105,12 +111,145 @@ def _pipeline_run(*, pipeline: str | None = None, **kwargs):
     )
 
 
+def _pipeline_datasets(
+    *,
+    pipeline: str | None = None,
+    config_precedence: str = "yaml_overrides",
+):
+    if not pipeline:
+        raise SystemExit("Provide --pipeline <path_or_module>")
+    module = _load_pipeline_module(pipeline)
+    if not hasattr(module, "USER_CONFIG"):
+        raise SystemExit("Pipeline module must define USER_CONFIG.")
+    config_file = getattr(module, "__file__", None) or pipeline
+    user_cfg = resolve_user_config(
+        dict(module.USER_CONFIG),
+        module_file=config_file,
+        precedence=config_precedence,
+    )
+    config = AnalyticsConfig(**user_cfg)
+
+    start_date = str(config.START_DATE or "")
+    end_date = str(config.END_DATE or start_date)
+    if not start_date:
+        start_date = end_date = pd.Timestamp.utcnow().date().isoformat()
+    date_for_universe = start_date
+
+    ref = None
+    mics: list[str] = []
+    try:
+        if hasattr(module, "get_universe"):
+            ref_raw = module.get_universe(date_for_universe)
+            if hasattr(ref_raw, "to_pandas"):
+                ref = ref_raw
+            else:
+                import polars as pl
+                ref = pl.DataFrame(ref_raw)
+            if "MIC" in ref.columns:
+                mics = [x for x in ref["MIC"].drop_nulls().unique().to_list() if x is not None]
+            elif "OPOL" in ref.columns:
+                mics = [x for x in ref["OPOL"].drop_nulls().unique().to_list() if x is not None]
+    except Exception:
+        ref = None
+
+    known_context: list[str] = []
+    inputs_by_pass: dict[str, list[str]] = {}
+    for pass_cfg in config.PASSES:
+        tables = _derive_tables_to_load(
+            pass_cfg,
+            config.TABLES_TO_LOAD,
+            known_context_sources=known_context,
+        )
+        known_context.append(pass_cfg.name)
+        inputs_by_pass[pass_cfg.name] = tables
+
+    inputs = []
+    for pass_name, tables in inputs_by_pass.items():
+        for table_name in tables:
+            table = ALL_TABLES.get(table_name)
+            if table is None:
+                continue
+            sample_paths = []
+            if mics:
+                try:
+                    ts = pd.Timestamp(start_date)
+                    sample_paths = table.get_s3_paths(mics[:2], ts.year, ts.month, ts.day)[:2]
+                except Exception:
+                    sample_paths = []
+            inputs.append(
+                {
+                    "pass": pass_name,
+                    "table": table_name,
+                    "bmll_table": table.bmll_table_name,
+                    "s3_folder": table.s3_folder_name,
+                    "snowflake_table": table.snowflake_table_name(),
+                    "databricks_table": table.databricks_table_name(),
+                    "sample_bmll_paths": sample_paths,
+                }
+            )
+
+    outputs = []
+    for pass_cfg in config.PASSES:
+        output_target = pass_cfg.output or config.OUTPUT_TARGET
+        try:
+            out_path = get_final_output_path(
+                pd.Timestamp(start_date),
+                pd.Timestamp(end_date),
+                config,
+                pass_cfg.name,
+                output_target=output_target,
+            )
+        except Exception:
+            template = str(getattr(output_target, "path_template", "") or "")
+            out_path = template.format(
+                bucket="",
+                prefix="",
+                datasetname=f"{config.DATASETNAME}_{pass_cfg.name}",
+                **{"pass": pass_cfg.name},
+                universe=config.UNIVERSE or "all",
+                start_date=start_date,
+                end_date=end_date,
+            ).replace("//", "/")
+        outputs.append(
+            {
+                "pass": pass_cfg.name,
+                "output_type": str(getattr(output_target.type, "value", output_target.type)),
+                "path": out_path,
+            }
+        )
+
+    return {
+        "pipeline": pipeline,
+        "config_file": config_file,
+        "data_source_path": [str(x.value if hasattr(x, "value") else x) for x in (config.DATA_SOURCE_PATH or [])],
+        "date_range": {"start_date": start_date, "end_date": end_date},
+        "inputs": inputs,
+        "outputs": outputs,
+    }
+
+
 def _job_run(*, pipeline: str | None = None, **kwargs):
     if _help_requested():
         _print_suite_header()
-        print("Usage: basalt ec2 run --pipeline <path_or_module> [options]")
+        print("Usage: basalt bmll run --pipeline <path_or_module> [options]")
         return None
-    return _ec2_run(pipeline=pipeline, **kwargs)
+    return _bmll_run(pipeline=pipeline, **kwargs)
+
+
+def _bmll_run(*, pipeline: str | None = None, **kwargs):
+    try:
+        from basalt.executors.bmll import bmll_run
+    except Exception as exc:
+        raise SystemExit("BMLL executor is not available in this installation.") from exc
+    return bmll_run(pipeline=pipeline, **kwargs)
+
+
+def _bmll_install(*, pipeline: str | None = None, **kwargs):
+    try:
+        from basalt.executors.bmll import bmll_install
+    except Exception as exc:
+        raise SystemExit("BMLL executor is not available in this installation.") from exc
+    return bmll_install(pipeline=pipeline, **kwargs)
 
 
 def _ec2_run(*, pipeline: str | None = None, **kwargs):
@@ -205,6 +344,10 @@ class PipelineCLI:
     def config(*args, **kwargs):
         return _config_ui(*args, **kwargs)
 
+    @staticmethod
+    def datasets(*args, **kwargs):
+        return _pipeline_datasets(*args, **kwargs)
+
 
 class JobCLI:
     @staticmethod
@@ -213,7 +356,17 @@ class JobCLI:
 
     @staticmethod
     def install(*args, **kwargs):
-        return _ec2_install(*args, **kwargs)
+        return _bmll_install(*args, **kwargs)
+
+
+class BMLLCLI:
+    @staticmethod
+    def run(*args, **kwargs):
+        return _bmll_run(*args, **kwargs)
+
+    @staticmethod
+    def install(*args, **kwargs):
+        return _bmll_install(*args, **kwargs)
 
 
 class EC2CLI:
@@ -250,6 +403,7 @@ def main():
         "analytics": AnalyticsCLI,
         "pipeline": PipelineCLI,
         "job": JobCLI,
+        "bmll": BMLLCLI,
         "ec2": EC2CLI,
         "k8s": K8SCLI,
         "plugins": PluginsCLI,

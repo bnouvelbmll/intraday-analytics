@@ -25,6 +25,7 @@ def _to_plain(value: Any) -> Any:
 def list_capabilities() -> dict[str, Any]:
     available = {
         "pipeline": True,
+        "bmll": importlib.util.find_spec("basalt.executors.bmll") is not None,
         "ec2": importlib.util.find_spec("basalt.executors.aws_ec2") is not None,
         "k8s": importlib.util.find_spec("basalt.executors.kubernetes") is not None,
         "dagster": (
@@ -48,7 +49,7 @@ def _pipeline_yaml_path(pipeline: str) -> Path:
 def configure_job(
     *,
     pipeline: str,
-    executor: str = "ec2",
+    executor: str = "bmll",
     instance_size: int | None = None,
     conda_env: str | None = None,
     max_runtime_hours: int | None = None,
@@ -64,7 +65,7 @@ def configure_job(
     data = _load_yaml_config(str(yaml_path))
     user_cfg = _extract_user_config(data) if isinstance(data, dict) else {}
 
-    if executor in {"ec2", "aws", "aws_ec2"}:
+    if executor in {"bmll", "bmll_jobs", "job"}:
         cfg = dict(user_cfg.get("BMLL_JOBS") or {})
         cfg["enabled"] = True
         if instance_size is not None:
@@ -78,7 +79,7 @@ def configure_job(
         return {
             "pipeline": str(pipeline),
             "yaml_path": str(yaml_path),
-            "executor": "ec2",
+            "executor": "bmll",
             "updated": {"BMLL_JOBS": cfg},
         }
 
@@ -109,7 +110,7 @@ def configure_job(
 def run_job(
     *,
     pipeline: str,
-    executor: str = "ec2",
+    executor: str = "bmll",
     name: str | None = None,
     instance_size: int | None = None,
     conda_env: str | None = None,
@@ -128,6 +129,21 @@ def run_job(
 
         result = _pipeline_run(pipeline=str(pipeline), **kwargs)
         return {"executor": "pipeline", "result": _to_plain(result)}
+
+    if executor in {"bmll", "bmll_jobs", "job"}:
+        from basalt.executors.bmll import bmll_run
+
+        result = bmll_run(
+            pipeline=str(pipeline),
+            name=name,
+            instance_size=instance_size,
+            conda_env=conda_env,
+            cron=cron,
+            cron_timezone=cron_timezone,
+            overwrite_existing=overwrite_existing,
+            **kwargs,
+        )
+        return {"executor": "bmll", "result": _to_plain(result)}
 
     if executor in {"ec2", "aws", "aws_ec2"}:
         from basalt.executors.aws_ec2 import ec2_run
@@ -167,7 +183,7 @@ def run_job(
 
 def recent_runs(
     *,
-    executor: str = "ec2",
+    executor: str = "bmll",
     limit: int = 20,
     status: str | None = None,
     dagster_home: str | None = None,
@@ -175,7 +191,7 @@ def recent_runs(
     executor = str(executor).strip().lower()
     rows: list[dict[str, Any]] = []
 
-    if executor in {"ec2", "aws", "aws_ec2"}:
+    if executor in {"bmll", "bmll_jobs", "job", "ec2", "aws", "aws_ec2"}:
         from bmll import compute
 
         runs = compute.get_job_runs(state=status) if status else compute.get_job_runs()
@@ -189,7 +205,8 @@ def recent_runs(
                     "ended_at": getattr(run, "end_time", None),
                 }
             )
-        return {"executor": "ec2", "runs": rows}
+        normalized = "bmll" if executor in {"bmll", "bmll_jobs", "job"} else "ec2"
+        return {"executor": normalized, "runs": rows}
 
     if executor == "dagster":
         import os
@@ -273,7 +290,7 @@ def materialized_partitions(
 
 def success_rate(
     *,
-    executor: str = "ec2",
+    executor: str = "bmll",
     limit: int = 100,
     status: str | None = None,
     dagster_home: str | None = None,

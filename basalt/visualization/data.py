@@ -10,6 +10,9 @@ import pandas as pd
 import polars as pl
 
 from basalt.cli import resolve_user_config
+from basalt.configuration import AnalyticsConfig
+from basalt.orchestrator import _derive_tables_to_load
+from basalt.tables import ALL_TABLES
 
 
 @dataclass(frozen=True)
@@ -17,6 +20,13 @@ class DatasetOption:
     pass_name: str
     path: str
     is_default: bool
+    kind: str = "output"
+
+
+@dataclass(frozen=True)
+class InputTableOption:
+    table_name: str
+    from_passes: tuple[str, ...]
 
 
 def _load_pipeline_module(path_or_name: str):
@@ -45,6 +55,30 @@ def load_resolved_user_config(
         module_file=config_file,
         precedence=config_precedence,
     )
+
+
+def derive_input_table_options(config: dict[str, Any]) -> list[InputTableOption]:
+    model = AnalyticsConfig(**config)
+    out: dict[str, list[str]] = {}
+    known_context: list[str] = []
+    for pass_cfg in model.PASSES:
+        tables = _derive_tables_to_load(
+            pass_cfg,
+            model.TABLES_TO_LOAD,
+            known_context_sources=known_context,
+        )
+        known_context.append(pass_cfg.name)
+        for table in tables:
+            out.setdefault(table, []).append(pass_cfg.name)
+    # include user-requested tables, even if unused by modules in current pass graph.
+    for table in model.TABLES_TO_LOAD or []:
+        out.setdefault(str(table), [])
+    rows = [
+        InputTableOption(table_name=name, from_passes=tuple(sorted(set(passes))))
+        for name, passes in sorted(out.items())
+        if name in ALL_TABLES
+    ]
+    return rows
 
 
 def _render_path_template(
@@ -146,6 +180,59 @@ def load_dataset_frame(path: str) -> pl.DataFrame:
     if not matches:
         raise FileNotFoundError(f"Dataset path not found: {path}")
     return pl.scan_parquet([str(p) for p in matches]).collect()
+
+
+def load_input_table_frame(
+    *,
+    pipeline: str,
+    config: dict[str, Any],
+    table_name: str,
+    date_start: str,
+    date_end: str,
+    source: str = "bmll",
+) -> pl.DataFrame:
+    if table_name not in ALL_TABLES:
+        raise ValueError(f"Unknown input table: {table_name}")
+    module = _load_pipeline_module(pipeline)
+    if not hasattr(module, "get_universe"):
+        raise ValueError("Pipeline module must define get_universe(date).")
+
+    ref = module.get_universe(str(date_start))
+    if isinstance(ref, pl.DataFrame):
+        ref_df = ref
+    else:
+        ref_df = pl.DataFrame(ref)
+    if ref_df.is_empty():
+        raise ValueError("Universe is empty for selected date.")
+
+    if "MIC" in ref_df.columns:
+        markets = [m for m in ref_df["MIC"].drop_nulls().unique().to_list() if m is not None]
+    elif "OPOL" in ref_df.columns:
+        markets = [m for m in ref_df["OPOL"].drop_nulls().unique().to_list() if m is not None]
+    else:
+        raise ValueError("Universe must contain MIC or OPOL to load BMLL input tables.")
+
+    passes = list((config or {}).get("PASSES") or [])
+    first_pass = passes[0] if passes else {}
+    bucket_seconds = float(first_pass.get("time_bucket_seconds", 1.0) or 1.0)
+    nanoseconds = int(bucket_seconds * 1e9)
+    anchor = str(first_pass.get("time_bucket_anchor", "end"))
+    closed = str(first_pass.get("time_bucket_closed", "right"))
+
+    table = ALL_TABLES[table_name]
+    lf = table.load_from_source(
+        source=source,
+        markets=markets,
+        start_date=str(date_start),
+        end_date=str(date_end),
+        ref=ref_df,
+        nanoseconds=nanoseconds,
+        time_bucket_anchor=anchor,
+        time_bucket_closed=closed,
+    )
+    if isinstance(lf, pl.DataFrame):
+        return lf
+    return lf.collect()
 
 
 def filter_frame(

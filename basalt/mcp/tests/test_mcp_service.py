@@ -34,12 +34,12 @@ def test_configure_job_updates_bmll_jobs_defaults(tmp_path):
 
     out = service.configure_job(
         pipeline=str(pipeline),
-        executor="ec2",
+        executor="bmll",
         instance_size=64,
         conda_env="py311-latest",
         max_runtime_hours=5,
     )
-    assert out["executor"] == "ec2"
+    assert out["executor"] == "bmll"
 
     yaml_path = pipeline.with_suffix(".yaml")
     data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
@@ -66,7 +66,32 @@ def test_run_job_pipeline_dispatch(monkeypatch):
     assert out["result"]["ok"] is True
 
 
-def test_recent_runs_ec2_and_success_rate(monkeypatch):
+def test_run_job_ec2_dispatch(monkeypatch):
+    called = {}
+
+    def _fake_ec2_run(**kwargs):
+        called.update(kwargs)
+        return {"instance_id": "i-123"}
+
+    import basalt.executors.aws_ec2 as ec2_mod
+
+    monkeypatch.setattr(ec2_mod, "ec2_run", _fake_ec2_run)
+    out = service.run_job(
+        pipeline="demo/01_ohlcv_bars.py",
+        executor="ec2",
+        name="test-ec2",
+    )
+    assert out["executor"] == "ec2"
+    assert called["pipeline"] == "demo/01_ohlcv_bars.py"
+    assert called["name"] == "test-ec2"
+
+
+def test_capabilities_includes_bmll():
+    caps = service.list_capabilities()["capabilities"]
+    assert "bmll" in caps
+
+
+def test_recent_runs_bmll_and_success_rate(monkeypatch):
     class _Run:
         def __init__(self, run_id, name, state):
             self.id = run_id
@@ -80,11 +105,11 @@ def test_recent_runs_ec2_and_success_rate(monkeypatch):
     fake_bmll.compute = compute
     monkeypatch.setitem(sys.modules, "bmll", fake_bmll)
 
-    payload = service.recent_runs(executor="ec2", limit=10)
-    assert payload["executor"] == "ec2"
+    payload = service.recent_runs(executor="bmll", limit=10)
+    assert payload["executor"] == "bmll"
     assert len(payload["runs"]) == 3
 
-    stats = service.success_rate(executor="ec2", limit=10)
+    stats = service.success_rate(executor="bmll", limit=10)
     assert stats["lookback"] == 3
     assert stats["successes"] == 2
     assert stats["failures"] == 1

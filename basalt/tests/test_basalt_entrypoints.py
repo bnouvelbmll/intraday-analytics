@@ -146,11 +146,11 @@ def test_pipeline_run_delegates_to_run_cli(tmp_path, monkeypatch):
 def test_job_run_help(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["basalt", "ec2", "run", "--help"])
     assert basalt_main._job_run() is None
-    assert "Usage: basalt ec2 run" in capsys.readouterr().out
+    assert "Usage: basalt bmll run" in capsys.readouterr().out
 
 
 def test_job_run_delegates(monkeypatch):
-    monkeypatch.setattr(basalt_main, "_ec2_run", lambda **kwargs: kwargs)
+    monkeypatch.setattr(basalt_main, "_bmll_run", lambda **kwargs: kwargs)
     out = basalt_main._job_run(pipeline="x.py", dry_run=True)
     assert out["pipeline"] == "x.py"
 

@@ -1,89 +1,99 @@
 from __future__ import annotations
 
-import inspect
-import logging
-from pathlib import Path
 from typing import Optional
 
-from basalt.cli import (
-    _format_cli_args,
-    _load_bmll_job_config,
-    _default_basalt_job_name,
-    _write_basalt_run_script,
-    run_cli,
-)
-from .backend import submit_instance_job
+from .backend import ec2_install as _ec2_install_backend
+from .backend import ec2_run as _ec2_run_backend
 
 
 def ec2_run(
     *,
+    pipeline: Optional[str] = None,
     config_file: Optional[str] = None,
     name: Optional[str] = None,
     instance_size: Optional[int] = None,
     conda_env: Optional[str] = None,
-    delete_after: Optional[bool] = None,
-    cron: Optional[str] = None,
-    cron_timezone: Optional[str] = None,
-    overwrite_existing: bool = False,
-    pipeline: Optional[str] = None,
-    **kwargs,
+    user_config_json: Optional[str] = None,
+    ami_id: Optional[str] = None,
+    instance_type: Optional[str] = None,
+    subnet_id: Optional[str] = None,
+    security_group_ids: Optional[str | list[str]] = None,
+    key_name: Optional[str] = None,
+    iam_instance_profile: Optional[str] = None,
+    region: Optional[str] = None,
+    assign_public_ip: Optional[bool] = None,
+    dry_run: Optional[bool] = None,
+    root_volume_size_gb: Optional[int] = None,
+    user_data: Optional[str] = None,
+    **kwargs
 ):
     """
-    Submit an AWS EC2-backed BMLL job that runs the standard basalt CLI.
+    Launch a standalone EC2 instance using boto3 and an AMI image.
     """
-    if pipeline and not config_file:
-        config_file = pipeline
-    if not config_file:
-        raise SystemExit("Provide --config_file (or --pipeline).")
-
-    job_config = _load_bmll_job_config(config_file)
-    if not job_config.enabled:
-        logging.warning("BMLL_JOBS.enabled is False; job will still be submitted.")
-
-    cli_args = {"config_file": config_file, **kwargs}
-    allowed = set(inspect.signature(run_cli).parameters.keys())
-    cli_args = {k: v for k, v in cli_args.items() if k in allowed}
-    script_path = _write_basalt_run_script(job_config, _format_cli_args(cli_args))
-    job_name = _default_basalt_job_name(config_file, name)
-
-    return submit_instance_job(
-        script_path,
-        name=job_name,
+    return _ec2_run_backend(
+        pipeline=pipeline,
+        config_file=config_file,
+        name=name,
         instance_size=instance_size,
         conda_env=conda_env,
-        cron=cron,
-        cron_timezone=cron_timezone,
-        delete_after=delete_after,
-        config=job_config,
-        on_name_conflict="overwrite" if overwrite_existing else "fail",
+        user_config_json=user_config_json,
+        ami_id=ami_id,
+        instance_type=instance_type,
+        subnet_id=subnet_id,
+        security_group_ids=security_group_ids,
+        key_name=key_name,
+        iam_instance_profile=iam_instance_profile,
+        region=region,
+        assign_public_ip=assign_public_ip,
+        dry_run=dry_run,
+        root_volume_size_gb=root_volume_size_gb,
+        user_data=user_data,
+        **kwargs,
     )
 
 
 def ec2_install(
     *,
-    config_file: Optional[str] = None,
     pipeline: Optional[str] = None,
+    config_file: Optional[str] = None,
     name: Optional[str] = None,
     instance_size: Optional[int] = None,
     conda_env: Optional[str] = None,
-    cron: Optional[str] = None,
-    cron_timezone: Optional[str] = None,
-    overwrite_existing: bool = False,
+    user_config_json: Optional[str] = None,
+    ami_id: Optional[str] = None,
+    instance_type: Optional[str] = None,
+    subnet_id: Optional[str] = None,
+    security_group_ids: Optional[str | list[str]] = None,
+    key_name: Optional[str] = None,
+    iam_instance_profile: Optional[str] = None,
+    region: Optional[str] = None,
+    assign_public_ip: Optional[bool] = None,
+    dry_run: Optional[bool] = None,
+    root_volume_size_gb: Optional[int] = None,
+    user_data: Optional[str] = None,
     **kwargs,
 ):
     """
-    Install a cron-triggered AWS EC2-backed BMLL job.
+    Install semantics for EC2 map to launching a run.
     """
-    return ec2_run(
-        config_file=config_file,
+    return _ec2_install_backend(
         pipeline=pipeline,
+        config_file=config_file,
         name=name,
         instance_size=instance_size,
         conda_env=conda_env,
-        delete_after=False,
-        cron=cron,
-        cron_timezone=cron_timezone,
-        overwrite_existing=overwrite_existing,
+        user_config_json=user_config_json,
+        ami_id=ami_id,
+        instance_type=instance_type,
+        subnet_id=subnet_id,
+        security_group_ids=security_group_ids,
+        key_name=key_name,
+        iam_instance_profile=iam_instance_profile,
+        region=region,
+        assign_public_ip=assign_public_ip,
+        dry_run=dry_run,
+        root_volume_size_gb=root_volume_size_gb,
+        user_data=user_data,
         **kwargs,
     )
 
@@ -100,4 +110,3 @@ class EC2CLI:
 
 def get_cli_extension():
     return {"ec2": EC2CLI}
-

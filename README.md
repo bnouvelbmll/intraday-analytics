@@ -61,6 +61,12 @@ Open schema-driven config UI:
 basalt pipeline config demo/01_ohlcv_bars.py
 ```
 
+Inspect resolved input/output dataset locations for a pipeline:
+
+```bash
+basalt pipeline datasets --pipeline demo/01_ohlcv_bars.py
+```
+
 List available analytics columns:
 
 ```bash
