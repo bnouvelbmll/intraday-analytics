@@ -28,6 +28,27 @@ def test_list_capabilities(monkeypatch):
     assert out["capabilities"]["fastmcp"] is True
 
 
+def test_list_plugins(monkeypatch):
+    monkeypatch.setattr(
+        "basalt.plugins.list_plugins_payload",
+        lambda: [{"name": "x", "status": "ok"}],
+    )
+    out = service.list_plugins()
+    assert out["plugins"][0]["name"] == "x"
+
+
+def test_list_metrics_and_source():
+    out = service.list_metrics(module="external_events", limit=5)
+    assert out["count"] >= 1
+    src = service.inspect_metric_source(
+        metric="EventAnchorTime",
+        module="external_events",
+        context_lines=3,
+    )
+    assert src["metric"] == "EventAnchorTime"
+    assert isinstance(src["matches"], list)
+
+
 def test_run_job_unsupported_executor():
     with pytest.raises(ValueError, match="Unsupported executor"):
         service.run_job(pipeline="x.py", executor="bad")

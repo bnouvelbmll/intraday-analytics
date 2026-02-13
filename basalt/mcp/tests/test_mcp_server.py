@@ -27,6 +27,9 @@ def test_create_server_registers_tools(monkeypatch):
     mcp = server.create_server()
     expected = {
         "capabilities",
+        "list_plugins",
+        "list_metrics",
+        "inspect_metric_source",
         "configure_job",
         "run_job",
         "recent_runs",

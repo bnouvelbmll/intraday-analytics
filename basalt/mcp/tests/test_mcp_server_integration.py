@@ -27,6 +27,17 @@ def test_server_tool_calls_route_to_service(monkeypatch):
     import basalt.mcp.service as service
 
     monkeypatch.setattr(service, "list_capabilities", lambda: {"capabilities": {"x": True}})
+    monkeypatch.setattr(service, "list_plugins", lambda: {"plugins": [{"name": "p"}]})
+    monkeypatch.setattr(
+        service,
+        "list_metrics",
+        lambda **kwargs: {"metrics": [{"module": "l2", "pattern": "Spread"}], "count": 1},
+    )
+    monkeypatch.setattr(
+        service,
+        "inspect_metric_source",
+        lambda **kwargs: {"metric": kwargs["metric"], "matches": []},
+    )
     monkeypatch.setattr(
         service,
         "run_job",
@@ -39,6 +50,12 @@ def test_server_tool_calls_route_to_service(monkeypatch):
     )
 
     assert mcp.tools["capabilities"]() == {"capabilities": {"x": True}}
+    assert mcp.tools["list_plugins"]() == {"plugins": [{"name": "p"}]}
+    assert mcp.tools["list_metrics"](module="l2")["count"] == 1
+    assert mcp.tools["inspect_metric_source"](metric="Spread") == {
+        "metric": "Spread",
+        "matches": [],
+    }
     assert mcp.tools["run_job"](pipeline="demo/01_ohlcv_bars.py", executor="direct") == {
         "executor": "direct",
         "result": {"pipeline": "demo/01_ohlcv_bars.py"},

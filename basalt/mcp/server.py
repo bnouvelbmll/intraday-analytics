@@ -14,9 +14,35 @@ def create_server():
         return service.list_capabilities()
 
     @mcp.tool()
+    def list_plugins() -> dict:
+        """List discovered Basalt plugins."""
+        return service.list_plugins()
+
+    @mcp.tool()
+    def list_metrics(
+        module: str | None = None,
+        limit: int | None = None,
+    ) -> dict:
+        """List analytics metrics metadata from registered analytic docs."""
+        return service.list_metrics(module=module, limit=limit)
+
+    @mcp.tool()
+    def inspect_metric_source(
+        metric: str,
+        module: str | None = None,
+        context_lines: int = 20,
+    ) -> dict:
+        """Inspect source-code snippets that define or reference a metric."""
+        return service.inspect_metric_source(
+            metric=metric,
+            module=module,
+            context_lines=context_lines,
+        )
+
+    @mcp.tool()
     def configure_job(
         pipeline: str,
-        executor: str = "ec2",
+        executor: str = "bmll",
         instance_size: int | None = None,
         conda_env: str | None = None,
         max_runtime_hours: int | None = None,
@@ -39,7 +65,7 @@ def create_server():
     @mcp.tool()
     def run_job(
         pipeline: str,
-        executor: str = "ec2",
+        executor: str = "bmll",
         name: str | None = None,
         instance_size: int | None = None,
         conda_env: str | None = None,
@@ -69,7 +95,7 @@ def create_server():
 
     @mcp.tool()
     def recent_runs(
-        executor: str = "ec2",
+        executor: str = "bmll",
         limit: int = 20,
         status: str | None = None,
         dagster_home: str | None = None,
@@ -84,7 +110,7 @@ def create_server():
 
     @mcp.tool()
     def success_rate(
-        executor: str = "ec2",
+        executor: str = "bmll",
         limit: int = 100,
         status: str | None = None,
         dagster_home: str | None = None,

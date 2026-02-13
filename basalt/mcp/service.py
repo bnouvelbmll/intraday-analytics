@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import inspect
+import importlib
 import importlib.util
 import json
+import pkgutil
 from typing import Any
 
 
@@ -20,6 +23,17 @@ def _to_plain(value: Any) -> Any:
         if hasattr(value, key):
             out[key] = _to_plain(getattr(value, key))
     return out or repr(value)
+
+
+def _ensure_analytics_loaded() -> None:
+    import basalt.analytics as analytics_pkg
+
+    for mod in pkgutil.iter_modules(
+        analytics_pkg.__path__, analytics_pkg.__name__ + "."
+    ):
+        importlib.import_module(mod.name)
+    importlib.import_module("basalt.time.dense")
+    importlib.import_module("basalt.time.external_events")
 
 
 def list_capabilities() -> dict[str, Any]:
@@ -40,6 +54,114 @@ def list_capabilities() -> dict[str, Any]:
         "fastmcp": importlib.util.find_spec("fastmcp") is not None,
     }
     return {"capabilities": available}
+
+
+def list_plugins() -> dict[str, Any]:
+    from basalt.plugins import list_plugins_payload
+
+    return {"plugins": list_plugins_payload()}
+
+
+def list_metrics(
+    *,
+    module: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    from basalt.analytics_base import ANALYTIC_DOCS
+
+    _ensure_analytics_loaded()
+    target = (module or "").strip().lower()
+    rows: list[dict[str, Any]] = []
+    for doc in ANALYTIC_DOCS:
+        mod = str(doc.get("module") or "")
+        if target and mod.lower() != target:
+            continue
+        rows.append(
+            {
+                "module": mod,
+                "pattern": str(doc.get("pattern") or ""),
+                "unit": str(doc.get("unit") or ""),
+                "definition": str(doc.get("template") or ""),
+                "description": str(doc.get("description") or ""),
+            }
+        )
+    rows.sort(key=lambda r: (r["module"], r["pattern"]))
+    if limit is not None:
+        rows = rows[: max(0, int(limit))]
+    return {"metrics": rows, "count": len(rows)}
+
+
+def inspect_metric_source(
+    *,
+    metric: str,
+    module: str | None = None,
+    context_lines: int = 20,
+) -> dict[str, Any]:
+    from basalt.analytics_registry import get_registered_entries
+
+    _ensure_analytics_loaded()
+    query = str(metric or "").strip()
+    if not query:
+        raise ValueError("metric is required")
+    module_hint = (module or "").strip().lower()
+    entries = get_registered_entries()
+    source_files: list[Path] = []
+    seen: set[Path] = set()
+
+    def _add_file_for_module(mod_name: str) -> None:
+        entry = entries.get(mod_name)
+        if entry is None:
+            return
+        src = inspect.getsourcefile(entry.cls)
+        if not src:
+            return
+        path = Path(src)
+        if path.exists() and path not in seen:
+            seen.add(path)
+            source_files.append(path)
+
+    if module_hint:
+        _add_file_for_module(module_hint)
+    else:
+        for mod_name in entries.keys():
+            _add_file_for_module(mod_name)
+
+    # Fallback to known analytic/time package files if registry lookups are empty.
+    if not source_files:
+        candidates = list(Path("basalt/analytics").glob("*.py")) + list(
+            Path("basalt/time").glob("*.py")
+        )
+        for path in candidates:
+            if path.exists() and path not in seen:
+                seen.add(path)
+                source_files.append(path)
+
+    needle = query.lower()
+    hits: list[dict[str, Any]] = []
+    max_hits = 25
+    span = max(1, int(context_lines))
+    for path in source_files:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            continue
+        for idx, line in enumerate(lines):
+            if needle not in line.lower():
+                continue
+            start = max(0, idx - span)
+            end = min(len(lines), idx + span + 1)
+            snippet = "\n".join(lines[start:end])
+            hits.append(
+                {
+                    "file": str(path),
+                    "line": idx + 1,
+                    "match": line.strip(),
+                    "snippet": snippet,
+                }
+            )
+            if len(hits) >= max_hits:
+                return {"metric": query, "module": module, "matches": hits}
+    return {"metric": query, "module": module, "matches": hits}
 
 
 def _pipeline_yaml_path(pipeline: str) -> Path:
