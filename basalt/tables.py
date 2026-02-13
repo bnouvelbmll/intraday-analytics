@@ -464,7 +464,7 @@ class MarketStateTable(DataTable):
     """Represents the 'MarketState' data table."""
 
     name = "marketstate"
-    bmll_table_name = "MarketState"
+    bmll_table_name = "market-state"
     timestamp_col = "EventTimestamp"
     s3_folder_name = "MarketState"
     s3_file_prefix = "market-state-"
