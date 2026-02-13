@@ -42,7 +42,7 @@ def load_resolved_user_config(
     config_file = getattr(module, "__file__", None) or pipeline
     return resolve_user_config(
         dict(module.USER_CONFIG),
-        config_file=config_file,
+        module_file=config_file,
         precedence=config_precedence,
     )
 
@@ -171,4 +171,3 @@ def filter_frame(
     if instrument_col and instrument_value not in (None, ""):
         out = out.filter(pl.col(instrument_col).cast(pl.String) == str(instrument_value))
     return out, time_col, instrument_col
-

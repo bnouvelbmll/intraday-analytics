@@ -33,6 +33,8 @@ class VisualizationCLI:
         tunnel = str(tunnel).strip().lower()
         auth_mode = str(auth_mode).strip().lower()
         env = os.environ.copy()
+        # Prevent first-run interactive email prompt (breaks tunnel startup).
+        env.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
         if auth_mode == "password":
             env["UI_PASSWORD_ENABLED"] = "password"
             if access_password:
@@ -86,6 +88,8 @@ class VisualizationCLI:
             "true" if headless else "false",
             "--server.enableCORS",
             "true" if enable_cors else "false",
+            "--browser.gatherUsageStats",
+            "false",
             "--",
             "--pipeline",
             str(pipeline),

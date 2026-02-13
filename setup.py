@@ -361,7 +361,14 @@ elif dist == "all":
             "basalt.preprocessors.tests*",
         )
     )
-    install_requires = core_requirements
+    all_optional = sorted(
+        {
+            dep
+            for deps in subpackage_requirements.values()
+            for dep in deps
+        }
+    )
+    install_requires = core_requirements + all_optional
 else:
     name = f"bmll-basalt-{dist}"
     extras_require = {}

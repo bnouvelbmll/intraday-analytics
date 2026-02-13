@@ -44,8 +44,8 @@ def _format_score_table(df_scores) -> pd.DataFrame:
 
 def main() -> None:
     args = _parse_args()
-    st.set_page_config(page_title="Basalt Visualization", layout="wide")
-    st.title("Basalt Visualization Explorer")
+    st.set_page_config(page_title="BMLL Basalt Visualization", layout="wide")
+    st.title("BMLL Basalt Visualization Explorer")
     st.caption("Config-driven exploration for wide analytics datasets.")
 
     auth_mode = str(os.environ.get("UI_PASSWORD_ENABLED", "false")).lower()

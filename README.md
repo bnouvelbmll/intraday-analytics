@@ -200,6 +200,7 @@ Visualization package is modular:
 - Install `bmll-basalt-visualization` to enable `basalt viz run ...`.
 - Launch explorer from a pipeline config:
   - `basalt viz run --pipeline demo/02_multi_pass.py`
+- `viz run` disables Streamlit usage-stats prompt by default (avoids first-run email prompt that can block tunnel startup).
 - Optional secure access/tunneling:
   - password-gated UI: `basalt viz run --pipeline demo/02_multi_pass.py --auth_mode password --access_password '***'`
   - serveo tunnel: `basalt viz run --pipeline demo/02_multi_pass.py --tunnel serveo --ingress my-host.serveo.net`

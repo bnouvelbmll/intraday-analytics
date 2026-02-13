@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import polars as pl
 
-from basalt.visualization.data import filter_frame, infer_dataset_options
+from basalt.visualization.data import (
+    filter_frame,
+    infer_dataset_options,
+    load_resolved_user_config,
+)
 
 
 def test_infer_dataset_options_defaults_last_pass():
@@ -44,3 +48,15 @@ def test_filter_frame_by_date_and_instrument():
     assert instrument_col == "ListingId"
     assert out.height == 1
     assert out["ListingId"].to_list() == [1]
+
+
+def test_load_resolved_user_config_uses_yaml(tmp_path):
+    py_file = tmp_path / "demo_pipeline.py"
+    py_file.write_text(
+        "USER_CONFIG = {'DATASETNAME': 'base', 'PASSES': [{'name': 'p1'}]}\n",
+        encoding="utf-8",
+    )
+    yaml_file = tmp_path / "demo_pipeline.yaml"
+    yaml_file.write_text("USER_CONFIG:\n  DATASETNAME: overridden\n", encoding="utf-8")
+    cfg = load_resolved_user_config(pipeline=str(py_file))
+    assert cfg["DATASETNAME"] == "overridden"
