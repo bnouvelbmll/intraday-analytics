@@ -29,6 +29,16 @@ class InputTableOption:
     from_passes: tuple[str, ...]
 
 
+UNIVERSE_KEY_CANDIDATES = [
+    "ISIN",
+    "ListingId",
+    "InstrumentId",
+    "PrimaryListingId",
+    "Ticker",
+    "Symbol",
+]
+
+
 def _load_pipeline_module(path_or_name: str):
     path = Path(path_or_name)
     if path.exists():
@@ -190,6 +200,7 @@ def load_input_table_frame(
     date_start: str,
     date_end: str,
     source: str = "bmll",
+    ref_override: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     if table_name not in ALL_TABLES:
         raise ValueError(f"Unknown input table: {table_name}")
@@ -197,7 +208,7 @@ def load_input_table_frame(
     if not hasattr(module, "get_universe"):
         raise ValueError("Pipeline module must define get_universe(date).")
 
-    ref = module.get_universe(str(date_start))
+    ref = ref_override if ref_override is not None else module.get_universe(str(date_start))
     if isinstance(ref, pl.DataFrame):
         ref_df = ref
     else:
@@ -233,6 +244,155 @@ def load_input_table_frame(
     if isinstance(lf, pl.DataFrame):
         return lf
     return lf.collect()
+
+
+def load_reference_snapshot(*, pipeline: str, date: str) -> pl.DataFrame:
+    module = _load_pipeline_module(pipeline)
+    if not hasattr(module, "get_universe"):
+        raise ValueError("Pipeline module must define get_universe(date).")
+    ref = module.get_universe(str(date))
+    if isinstance(ref, pl.DataFrame):
+        return ref
+    return pl.DataFrame(ref)
+
+
+def available_universe_keys(ref: pl.DataFrame) -> list[str]:
+    cols = {c.lower(): c for c in ref.columns}
+    out: list[str] = []
+    for key in UNIVERSE_KEY_CANDIDATES:
+        hit = cols.get(key.lower())
+        if hit:
+            out.append(hit)
+    return out
+
+
+def estimate_listing_days(
+    ref: pl.DataFrame,
+    *,
+    date_start: str | None,
+    date_end: str | None,
+) -> int:
+    if ref.is_empty() or not date_start:
+        return 0
+    if "ListingId" in ref.columns:
+        listing_count = int(ref.select(pl.col("ListingId").n_unique()).item())
+    else:
+        listing_count = int(ref.height)
+    start = pd.Timestamp(date_start).normalize()
+    end = pd.Timestamp(date_end or date_start).normalize()
+    day_count = max(1, int((end - start).days) + 1)
+    return int(listing_count * day_count)
+
+
+def select_subuniverse(
+    ref: pl.DataFrame,
+    *,
+    mode: str,
+    single_value: str | None = None,
+    subset_values: list[str] | None = None,
+    subset_column: str | None = None,
+) -> pl.DataFrame:
+    if ref.is_empty():
+        return ref
+    mode_l = str(mode).strip().lower()
+    if mode_l in {"whole", "whole universe"}:
+        return ref
+
+    col = None
+    if mode_l.startswith("isin"):
+        col = next((c for c in ref.columns if c.lower() == "isin"), None)
+    elif mode_l.startswith("listingid"):
+        col = next((c for c in ref.columns if c.lower() == "listingid"), None)
+    elif mode_l.startswith("instrumentid"):
+        col = next((c for c in ref.columns if c.lower() == "instrumentid"), None)
+    elif mode_l.startswith("arbitrary"):
+        col = subset_column
+
+    if not col or col not in ref.columns:
+        return ref
+
+    if mode_l.startswith("arbitrary"):
+        values = [str(v).strip() for v in (subset_values or []) if str(v).strip()]
+        if not values:
+            return ref
+        return ref.filter(pl.col(col).cast(pl.String).is_in(values))
+
+    if single_value is None or str(single_value).strip() == "":
+        return ref
+    return ref.filter(pl.col(col).cast(pl.String) == str(single_value))
+
+
+def apply_universe_filter_to_frame(frame: pl.DataFrame, ref: pl.DataFrame) -> pl.DataFrame:
+    if frame.is_empty() or ref.is_empty():
+        return frame
+    keys = ["ListingId", "InstrumentId", "PrimaryListingId", "ISIN", "Ticker", "Symbol"]
+    frame_by_lower = {c.lower(): c for c in frame.columns}
+    ref_by_lower = {c.lower(): c for c in ref.columns}
+    for key in keys:
+        fcol = frame_by_lower.get(key.lower())
+        rcol = ref_by_lower.get(key.lower())
+        if not fcol or not rcol:
+            continue
+        values = ref.get_column(rcol).drop_nulls().cast(pl.String).unique().to_list()
+        if not values:
+            return frame.head(0)
+        return frame.filter(pl.col(fcol).cast(pl.String).is_in(values))
+    return frame
+
+
+def build_load_payload(
+    *,
+    source_mode: str,
+    pipeline: str,
+    config: dict[str, Any],
+    dataset_path: str | None,
+    table_name: str | None,
+    source: str | None,
+    date_start: str | None,
+    date_end: str | None,
+    selected_ref: pl.DataFrame | None,
+) -> dict[str, Any]:
+    return {
+        "source_mode": source_mode,
+        "pipeline": pipeline,
+        "config": config,
+        "dataset_path": dataset_path,
+        "table_name": table_name,
+        "source": source,
+        "date_start": date_start,
+        "date_end": date_end,
+        "selected_ref": selected_ref.to_dict(as_series=False) if selected_ref is not None else None,
+    }
+
+
+def load_frame_from_payload(payload: dict[str, Any]) -> pl.DataFrame:
+    source_mode = str(payload.get("source_mode") or "Pass Outputs")
+    config = dict(payload.get("config") or {})
+    selected_ref_raw = payload.get("selected_ref")
+    selected_ref = (
+        pl.DataFrame(selected_ref_raw) if isinstance(selected_ref_raw, dict) else None
+    )
+    if source_mode == "Pass Outputs":
+        path = str(payload.get("dataset_path") or "")
+        if not path:
+            raise ValueError("Missing dataset path.")
+        out = load_dataset_frame(path)
+        if selected_ref is not None:
+            out = apply_universe_filter_to_frame(out, selected_ref)
+        return out
+    table_name = str(payload.get("table_name") or "")
+    source = str(payload.get("source") or "bmll")
+    date_start = str(payload.get("date_start") or "")
+    date_end = str(payload.get("date_end") or date_start)
+    return load_input_table_frame(
+        pipeline=str(payload.get("pipeline") or ""),
+        config=config,
+        table_name=table_name,
+        date_start=date_start,
+        date_end=date_end,
+        source=source,
+        ref_override=selected_ref,
+    )
 
 
 def filter_frame(

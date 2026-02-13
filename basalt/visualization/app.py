@@ -1,21 +1,38 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
+import time
 
 import pandas as pd
 import plotly.express as px
+import polars as pl
 import streamlit as st
 
+from basalt.visualization.background import BackgroundFrameLoader
+from basalt.visualization.crossfilter import (
+    RangeConstraint,
+    SetConstraint,
+    apply_constraints,
+    candidate_dimensions,
+    constraints_to_predicates,
+    constraints_to_mongo,
+    is_discrete_column,
+)
 from basalt.visualization.data import (
+    available_universe_keys,
+    build_load_payload,
     derive_input_table_options,
     filter_frame,
     infer_dataset_options,
-    load_input_table_frame,
-    load_dataset_frame,
+    load_frame_from_payload,
+    load_reference_snapshot,
     load_resolved_user_config,
+    select_subuniverse,
+    estimate_listing_days,
 )
 from basalt.visualization.modules import discover_plot_modules
 from basalt.visualization.scoring import score_numeric_columns, top_interesting_columns
@@ -42,6 +59,103 @@ def _format_score_table(df_scores) -> pd.DataFrame:
             for s in df_scores
         ]
     )
+
+
+def _payload_request_id(payload: dict) -> str:
+    raw = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _ensure_bg_loader() -> BackgroundFrameLoader:
+    loader = st.session_state.get("_viz_bg_loader")
+    if loader is None:
+        loader = BackgroundFrameLoader(load_frame_from_payload)
+        st.session_state["_viz_bg_loader"] = loader
+    return loader
+
+
+def _initial_panel(df_cols: list[str], time_col: str | None) -> dict:
+    numeric = [c for c in df_cols]
+    if time_col and numeric:
+        target = next((c for c in numeric if c != time_col), numeric[0])
+        return {
+            "id": 1,
+            "dims": 1,
+            "columns": [target],
+            "plot_type": "historical",
+            "as_filter": False,
+        }
+    target = numeric[0] if numeric else (df_cols[0] if df_cols else "")
+    return {
+        "id": 1,
+        "dims": 1,
+        "columns": [target] if target else [],
+        "plot_type": "distribution",
+        "as_filter": False,
+    }
+
+
+def _plot_type_options(dims: int) -> list[str]:
+    if dims == 1:
+        return ["distribution", "historical"]
+    if dims == 2:
+        return ["scatter", "2d-elevation map", "2d-distribution view"]
+    return ["scatter3d"]
+
+
+def _render_panel_plot(
+    df: pd.DataFrame,
+    *,
+    panel_id: int,
+    dims: int,
+    columns: list[str],
+    plot_type: str,
+    time_col: str | None,
+) -> None:
+    title = f"Panel {panel_id}: {plot_type}"
+    if not columns:
+        st.info("Select dimensions/columns for this panel.")
+        return
+    if dims == 1:
+        c1 = columns[0]
+        if c1 not in df.columns:
+            st.info(f"Column `{c1}` not available.")
+            return
+        if plot_type == "historical":
+            x = time_col if time_col in df.columns else None
+            if x is None:
+                st.info("Historical plot needs a time column in data.")
+                return
+            st.plotly_chart(px.line(df, x=x, y=c1, title=title), use_container_width=True)
+            return
+        st.plotly_chart(px.histogram(df, x=c1, nbins=80, title=title), use_container_width=True)
+        return
+
+    if dims == 2:
+        c1, c2 = columns[:2]
+        if c1 not in df.columns or c2 not in df.columns:
+            st.info("Selected 2D columns are not available.")
+            return
+        if plot_type == "2d-elevation map":
+            st.plotly_chart(
+                px.density_heatmap(df, x=c1, y=c2, nbinsx=60, nbinsy=60, title=title),
+                use_container_width=True,
+            )
+            return
+        if plot_type == "2d-distribution view":
+            st.plotly_chart(
+                px.density_contour(df, x=c1, y=c2, title=title),
+                use_container_width=True,
+            )
+            return
+        st.plotly_chart(px.scatter(df, x=c1, y=c2, title=title), use_container_width=True)
+        return
+
+    c1, c2, c3 = columns[:3]
+    if c1 not in df.columns or c2 not in df.columns or c3 not in df.columns:
+        st.info("Selected 3D columns are not available.")
+        return
+    st.plotly_chart(px.scatter_3d(df, x=c1, y=c2, z=c3, title=title), use_container_width=True)
 
 
 def main() -> None:
@@ -84,17 +198,20 @@ def main() -> None:
 
     options = infer_dataset_options(config)
     input_options = derive_input_table_options(config)
-    source_mode = st.sidebar.radio(
-        "Data Source",
-        options=["Pass Outputs", "Input Tables"],
-        index=0,
-    )
+    loader = _ensure_bg_loader()
 
-    frame = None
     selected_meta = {}
+    selected_ref = None
+    date_start = None
+    date_end = None
+    source_mode = "Pass Outputs"
+    selected_dataset_path = None
+    selected_table_name = None
+    selected_source = None
 
+    ref_snapshot = None
     with st.sidebar:
-        st.subheader("Filters")
+        st.subheader("Universe & Date")
         cfg_start = str(config.get("START_DATE") or "")
         cfg_end = str(config.get("END_DATE") or cfg_start)
         if cfg_start:
@@ -108,9 +225,90 @@ def main() -> None:
                 date_start = str(date_range)
                 date_end = str(date_range)
         else:
-            date_start = None
-            date_end = None
-        instrument_value = None
+            date_start, date_end = None, None
+
+        if date_start:
+            try:
+                ref_snapshot = load_reference_snapshot(pipeline=args.pipeline, date=date_start)
+            except Exception as exc:
+                st.error(f"Failed to load universe reference: {exc}")
+                return
+        else:
+            ref_snapshot = None
+
+        universe_mode = st.selectbox(
+            "Universe selector",
+            options=[
+                "ISIN (default)",
+                "ListingId",
+                "InstrumentId",
+                "Arbitrary subset",
+                "Whole universe",
+            ],
+            index=0,
+        )
+        single_value = None
+        subset_values: list[str] = []
+        subset_column = None
+        if ref_snapshot is not None and not ref_snapshot.is_empty():
+            keys = available_universe_keys(ref_snapshot)
+            if universe_mode in {"ISIN (default)", "ListingId", "InstrumentId"}:
+                default_col = universe_mode.split(" ")[0]
+                matching = next((k for k in keys if k.lower() == default_col.lower()), None)
+                if matching:
+                    vals = (
+                        ref_snapshot.get_column(matching)
+                        .drop_nulls()
+                        .cast(str)
+                        .unique()
+                        .sort()
+                        .to_list()
+                    )
+                    if vals:
+                        single_value = st.selectbox(f"{matching} value", vals, index=0)
+                else:
+                    st.warning(f"{default_col} is not available in reference.")
+            elif universe_mode == "Arbitrary subset":
+                if not keys:
+                    st.warning("No universe key available for subset selection.")
+                else:
+                    default_idx = next((i for i, k in enumerate(keys) if k.lower() == "isin"), 0)
+                    subset_column = st.selectbox("Subset column", keys, index=default_idx)
+                    raw_subset = st.text_area(
+                        "Subset values (comma/newline separated)",
+                        value="",
+                        height=96,
+                    )
+                    subset_values = [
+                        v.strip()
+                        for chunk in raw_subset.splitlines()
+                        for v in chunk.split(",")
+                        if v.strip()
+                    ]
+            selected_ref = select_subuniverse(
+                ref_snapshot,
+                mode=universe_mode,
+                single_value=single_value,
+                subset_values=subset_values,
+                subset_column=subset_column,
+            )
+            ld = estimate_listing_days(
+                selected_ref,
+                date_start=date_start,
+                date_end=date_end,
+            )
+            st.caption(
+                f"Estimated Listing-Days (LD): {ld:,} | Selected listings: {selected_ref.height:,}"
+            )
+        else:
+            selected_ref = ref_snapshot
+
+        st.subheader("Data Source")
+        source_mode = st.radio(
+            "Data Source",
+            options=["Pass Outputs", "Input Tables"],
+            index=0,
+        )
 
     if source_mode == "Pass Outputs":
         if not options:
@@ -120,13 +318,9 @@ def main() -> None:
         default_idx = next((i for i, o in enumerate(options) if o.is_default), len(options) - 1)
         selected_idx = st.sidebar.selectbox("Dataset (pass output)", range(len(options)), index=default_idx, format_func=lambda i: labels[i])
         selected = options[selected_idx]
+        selected_dataset_path = selected.path
         selected_meta = {"pass": selected.pass_name, "path": selected.path, "kind": "output"}
         st.sidebar.code(selected.path)
-        try:
-            frame = load_dataset_frame(selected.path)
-        except Exception as exc:
-            st.error(f"Failed to read output dataset: {exc}")
-            return
     else:
         if not input_options:
             st.warning("No input tables inferred from config/passes.")
@@ -144,6 +338,8 @@ def main() -> None:
         selected_input = input_options[selected_idx]
         source_candidates = [str(x) for x in config.get("DATA_SOURCE_PATH") or ["bmll"]]
         source = st.sidebar.selectbox("Input source mechanism", source_candidates, index=0)
+        selected_source = source
+        selected_table_name = selected_input.table_name
         if not date_start or not date_end:
             st.error("START_DATE/END_DATE (or date range) are required for input table mode.")
             return
@@ -152,29 +348,51 @@ def main() -> None:
             "source": source,
             "kind": "input",
         }
-        try:
-            frame = load_input_table_frame(
-                pipeline=args.pipeline,
-                config=config,
-                table_name=selected_input.table_name,
-                date_start=date_start,
-                date_end=date_end,
-                source=source,
-            )
-        except Exception as exc:
-            st.error(f"Failed to load input table: {exc}")
-            return
 
-    if frame is None or frame.is_empty():
+    payload = build_load_payload(
+        source_mode=source_mode,
+        pipeline=args.pipeline,
+        config=config,
+        dataset_path=selected_dataset_path,
+        table_name=selected_table_name,
+        source=selected_source,
+        date_start=date_start,
+        date_end=date_end,
+        selected_ref=selected_ref,
+    )
+    request_id = _payload_request_id(payload)
+    if loader.request_id != request_id:
+        loader.submit(request_id, payload)
+
+    frame = None
+    result = loader.poll()
+    if result is not None and result.request_id == request_id:
+        if result.status == "error":
+            st.error(f"Failed to load data:\n{result.error}")
+            return
+        frame = loader.consume_dataframe()
+        if frame is not None:
+            st.session_state["_viz_last_frame"] = frame
+            st.session_state["_viz_last_frame_request"] = request_id
+
+    if frame is None and st.session_state.get("_viz_last_frame_request") == request_id:
+        frame = st.session_state.get("_viz_last_frame")
+
+    if frame is None:
+        st.info("Loading selected dataset in background...")
+        time.sleep(0.4)
+        st.rerun()
+        return
+
+    if frame.is_empty():
         st.warning("Selected dataset is empty.")
         return
 
     instrument_col = next((c for c in ["ListingId", "InstrumentId", "PrimaryListingId", "BMLL_OBJECT_ID", "Ticker", "Symbol"] if c in frame.columns), None)
+    instrument_value = None
     if instrument_col is not None:
         values = frame[instrument_col].cast(str).unique().sort().to_list()
         instrument_value = st.sidebar.selectbox("Instrument", values, index=0)
-    time_col = next((c for c in ["TimeBucket", "Timestamp", "DateTime", "Date", "EventTime"] if c in frame.columns), None)
-
     filtered, used_time_col, used_instrument_col = filter_frame(
         frame,
         date_start=date_start,
@@ -199,6 +417,160 @@ def main() -> None:
     if filtered.is_empty():
         st.warning("No rows after filters.")
         return
+
+    st.subheader("Crossfilter Panels")
+    dims_candidates = candidate_dimensions(filtered)
+    if "_viz_panels" not in st.session_state:
+        st.session_state["_viz_panels"] = [_initial_panel(dims_candidates, used_time_col)]
+        st.session_state["_viz_panel_seq"] = 2
+
+    toolbar = st.columns([1, 1, 2])
+    with toolbar[0]:
+        if st.button("Add view panel", key="add_panel"):
+            nxt = int(st.session_state.get("_viz_panel_seq", 1))
+            st.session_state["_viz_panels"].append(
+                {
+                    "id": nxt,
+                    "dims": 1,
+                    "columns": [dims_candidates[0]] if dims_candidates else [],
+                    "plot_type": "distribution",
+                    "as_filter": False,
+                }
+            )
+            st.session_state["_viz_panel_seq"] = nxt + 1
+            st.rerun()
+    with toolbar[1]:
+        if st.button("Clear filters", key="clear_xfilters"):
+            st.session_state["_viz_global_constraints"] = {}
+            st.rerun()
+
+    constraints: dict[str, RangeConstraint | SetConstraint] = {}
+    remove_ids: list[int] = []
+    panels = list(st.session_state.get("_viz_panels", []))
+    for i, panel in enumerate(panels):
+        pid = int(panel.get("id", i + 1))
+        with st.container(border=True):
+            head = st.columns([2, 2, 2, 1, 1])
+            with head[0]:
+                dims = int(
+                    st.selectbox(
+                        f"View dimensions #{pid}",
+                        [1, 2, 3],
+                        index=max(0, min(2, int(panel.get("dims", 1)) - 1)),
+                        key=f"panel_dims_{pid}",
+                    )
+                )
+            with head[1]:
+                ptypes = _plot_type_options(dims)
+                default_plot = str(panel.get("plot_type", ptypes[0]))
+                plot_type = st.selectbox(
+                    f"Plot type #{pid}",
+                    ptypes,
+                    index=ptypes.index(default_plot) if default_plot in ptypes else 0,
+                    key=f"panel_plot_{pid}",
+                )
+            with head[2]:
+                as_filter = bool(
+                    st.checkbox(
+                        "Use as filter control",
+                        value=bool(panel.get("as_filter", False)),
+                        key=f"panel_filter_{pid}",
+                    )
+                )
+            with head[3]:
+                st.caption(f"Panel {pid}")
+            with head[4]:
+                if st.button("Remove", key=f"panel_remove_{pid}"):
+                    remove_ids.append(pid)
+
+            selected_cols: list[str] = []
+            for cidx in range(dims):
+                default_cols = panel.get("columns", [])
+                default_col = default_cols[cidx] if cidx < len(default_cols) else None
+                col_name = st.selectbox(
+                    f"Column {cidx + 1} #{pid}",
+                    dims_candidates,
+                    index=dims_candidates.index(default_col) if default_col in dims_candidates else min(cidx, max(0, len(dims_candidates) - 1)),
+                    key=f"panel_col_{pid}_{cidx}",
+                )
+                selected_cols.append(col_name)
+
+            panel["dims"] = dims
+            panel["plot_type"] = plot_type
+            panel["as_filter"] = as_filter
+            panel["columns"] = selected_cols
+            panels[i] = panel
+
+            if as_filter and plot_type in {"distribution", "2d-distribution view"}:
+                st.caption("Control filter values for this view")
+                for c in selected_cols:
+                    if c not in filtered.columns:
+                        continue
+                    if is_discrete_column(filtered, c):
+                        all_vals = (
+                            filtered.get_column(c).drop_nulls().cast(str).unique().sort().to_list()
+                        )
+                        sel = st.multiselect(
+                            f"Allowed values: {c}",
+                            options=all_vals,
+                            default=all_vals,
+                            key=f"panel_filter_vals_{pid}_{c}",
+                        )
+                        if sel and len(sel) < len(all_vals):
+                            constraints[c] = SetConstraint(column=c, values=list(sel))
+                    else:
+                        col_df = filtered.select(pl.col(c).cast(pl.Float64).drop_nulls())
+                        if col_df.is_empty():
+                            continue
+                        lo = float(col_df.min().item())
+                        hi = float(col_df.max().item())
+                        if lo == hi:
+                            continue
+                        r = st.slider(
+                            f"Range: {c}",
+                            min_value=float(lo),
+                            max_value=float(hi),
+                            value=(float(lo), float(hi)),
+                            key=f"panel_filter_rng_{pid}_{c}",
+                        )
+                        if r[0] > lo or r[1] < hi:
+                            constraints[c] = RangeConstraint(column=c, min_value=float(r[0]), max_value=float(r[1]))
+
+    if remove_ids:
+        panels = [p for p in panels if int(p.get("id", -1)) not in set(remove_ids)]
+        st.session_state["_viz_panels"] = panels
+        st.rerun()
+        return
+    st.session_state["_viz_panels"] = panels
+    mongo_filters = constraints_to_mongo(constraints)
+    predicates = constraints_to_predicates(constraints)
+    st.session_state["_viz_global_constraints"] = constraints
+    st.session_state["_viz_global_constraints_mongo"] = mongo_filters
+    st.session_state["_viz_global_constraints_predicates"] = predicates
+    st.session_state["_viz_layout_doc"] = {
+        "panels": panels,
+        "filters": mongo_filters,
+        "predicates": predicates,
+    }
+    st.caption(f"Active crossfilters: {', '.join(sorted(constraints.keys())) if constraints else 'none'}")
+    with st.expander("Crossfilter JSON (Mongo syntax)", expanded=False):
+        st.code(json.dumps(st.session_state["_viz_layout_doc"], indent=2, default=str), language="json")
+
+    for panel in panels:
+        pid = int(panel["id"])
+        dims = int(panel.get("dims", 1))
+        cols = list(panel.get("columns", []))
+        ptype = str(panel.get("plot_type", "distribution"))
+        view_df = apply_constraints(filtered, constraints, exclude_columns=set(cols))
+        with st.expander(f"Rendered panel {pid}", expanded=True):
+            _render_panel_plot(
+                view_df.to_pandas(),
+                panel_id=pid,
+                dims=dims,
+                columns=cols,
+                plot_type=ptype,
+                time_col=used_time_col,
+            )
 
     st.subheader("Interesting Series (Entropy/Variation Ranking)")
     scored = score_numeric_columns(filtered)

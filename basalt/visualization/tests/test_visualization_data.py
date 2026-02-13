@@ -3,9 +3,13 @@ from __future__ import annotations
 import polars as pl
 
 from basalt.visualization.data import (
+    apply_universe_filter_to_frame,
+    available_universe_keys,
+    estimate_listing_days,
     filter_frame,
     infer_dataset_options,
     load_resolved_user_config,
+    select_subuniverse,
 )
 
 
@@ -60,3 +64,44 @@ def test_load_resolved_user_config_uses_yaml(tmp_path):
     yaml_file.write_text("USER_CONFIG:\n  DATASETNAME: overridden\n", encoding="utf-8")
     cfg = load_resolved_user_config(pipeline=str(py_file))
     assert cfg["DATASETNAME"] == "overridden"
+
+
+def test_universe_selection_and_ld_estimate():
+    ref = pl.DataFrame(
+        {
+            "ListingId": [1, 2, 3],
+            "InstrumentId": [10, 20, 20],
+            "ISIN": ["A", "B", "C"],
+        }
+    )
+    keys = available_universe_keys(ref)
+    assert "ISIN" in keys
+    assert "ListingId" in keys
+
+    one = select_subuniverse(ref, mode="ListingId", single_value="2")
+    assert one.height == 1
+    assert one["ListingId"].to_list() == [2]
+
+    subset = select_subuniverse(
+        ref,
+        mode="Arbitrary subset",
+        subset_column="ISIN",
+        subset_values=["A", "C"],
+    )
+    assert subset["ISIN"].to_list() == ["A", "C"]
+
+    ld = estimate_listing_days(subset, date_start="2026-01-01", date_end="2026-01-03")
+    assert ld == 6
+
+
+def test_apply_universe_filter_to_frame_uses_common_identifier():
+    ref = pl.DataFrame({"InstrumentId": [10, 30]})
+    frame = pl.DataFrame(
+        {
+            "InstrumentId": [10, 20, 30],
+            "TimeBucket": ["2026-01-01T10:00:00"] * 3,
+            "x": [1.0, 2.0, 3.0],
+        }
+    )
+    out = apply_universe_filter_to_frame(frame, ref)
+    assert out["InstrumentId"].to_list() == [10, 30]
