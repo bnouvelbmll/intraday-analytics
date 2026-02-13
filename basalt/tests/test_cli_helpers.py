@@ -57,6 +57,8 @@ def test_load_bmll_job_config_yaml(tmp_path):
     cfg = cli._load_bmll_job_config(str(yaml_path))
     assert cfg.enabled is True
     assert cfg.default_instance_size == 32
+    assert cfg.project_root == str(tmp_path.resolve())
+    assert cfg.jobs_dir == str((tmp_path.resolve() / "_bmll_jobs"))
 
 
 def test_load_bmll_job_config_demo_pipeline_yaml(tmp_path):
@@ -74,6 +76,12 @@ def test_load_bmll_job_config_demo_pipeline_yaml(tmp_path):
     cfg = cli._load_bmll_job_config(str(defs))
     assert cfg.enabled is True
     assert cfg.default_instance_size == 64
+
+
+def test_load_bmll_job_config_defaults_resolve_to_runtime_path(tmp_path):
+    cfg = cli._load_bmll_job_config(str(tmp_path / "missing.yaml"))
+    assert cfg.project_root == str(tmp_path.resolve())
+    assert cfg.jobs_dir == str((tmp_path.resolve() / "_bmll_jobs"))
 
 
 def test_bmll_job_run_requires_config():

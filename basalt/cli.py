@@ -17,6 +17,9 @@ from basalt.configuration import AnalyticsConfig, BMLLJobConfig
 from basalt.executors.bmll import submit_instance_job
 from basalt.orchestrator import run_multiday_pipeline
 
+_LEGACY_DEFAULT_JOBS_DIR = "/home/bmll/user/basalt/_bmll_jobs"
+_LEGACY_DEFAULT_PROJECT_ROOT = "/home/bmll/user/basalt"
+
 
 def _disable_fire_pager() -> None:
     if "PAGER" not in os.environ:
@@ -116,8 +119,37 @@ def _deep_merge(a: dict, b: dict) -> dict:
 
 
 def _load_bmll_job_config(config_file: Optional[str]) -> BMLLJobConfig:
+    resolved_path = Path(config_file).resolve() if config_file else None
+
+    def _runtime_root_from_path(path: Optional[Path]) -> Path:
+        if path is None:
+            return Path.cwd().resolve()
+        if path.suffix in {".py", ".yaml", ".yml"}:
+            return path.parent.resolve()
+        return path.resolve()
+
+    def _hydrate_runtime_paths(cfg: BMLLJobConfig, source_path: Optional[Path]) -> BMLLJobConfig:
+        runtime_root = _runtime_root_from_path(source_path)
+        updates: dict[str, object] = {}
+
+        project_root = str(getattr(cfg, "project_root", "") or "").strip()
+        if (
+            not project_root
+            or project_root == _LEGACY_DEFAULT_PROJECT_ROOT
+            or not Path(project_root).exists()
+        ):
+            updates["project_root"] = str(runtime_root)
+
+        jobs_dir = str(getattr(cfg, "jobs_dir", "") or "").strip()
+        if not jobs_dir or jobs_dir == _LEGACY_DEFAULT_JOBS_DIR:
+            updates["jobs_dir"] = str(runtime_root / "_bmll_jobs")
+
+        if updates:
+            return cfg.model_copy(update=updates)
+        return cfg
+
     if not config_file:
-        return BMLLJobConfig()
+        return _hydrate_runtime_paths(BMLLJobConfig(), resolved_path)
     path = Path(config_file)
     user_config: dict = {}
 
@@ -147,11 +179,12 @@ def _load_bmll_job_config(config_file: Optional[str]) -> BMLLJobConfig:
             user_config = _extract_user_config(yaml_data)
 
     if not user_config:
-        return BMLLJobConfig()
+        return _hydrate_runtime_paths(BMLLJobConfig(), resolved_path)
     try:
-        return AnalyticsConfig(**user_config).BMLL_JOBS
+        cfg = AnalyticsConfig(**user_config).BMLL_JOBS
+        return _hydrate_runtime_paths(cfg, resolved_path)
     except Exception:
-        return BMLLJobConfig()
+        return _hydrate_runtime_paths(BMLLJobConfig(), resolved_path)
 
 
 def _format_cli_args(args: dict) -> list[str]:
