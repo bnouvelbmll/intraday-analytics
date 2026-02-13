@@ -79,7 +79,7 @@ subpackage_requirements = {
     "objective_functions": [],
     "models": [],
     "talib": ["TA-Lib"],
-    "mcp": ["fastmcp"],
+    "mcp": ["fastmcp", "mcp"],
     "aws_ec2": [],
     "kubernetes": [],
 }
@@ -116,6 +116,12 @@ if dist == "core":
     entry_points = {
         "console_scripts": [
             "basalt=basalt.basalt:main",
+        ],
+        "basalt.plugins": [
+            "bmll=basalt.executors.bmll:get_basalt_plugin",
+        ],
+        "basalt.cli": [
+            "bmll=basalt.executors.bmll:get_cli_extension",
         ],
     }
 elif dist == "dagster":
@@ -330,6 +336,7 @@ elif dist == "all":
             "basalt=basalt.basalt:main",
         ],
         "basalt.plugins": [
+            "bmll=basalt.executors.bmll:get_basalt_plugin",
             "dagster=basalt.dagster:get_basalt_plugin",
             "preprocessors=basalt.preprocessors:get_basalt_plugin",
             "characteristics=basalt.analytics.characteristics:get_basalt_plugin",
@@ -344,6 +351,7 @@ elif dist == "all":
             "visualization=basalt.visualization:get_basalt_plugin",
         ],
         "basalt.cli": [
+            "bmll=basalt.executors.bmll:get_cli_extension",
             "dagster=basalt.dagster.cli_ext:get_cli_extension",
             "mcp=basalt.mcp.cli_ext:get_cli_extension",
             "optimize=basalt.optimize.cli_ext:get_cli_extension",
