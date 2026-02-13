@@ -19,7 +19,7 @@ from basalt.utils import (
 )
 
 DEFAULT_GROUPED_BUFFER_ROWS = 250_000
-MAX_BMLL_OBJECT_IDS_PER_QUERY = 2000
+MAX_BMLL_OBJECT_IDS_PER_QUERY = 10000
 
 
 class SymbolBatcherStreaming:
@@ -341,20 +341,40 @@ class SymbolSizeEstimator:
                 ]
                 page_results = []
                 for page in pages:
-                    res_page = api_call(
-                        "bmll.time_series.query",
-                        lambda page_ids=page: bmll.time_series.query(
-                            object_ids=page_ids,
-                            metric=["TradeCount"],
-                            start_date=end_date_m2w,
-                            end_date=self.date,
-                        ),
-                        extra={
-                            "mic": mic,
-                            "object_ids_page_size": len(page),
-                            "object_ids_total": len(listing_ids),
-                        },
-                    )
+                    try:
+                        res_page = api_call(
+                            "bmll.time_series.query",
+                            lambda page_ids=page: bmll.time_series.query(
+                                object_ids=page_ids,
+                                metric=["TradeCount"],
+                                start_date=end_date_m2w,
+                                end_date=self.date,
+                            ),
+                            extra={
+                                "mic": mic,
+                                "object_ids_page_size": len(page),
+                                "object_ids_total": len(listing_ids),
+                            },
+                        )
+                    except Exception as page_err:
+                        err_text = str(page_err)
+                        level = logging.ERROR if "500" in err_text else logging.WARNING
+                        logging.log(
+                            level,
+                            "Size-estimate API call failed for mic %s. "
+                            "sample_params=%s error=%s",
+                            mic,
+                            {
+                                "metric": ["TradeCount"],
+                                "start_date": end_date_m2w,
+                                "end_date": self.date,
+                                "object_ids_page_size": len(page),
+                                "object_ids_total": len(listing_ids),
+                                "object_ids_sample": page[:20],
+                            },
+                            page_err,
+                        )
+                        continue
                     if isinstance(res_page, pd.DataFrame) and not res_page.empty:
                         page_results.append(res_page)
                 if not page_results:

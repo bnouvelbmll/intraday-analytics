@@ -15,9 +15,11 @@ def _install_fake_bmll(monkeypatch, query_fn):
 
 def test_symbol_size_estimator_paginates_object_ids(monkeypatch):
     calls: list[int] = []
+    all_ids: list[int] = []
 
     def _fake_query(*, object_ids, metric, start_date, end_date):
         calls.append(len(object_ids))
+        all_ids.extend(object_ids)
         return pd.DataFrame(
             {
                 "ObjectId": object_ids,
@@ -31,7 +33,7 @@ def test_symbol_size_estimator_paginates_object_ids(monkeypatch):
         lambda _name, fn, extra=None: fn(),
     )
 
-    listing_ids = list(range(1, 4501))
+    listing_ids = list(range(1, 25002))
     universe = pl.DataFrame(
         {
             "ListingId": listing_ids,
@@ -45,10 +47,11 @@ def test_symbol_size_estimator_paginates_object_ids(monkeypatch):
     assert calls == [
         MAX_BMLL_OBJECT_IDS_PER_QUERY,
         MAX_BMLL_OBJECT_IDS_PER_QUERY,
-        500,
+        5001,
     ]
+    assert all(isinstance(v, int) for v in all_ids)
     assert "trades" in out
-    assert len(out["trades"]) == 4500
+    assert len(out["trades"]) == 25001
 
 
 def test_symbol_size_estimator_filters_invalid_listing_ids(monkeypatch):
