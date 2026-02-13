@@ -10,9 +10,11 @@ def test_default_bootstrap_handles_missing_project_root():
     content = _default_bootstrap_content(Path("/does/not/exist"), [])
     assert "if [ -d \"$PROJECT_ROOT\" ]; then" in content
     assert "PROJECT_ROOT not found" in content
-    assert "import basalt" in content
+    assert "find_spec('basalt')" in content
     assert "cd \"$HOME\"" in content
     assert "BASALT_DIST=all python -m pip install -e ." in content
+    assert "findmnt /home /home/bmll /home/bmll/user" in content
+    assert "mount | grep -E '/home|bmll' || true" in content
 
 
 def test_ensure_default_bootstrap_rewrites_legacy_file(tmp_path):
