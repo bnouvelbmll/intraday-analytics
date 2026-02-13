@@ -7,7 +7,6 @@ from typing import Optional, List, Union, Literal, Dict, Any
 from basalt.analytics_base import (
     CombinatorialMetricConfig,
     Side,
-    AggregationMethod,
     AnalyticSpec,
     AnalyticContext,
     AnalyticDoc,
@@ -16,6 +15,7 @@ from basalt.analytics_base import (
     apply_metric_prefix,
 )
 from basalt.analytics_registry import register_analytics
+from .utils import resolve_output_name
 from .utils.volatility_common import annualized_std_from_log_returns
 
 
@@ -725,10 +725,10 @@ class L2LastLiquidityAnalytic(AnalyticSpec):
             )
 
         expr = base_expr.last()
-        alias = (
-            config.output_name_pattern.format(**variant)
-            if config.output_name_pattern
-            else f"{side}{measure}{level}"
+        alias = resolve_output_name(
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name=f"{side}{measure}{level}",
         )
         return [expr.alias(apply_metric_prefix(ctx, alias))]
 
@@ -781,12 +781,11 @@ class L2LastSpreadAnalytic(AnalyticSpec):
             )
 
         expr = base_expr.last()
-        if config.output_name_pattern:
-            alias = config.output_name_pattern.format(**variant)
-        elif v_type == "BPS":
-            alias = "SpreadBps"
-        else:
-            alias = f"Spread{v_type}"
+        alias = resolve_output_name(
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name="SpreadBps" if v_type == "BPS" else f"Spread{v_type}",
+        )
         return [expr.alias(apply_metric_prefix(ctx, alias))]
 
 
@@ -845,10 +844,10 @@ class L2LastImbalanceAnalytic(AnalyticSpec):
             )
 
         expr = base_expr.last()
-        alias = (
-            config.output_name_pattern.format(**variant)
-            if config.output_name_pattern
-            else f"Imbalance{measure}{level}"
+        alias = resolve_output_name(
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name=f"Imbalance{measure}{level}",
         )
         return [expr.alias(apply_metric_prefix(ctx, alias))]
 
@@ -903,10 +902,10 @@ class L2LastOHLCAnalytic(AnalyticSpec):
             else:
                 expr = p.last()
 
-            alias = (
-                config.output_name_pattern.format(**variant_with_ohlc)
-                if config.output_name_pattern
-                else default_name
+            alias = resolve_output_name(
+                output_name_pattern=config.output_name_pattern,
+                variant=variant_with_ohlc,
+                default_name=default_name,
             )
             expressions.append(expr.alias(apply_metric_prefix(ctx, alias)))
         return expressions
@@ -1031,10 +1030,10 @@ class L2TWLiquidityAnalytic(AnalyticSpec):
         if raw is None:
             return []
 
-        alias = (
-            config.output_name_pattern.format(**variant)
-            if config.output_name_pattern
-            else f"{side}{measure}{level}TWA"
+        alias = resolve_output_name(
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name=f"{side}{measure}{level}TWA",
         )
         return [_twa(raw, config.market_states).alias(apply_metric_prefix(ctx, alias))]
 
@@ -1092,12 +1091,11 @@ class L2TWSpreadAnalytic(AnalyticSpec):
         if expression_fn is None:
             return []
         raw = expression_fn(self)
-        if config.output_name_pattern:
-            alias = config.output_name_pattern.format(**variant)
-        elif v_type == "BPS":
-            alias = "SpreadBpsTWA"
-        else:
-            alias = f"Spread{v_type}TWA"
+        alias = resolve_output_name(
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name="SpreadBpsTWA" if v_type == "BPS" else f"Spread{v_type}TWA",
+        )
         return [_twa(raw, config.market_states).alias(apply_metric_prefix(ctx, alias))]
 
 
@@ -1144,10 +1142,10 @@ class L2TWImbalanceAnalytic(AnalyticSpec):
         if expression_fn is None:
             return []
         raw = expression_fn(self, level)
-        alias = (
-            config.output_name_pattern.format(**variant)
-            if config.output_name_pattern
-            else f"Imbalance{measure}{level}TWA"
+        alias = resolve_output_name(
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name=f"Imbalance{measure}{level}TWA",
         )
         return [_twa(raw, config.market_states).alias(apply_metric_prefix(ctx, alias))]
 
@@ -1212,10 +1210,10 @@ class L2TWVolatilityAnalytic(AnalyticSpec):
                 factor = (seconds_in_year * pl.len() / bucket_seconds).sqrt()
                 expr = expr * factor
 
-            alias = (
-                config.output_name_pattern.format(**variant, agg=agg)
-                if config.output_name_pattern
-                else f"L2Volatility{source}{agg}"
+            alias = resolve_output_name(
+                output_name_pattern=config.output_name_pattern,
+                variant={**variant, "agg": agg},
+                default_name=f"L2Volatility{source}{agg}",
             )
             expressions.append(expr.alias(apply_metric_prefix(ctx, alias)))
 

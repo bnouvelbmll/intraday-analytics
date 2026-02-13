@@ -12,6 +12,7 @@ from basalt.analytics_base import (
     apply_metric_prefix,
 )
 from basalt.analytics_registry import register_analytics
+from .utils import combine_conditions, resolve_output_name
 
 
 # =============================
@@ -307,22 +308,25 @@ class L3ExecutionAnalytic(AnalyticSpec):
         measure = variant["measures"]
 
         side_val = 1 if side == "Bid" else 2
-        cond = pl.col("Side") == side_val
+        cond = combine_conditions(pl.col("Side") == side_val)
 
         expression_fn = self.EXPRESSIONS.get(measure)
         if expression_fn is None:
             return []
         expr = expression_fn(self, cond)
 
-        if config.output_name_pattern:
-            alias = config.output_name_pattern.format(**variant)
+        if measure == "ExecutedVolume":
+            default_alias = f"ExecutedVolume{side}"
+        elif measure == "VWAP":
+            default_alias = f"Vwap{side}"
         else:
-            if measure == "ExecutedVolume":
-                alias = f"ExecutedVolume{side}"
-            elif measure == "VWAP":
-                alias = f"Vwap{side}"
-            else:
-                alias = f"{measure}{side}"
+            default_alias = f"{measure}{side}"
+
+        alias = resolve_output_name(
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name=default_alias,
+        )
 
         return [expr.alias(apply_metric_prefix(ctx, alias))]
 
@@ -410,8 +414,9 @@ class TradeBreakdownAnalytic(AnalyticSpec):
 
         agg_map = {"Buy": 1, "Sell": 2, "Unknown": 0}
         agg_side_val = agg_map.get(agg_side_str)
-        cond = (pl.col("BMLLTradeType") == t_type) & (
-            pl.col("AggressorSide") == agg_side_val
+        cond = combine_conditions(
+            pl.col("BMLLTradeType") == t_type,
+            pl.col("AggressorSide") == agg_side_val,
         )
 
         expression_fn = self.EXPRESSIONS.get(measure)
@@ -419,14 +424,13 @@ class TradeBreakdownAnalytic(AnalyticSpec):
             return []
         expr = expression_fn(self, cond)
 
-        if config.output_name_pattern:
-            alias = config.output_name_pattern.format(**variant)
-        else:
-            t_type_str = t_type.title()
-            measure_str = (
-                "VolumeWeightedPricePlacement" if measure == "VWPP" else measure
-            )
-            alias = f"{t_type_str}{measure_str}{agg_side_str}Aggressor"
+        t_type_str = t_type.title()
+        measure_str = "VolumeWeightedPricePlacement" if measure == "VWPP" else measure
+        alias = resolve_output_name(
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name=f"{t_type_str}{measure_str}{agg_side_str}Aggressor",
+        )
 
         return [expr.alias(apply_metric_prefix(ctx, alias))]
 

@@ -4,12 +4,11 @@ from pydantic import BaseModel, Field, model_validator, ConfigDict
 from typing import List, Union, Literal, Optional, Set, Dict, Any
 import logging
 
-from .utils import apply_alias
+from .utils import build_aggregated_outputs, combine_conditions
 from basalt.analytics_base import (
     CombinatorialMetricConfig,
     Side,
     AggregationMethod,
-    apply_aggregation,
     AnalyticSpec,
     AnalyticContext,
     AnalyticDoc,
@@ -325,9 +324,12 @@ Usage:
         else:
             return []
 
-        cond = side_filter & action_filter
-        if config.market_states:
-            cond = cond & pl.col("MarketState").is_in(config.market_states)
+        market_state_filter = (
+            pl.col("MarketState").is_in(config.market_states)
+            if config.market_states
+            else None
+        )
+        cond = combine_conditions(side_filter, action_filter, market_state_filter)
 
         if measure == "Count":
             expr = pl.when(cond).then(1).otherwise(0)
@@ -337,24 +339,20 @@ Usage:
         else:
             return []
 
-        outputs = []
-        for agg in config.aggregations:
-            agg_expr = apply_aggregation(expr, agg)
-            if agg_expr is None:
-                continue
-            default_name = f"{action}{measure}{side}"
+        def _default_name(agg: str) -> str:
+            name = f"{action}{measure}{side}"
             if agg != "Sum" and config.output_name_pattern is None:
-                default_name = f"{default_name}{agg}"
-            outputs.append(
-                apply_alias(
-                    agg_expr,
-                    config.output_name_pattern,
-                    {**variant, "agg": agg},
-                    default_name,
-                    prefix=ctx.cache.get("metric_prefix"),
-                )
-            )
-        return outputs
+                return f"{name}{agg}"
+            return name
+
+        return build_aggregated_outputs(
+            expr=expr,
+            aggregations=list(config.aggregations),
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name_for_agg=_default_name,
+            prefix=ctx.cache.get("metric_prefix"),
+        )
 
 
 class L3AdvancedAnalytic(AnalyticSpec):
@@ -484,6 +482,10 @@ class L3AdvancedAnalytic(AnalyticSpec):
 
         Usage:
             Used to classify market regimes and participant behavior.
+
+        Note:
+            Orders still open at end-of-window are right-censored to the last
+            observed event timestamp per listing so they remain in the sample.
         """
         gcols = ["ListingId", "TimeBucket"]
         resting_metrics = (
@@ -622,24 +624,66 @@ class L3AdvancedAnalytic(AnalyticSpec):
     ):
         if market_states:
             l3 = l3.filter(pl.col("MarketState").is_in(market_states))
+        events = l3.select(
+            [
+                "ListingId",
+                "OrderID",
+                "TimeBucket",
+                "EventTimestamp",
+                "LobAction",
+                "Size",
+            ]
+        ).sort(["ListingId", "OrderID", "EventTimestamp"])
+
+        # Next end-event timestamp (execution/remove) on the same order.
+        next_end = (
+            pl.when(pl.col("LobAction").is_in([1, 3]))
+            .then(pl.col("EventTimestamp"))
+            .otherwise(pl.lit(None, dtype=pl.Datetime("ns")))
+            .backward_fill()
+            .over(["ListingId", "OrderID"])
+        )
+
+        # Right-censor open orders at the last seen event timestamp per listing.
+        events = events.with_columns(
+            pl.col("EventTimestamp")
+            .max()
+            .over("ListingId")
+            .alias("__listing_window_end"),
+            next_end.alias("__next_end_time"),
+        )
 
         inserts = (
-            l3.filter(pl.col("LobAction") == 2)
-            .select(["ListingId", "OrderID", "EventTimestamp", "Size", "TimeBucket"])
-            .rename({"EventTimestamp": "InsertTime", "Size": "InsertSize"})
+            events.filter(pl.col("LobAction") == 2)
+            .with_columns(
+                pl.col("EventTimestamp").alias("InsertTime"),
+                pl.col("Size").alias("InsertSize"),
+                pl.col("__next_end_time").alias("EndTimeRaw"),
+                pl.col("__listing_window_end").alias("WindowEndTime"),
+            )
+            .with_columns(
+                pl.coalesce(["EndTimeRaw", "WindowEndTime"]).alias("EndTime"),
+                pl.col("EndTimeRaw").is_null().alias("IsRightCensored"),
+            )
+            .with_columns(
+                (
+                    (pl.col("EndTime") - pl.col("InsertTime"))
+                    .dt.total_nanoseconds()
+                    .clip(lower_bound=0)
+                ).alias("DurationNs")
+            )
         )
-
-        end_events = (
-            l3.filter(pl.col("LobAction").is_in([1, 3]))
-            .select(["ListingId", "OrderID", "EventTimestamp", "TimeBucket"])
-            .rename({"EventTimestamp": "EndTime"})
-        )
-
-        lifetimes = inserts.join(end_events, on=["ListingId", "OrderID"], how="inner")
-        return lifetimes.with_columns(
-            (pl.col("EndTime") - pl.col("InsertTime"))
-            .dt.total_nanoseconds()
-            .alias("DurationNs")
+        return inserts.select(
+            [
+                "ListingId",
+                "OrderID",
+                "TimeBucket",
+                "InsertTime",
+                "EndTime",
+                "InsertSize",
+                "DurationNs",
+                "IsRightCensored",
+            ]
         )
 
     def _compute_replacement_latency(

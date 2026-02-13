@@ -8,7 +8,6 @@ from basalt.analytics_base import (
     AnalyticContext,
     analytic_expression,
     apply_metric_prefix,
-    build_expressions,
 )
 from basalt.analytics_registry import register_analytics
 
@@ -99,6 +98,29 @@ class CBBOAnalytic(AnalyticSpec):
     MODULE = "cbbo_analytics"
     ConfigModel = CBBOAnalyticsConfig
 
+    @staticmethod
+    def _quantity_expr(
+        qty_expr: pl.Expr,
+        dt_expr: pl.Expr,
+        agg: CBBOQuantityAgg,
+        *,
+        base_name: str,
+    ) -> tuple[pl.Expr, str] | None:
+        if agg == "TWMean":
+            denom = dt_expr.sum()
+            numer = (dt_expr * qty_expr).sum()
+            return (
+                pl.when(denom > 0).then(numer / denom).otherwise(None),
+                base_name,
+            )
+        if agg == "Min":
+            return qty_expr.min(), f"{base_name}Min"
+        if agg == "Max":
+            return qty_expr.max(), f"{base_name}Max"
+        if agg == "Median":
+            return qty_expr.median(), f"{base_name}Median"
+        return None
+
     @analytic_expression(
         "TimeAtCBB",
         pattern=r"^TimeAtCBB$",
@@ -134,22 +156,12 @@ class CBBOAnalytic(AnalyticSpec):
         self, ctx: AnalyticContext, agg: CBBOQuantityAgg
     ) -> tuple[pl.Expr, str] | None:
         """Quantity available at CBB within the TimeBucket (aggregation varies by suffix)."""
-        qty = ctx.cache["qty_match_bid"]
-        dt = ctx.cache["dt"]
-        if agg == "TWMean":
-            denom = dt.sum()
-            numer = (dt * qty).sum()
-            return (
-                pl.when(denom > 0).then(numer / denom).otherwise(None),
-                "QuantityAtCBB",
-            )
-        if agg == "Min":
-            return qty.min(), "QuantityAtCBBMin"
-        if agg == "Max":
-            return qty.max(), "QuantityAtCBBMax"
-        if agg == "Median":
-            return qty.median(), "QuantityAtCBBMedian"
-        return None
+        return self._quantity_expr(
+            ctx.cache["qty_match_bid"],
+            ctx.cache["dt"],
+            agg,
+            base_name="QuantityAtCBB",
+        )
 
     @analytic_expression(
         "QuantityAtCBO",
@@ -160,22 +172,12 @@ class CBBOAnalytic(AnalyticSpec):
         self, ctx: AnalyticContext, agg: CBBOQuantityAgg
     ) -> tuple[pl.Expr, str] | None:
         """Quantity available at CBO within the TimeBucket (aggregation varies by suffix)."""
-        qty = ctx.cache["qty_match_ask"]
-        dt = ctx.cache["dt"]
-        if agg == "TWMean":
-            denom = dt.sum()
-            numer = (dt * qty).sum()
-            return (
-                pl.when(denom > 0).then(numer / denom).otherwise(None),
-                "QuantityAtCBO",
-            )
-        if agg == "Min":
-            return qty.min(), "QuantityAtCBOMin"
-        if agg == "Max":
-            return qty.max(), "QuantityAtCBOMax"
-        if agg == "Median":
-            return qty.median(), "QuantityAtCBOMedian"
-        return None
+        return self._quantity_expr(
+            ctx.cache["qty_match_ask"],
+            ctx.cache["dt"],
+            agg,
+            base_name="QuantityAtCBO",
+        )
 
     def expressions(
         self, ctx: AnalyticContext, config: CBBOAnalyticsConfig, variant: Dict[str, Any]

@@ -3,12 +3,16 @@ from basalt.analytics_base import BaseAnalytics
 from pydantic import BaseModel, Field, model_validator, ConfigDict
 from typing import List, Union, Literal, Optional, Dict, Any
 
-from .utils import apply_market_state_filter, apply_alias
+from .utils import (
+    apply_market_state_filter,
+    apply_alias,
+    build_aggregated_outputs,
+    combine_conditions,
+    resolve_output_name,
+)
 from basalt.analytics_base import (
     CombinatorialMetricConfig,
-    Side,
     AggregationMethod,
-    apply_aggregation,
     AnalyticSpec,
     AnalyticContext,
     AnalyticDoc,
@@ -602,20 +606,24 @@ class TradeGenericAnalytic(AnalyticSpec):
         side: str,
         available_cols: set[str] | None = None,
     ):
-        cond = pl.col("Size").is_not_null()
+        side_cond = None
         if side == "Bid":
-            cond = pl.col("AggressorSide") == 2
+            side_cond = pl.col("AggressorSide") == 2
         elif side == "Ask":
-            cond = pl.col("AggressorSide") == 1
-        if config.market_states:
-            cond = cond & pl.col("MarketState").is_in(config.market_states)
+            side_cond = pl.col("AggressorSide") == 1
+        market_state_cond = (
+            pl.col("MarketState").is_in(config.market_states)
+            if config.market_states
+            else None
+        )
+        cond = combine_conditions(pl.col("Size").is_not_null(), side_cond, market_state_cond)
         for col, allowed in (config.attribute_filters or {}).items():
             if available_cols is not None and col not in available_cols:
                 continue
             if isinstance(allowed, list):
-                cond = cond & pl.col(col).is_in(allowed)
+                cond = combine_conditions(cond, pl.col(col).is_in(allowed))
             else:
-                cond = cond & (pl.col(col) == allowed)
+                cond = combine_conditions(cond, pl.col(col) == allowed)
         return cond
 
     @staticmethod
@@ -918,10 +926,10 @@ class TradeGenericAnalytic(AnalyticSpec):
             Used for charting, volatility calculation, and technical indicators.
         """
         side = variant["sides"]
-        base_prefix = (
-            f"Trade{side}"
-            if not config.output_name_pattern
-            else config.output_name_pattern.format(**variant)
+        base_prefix = resolve_output_name(
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name=f"Trade{side}",
         )
         if side == "Total" and not config.output_name_pattern:
             base_prefix = ""
@@ -1022,28 +1030,21 @@ Usage:
             expr = pl.when(pl.col("AggressorSide") == 1).then(expr).otherwise(None)
 
         expr = apply_market_state_filter(expr, config.market_states)
+        side_suffix = "" if side == "Total" else f"{side}"
 
-        outputs = []
-        for agg in config.aggregations:
-            agg_expr = apply_aggregation(expr, agg)
-            if agg_expr is None:
-                continue
-            side_suffix = "" if side == "Total" else f"{side}"
-            default_name = (
-                f"DiscrepancyTo{ref_name}{side_suffix}"
-                if agg == "Mean" and config.output_name_pattern is None
-                else f"DiscrepancyTo{ref_name}{side_suffix}{agg}"
-            )
-            outputs.append(
-                apply_alias(
-                    agg_expr,
-                    config.output_name_pattern,
-                    {**variant, "agg": agg},
-                    default_name,
-                    prefix=ctx.cache.get("metric_prefix"),
-                )
-            )
-        return outputs
+        def _default_name(agg: str) -> str:
+            if agg == "Mean" and config.output_name_pattern is None:
+                return f"DiscrepancyTo{ref_name}{side_suffix}"
+            return f"DiscrepancyTo{ref_name}{side_suffix}{agg}"
+
+        return build_aggregated_outputs(
+            expr=expr,
+            aggregations=list(config.aggregations),
+            output_name_pattern=config.output_name_pattern,
+            variant=variant,
+            default_name_for_agg=_default_name,
+            prefix=ctx.cache.get("metric_prefix"),
+        )
 
 
 class TradeFlagAnalytic(AnalyticSpec):
@@ -1138,14 +1139,17 @@ class TradeFlagAnalytic(AnalyticSpec):
         if flag is None:
             return []
 
-        cond = flag
+        side_cond = None
         if side == "Bid":
-            cond = cond & (pl.col("AggressorSide") == 2)
+            side_cond = pl.col("AggressorSide") == 2
         elif side == "Ask":
-            cond = cond & (pl.col("AggressorSide") == 1)
-
-        if config.market_states:
-            cond = cond & pl.col("MarketState").is_in(config.market_states)
+            side_cond = pl.col("AggressorSide") == 1
+        market_state_cond = (
+            pl.col("MarketState").is_in(config.market_states)
+            if config.market_states
+            else None
+        )
+        cond = combine_conditions(flag, side_cond, market_state_cond)
 
         expression_fn = self.EXPRESSIONS.get(measure)
         if expression_fn is None:
