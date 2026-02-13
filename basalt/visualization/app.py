@@ -35,7 +35,16 @@ from basalt.visualization.data import (
     estimate_listing_days,
 )
 from basalt.visualization.modules import discover_plot_modules
-from basalt.visualization.scales import choose_scale, transform_series
+try:
+    from basalt.visualization.scales import choose_scale, transform_series
+except Exception:  # pragma: no cover - compatibility fallback for older installs
+    def choose_scale(_values):
+        class _Decision:
+            selected = "linear"
+        return _Decision()
+
+    def transform_series(values, _scale):
+        return values
 from basalt.visualization.scoring import (
     score_numeric_columns,
     suggest_feature_target_associations,
