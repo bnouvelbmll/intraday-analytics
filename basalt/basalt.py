@@ -67,12 +67,28 @@ def _load_pipeline_module(path_or_name: str):
     import importlib.util
     import importlib
 
+    def _module_name_from_path(path: Path) -> str:
+        # Prefer package-qualified names (e.g. demo.arnaud) so functions
+        # remain pickleable across multiprocessing workers.
+        parts = [path.stem]
+        parent = path.parent
+        while (parent / "__init__.py").exists():
+            parts.append(parent.name)
+            parent = parent.parent
+        return ".".join(reversed(parts))
+
     path = Path(path_or_name)
     if path.exists():
-        spec = importlib.util.spec_from_file_location(path.stem, path)
+        module_name = _module_name_from_path(path.resolve())
+        existing = sys.modules.get(module_name)
+        if existing is not None and getattr(existing, "__file__", None) == str(path.resolve()):
+            return existing
+
+        spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Unable to load pipeline: {path_or_name}")
         module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
         spec.loader.exec_module(module)  # type: ignore[attr-defined]
         return module
     return importlib.import_module(path_or_name)
