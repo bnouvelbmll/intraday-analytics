@@ -52,6 +52,10 @@ def _default_bootstrap_content(project_root: Path, pythonpath: list[str]) -> str
             "    cd \"$HOME\"",
             "  fi",
             "fi",
+            "if [ -f setup.py ]; then",
+            "  # Install local basalt checkout (core + discovered local plugins) in the active conda env.",
+            "  BASALT_DIST=all python -m pip install -e .",
+            "fi",
             "if [ -f requirements.txt ]; then",
             "  python -m pip install -r requirements.txt",
             "fi",
@@ -180,7 +184,19 @@ def ensure_default_bootstrap(config: BMLLJobConfig) -> tuple[str, str, list[Any]
     jobs_dir = Path(config.jobs_dir)
     _ensure_dir(jobs_dir)
     bootstrap_path = jobs_dir / "bootstrap.sh"
-    if not bootstrap_path.exists():
+    should_rewrite = not bootstrap_path.exists()
+    if bootstrap_path.exists():
+        try:
+            current = bootstrap_path.read_text(encoding="utf-8")
+            if (
+                "/home/bmll/user/basalt" in current
+                or "BASALT_DIST=all python -m pip install -e ." not in current
+            ):
+                should_rewrite = True
+        except Exception:
+            should_rewrite = True
+
+    if should_rewrite:
         content = _default_bootstrap_content(
             Path(config.project_root), list(config.pythonpath_prefixes or [])
         )
@@ -193,7 +209,6 @@ def ensure_default_bootstrap(config: BMLLJobConfig) -> tuple[str, str, list[Any]
 
 def _copy_script_to_jobs_dir(script_path: Path, jobs_dir: Path) -> Path:
     _ensure_dir(jobs_dir)
-    name = script_path.name
     stamp = time.strftime("%Y%m%d_%H%M%S")
     dest = jobs_dir / f"{script_path.stem}_{stamp}{script_path.suffix}"
     shutil.copy2(script_path, dest)

@@ -1,7 +1,6 @@
 import polars as pl
-import numpy as np
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Any, List, Dict, Optional, Union, Literal
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import Any, List, Dict, Optional
 from basalt.analytics_base import BaseAnalytics
 from basalt.analytics_registry import register_analytics
 import logging
@@ -168,6 +167,14 @@ class GenericAnalyticsConfig(BaseModel):
         },
     )
 
+    @model_validator(mode="after")
+    def _validate_resample_group_by(self) -> "GenericAnalyticsConfig":
+        if self.resample_rule and "TimeBucket" not in self.group_by:
+            raise ValueError(
+                "GenericAnalyticsConfig.resample_rule requires 'TimeBucket' in group_by."
+            )
+        return self
+
 
 @register_analytics("generic", config_attr="generic_analytics")
 class GenericAnalytics(BaseAnalytics):
@@ -213,11 +220,14 @@ class GenericAnalytics(BaseAnalytics):
 
         # 2. Resample if needed
         if self.config.resample_rule:
-            # Assuming TimeBucket is the time column and is in the group_by list
-            if "TimeBucket" in self.config.group_by:
-                lf = lf.with_columns(
-                    pl.col("TimeBucket").dt.truncate(self.config.resample_rule)
+            if "TimeBucket" not in self.config.group_by:
+                raise ValueError(
+                    "GenericAnalytics config is invalid: resample_rule is set but "
+                    "'TimeBucket' is missing from group_by."
                 )
+            lf = lf.with_columns(
+                pl.col("TimeBucket").dt.truncate(self.config.resample_rule)
+            )
 
         # 3. GroupBy & Aggregate
         if self.config.aggregations:

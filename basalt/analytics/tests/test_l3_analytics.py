@@ -147,14 +147,12 @@ class TestL3Analytics(unittest.TestCase):
         analytics.l3 = self.mock_l3_data
         result_df = analytics.compute().collect()
 
-        # Expected values for Resting Time
-        # Order 101 (Insert) -> 102 (Remove): DurationNs = 1s
-        # Order 103 (Update) -> No direct end event in this simplified data for resting time
-        # Order 105 (Insert) -> No direct end event
-        # Order 201 (Insert) -> 202 (Remove): DurationNs = 1s
-        # Order 203 (Update) -> No direct end event
-        # AvgRestingTime = (1s + 1s) / 2 = 1s = 1_000_000_000 ns
-        expected_avg_resting_time = 1_000_000_000
+        # Expected values for Resting Time (including right-censored open orders):
+        # Order 101 insert@09:00:01 -> end@09:00:02 = 1s
+        # Order 201 insert@09:00:05 -> end@09:00:06 = 1s
+        # Order 105 insert@09:00:03 -> no end event => censored at listing window end@09:00:10 = 7s
+        # AvgRestingTime = (1 + 1 + 7) / 3 = 3s = 3_000_000_000 ns
+        expected_avg_resting_time = 3_000_000_000
         self.assertAlmostEqual(
             result_df["AvgRestingTime"][0], expected_avg_resting_time, places=6
         )

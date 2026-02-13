@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import List, Optional, Literal
 
-import pandas as pd
 import polars as pl
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -110,44 +109,84 @@ class ObservedEventsAnalytics(BaseAnalytics):
                 f"Source pass '{self.config.source_pass}' not found in context."
             )
         if isinstance(source_df, pl.LazyFrame):
-            df = source_df.collect()
+            ldf = source_df
         elif isinstance(source_df, pl.DataFrame):
-            df = source_df
+            ldf = source_df.lazy()
         else:
             raise ValueError("Unsupported source pass type.")
 
-        pdf = df.to_pandas()
-        if "TimeBucket" not in pdf.columns:
+        schema = ldf.collect_schema().names()
+        if "TimeBucket" not in schema:
             raise ValueError("TimeBucket column required for event detection.")
-        if self.config.input_col not in pdf.columns:
+        if self.config.input_col not in schema:
             raise ValueError(f"Input column {self.config.input_col} not found.")
+        sorted_ldf = ldf.sort(["ListingId", "TimeBucket"])
 
-        pdf = pdf.sort_values(["ListingId", "TimeBucket"])
-        group = pdf.groupby("ListingId", sort=False)[self.config.input_col]
         if self.config.indicator == "ewma":
-            indicator = group.apply(lambda s: s.ewm(span=self.config.window).mean())
+            indicator_expr = (
+                pl.col(self.config.input_col)
+                .cast(pl.Float64)
+                .ewm_mean(span=self.config.window)
+                .over("ListingId")
+            )
         else:
-            indicator = group.apply(lambda s: s.rolling(self.config.window).mean())
-        pdf["__indicator"] = indicator.reset_index(level=0, drop=True)
+            indicator_expr = (
+                pl.col(self.config.input_col)
+                .cast(pl.Float64)
+                .rolling_mean(window_size=self.config.window)
+                .over("ListingId")
+            )
 
-        prev_val = pdf["__indicator"].groupby(pdf["ListingId"]).shift(1)
-        next_val = pdf["__indicator"].groupby(pdf["ListingId"]).shift(-1)
+        with_indicator = sorted_ldf.with_columns(indicator_expr.alias("__indicator"))
+        with_neighbors = with_indicator.with_columns(
+            pl.col("__indicator").shift(1).over("ListingId").alias("__prev_indicator"),
+            pl.col("__indicator").shift(-1).over("ListingId").alias("__next_indicator"),
+        )
 
-        events = []
-        if "local_min" in self.config.event_types:
-            mask = (pdf["__indicator"] < prev_val) & (pdf["__indicator"] < next_val)
-            events.append(pdf.loc[mask].assign(EventType="local_min"))
-        if "local_max" in self.config.event_types:
-            mask = (pdf["__indicator"] > prev_val) & (pdf["__indicator"] > next_val)
-            events.append(pdf.loc[mask].assign(EventType="local_max"))
+        local_min = (pl.col("__indicator") < pl.col("__prev_indicator")) & (
+            pl.col("__indicator") < pl.col("__next_indicator")
+        )
+        local_max = (pl.col("__indicator") > pl.col("__prev_indicator")) & (
+            pl.col("__indicator") > pl.col("__next_indicator")
+        )
 
-        if not events:
+        if "local_min" in self.config.event_types and "local_max" in self.config.event_types:
+            event_type_expr = (
+                pl.when(local_min)
+                .then(pl.lit("local_min"))
+                .when(local_max)
+                .then(pl.lit("local_max"))
+                .otherwise(pl.lit(None, dtype=pl.String))
+            )
+        elif "local_min" in self.config.event_types:
+            event_type_expr = pl.when(local_min).then(pl.lit("local_min")).otherwise(
+                pl.lit(None, dtype=pl.String)
+            )
+        elif "local_max" in self.config.event_types:
+            event_type_expr = pl.when(local_max).then(pl.lit("local_max")).otherwise(
+                pl.lit(None, dtype=pl.String)
+            )
+        else:
             return pl.DataFrame(
-                columns=["ListingId", "TimeBucket", "EventType", "Indicator", "IndicatorValue"]
+                schema={
+                    "ListingId": pl.Int64,
+                    "TimeBucket": pl.Datetime("ns"),
+                    "EventType": pl.String,
+                    "Indicator": pl.String,
+                    "IndicatorValue": pl.Float64,
+                }
             ).lazy()
 
-        out = pd.concat(events, ignore_index=True)
-        out["Indicator"] = self.config.indicator
-        out["IndicatorValue"] = out["__indicator"]
-        out = out[["ListingId", "TimeBucket", "EventType", "Indicator", "IndicatorValue"]]
-        return pl.from_pandas(out).lazy()
+        return (
+            with_neighbors.with_columns(event_type_expr.alias("EventType"))
+            .filter(pl.col("EventType").is_not_null())
+            .select(
+                [
+                    "ListingId",
+                    "TimeBucket",
+                    "EventType",
+                    pl.lit(self.config.indicator).alias("Indicator"),
+                    pl.col("__indicator").alias("IndicatorValue"),
+                ]
+            )
+        )

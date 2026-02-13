@@ -45,6 +45,7 @@ def _all_dist_names() -> list[str]:
         "mcp",
         "aws_ec2",
         "kubernetes",
+        "backtest",
     ]
 
 
@@ -79,9 +80,14 @@ subpackage_requirements = {
     "objective_functions": [],
     "models": [],
     "talib": ["TA-Lib"],
-    "mcp": ["fastmcp", "mcp"],
+    "mcp": [
+        # Pinned ranges reduce pip backtracking in editable/all installs.
+        "fastmcp>=2.14,<2.15",
+        "mcp>=1.22,<2",
+    ],
     "aws_ec2": [],
     "kubernetes": [],
+    "backtest": [],
 }
 extras = {
     name: [f"bmll-basalt-{name}>={VERSION}"] for name in subpackage_requirements
@@ -105,6 +111,7 @@ if dist == "core":
             "basalt.executors.kubernetes*",
             "basalt.analytics.talib*",
             "basalt.mcp*",
+            "basalt.backtest*",
             "basalt.tests*",
             "basalt.analytics.tests*",
             "basalt.dagster.tests*",
@@ -220,6 +227,24 @@ elif dist == "optimize":
         include=(
             "basalt.optimize",
             "basalt.optimize.*",
+        )
+    )
+    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "backtest":
+    name = "bmll-basalt-backtest"
+    extras_require = {}
+    entry_points = {
+        "basalt.plugins": [
+            "backtest=basalt.backtest:get_basalt_plugin",
+        ],
+        "basalt.cli": [
+            "backtest=basalt.backtest.cli_ext:get_cli_extension",
+        ],
+    }
+    packages = find_packages(
+        include=(
+            "basalt.backtest",
+            "basalt.backtest.*",
         )
     )
     install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]

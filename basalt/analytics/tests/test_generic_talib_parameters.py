@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
+import pytest
 
 from basalt.analytics.generic import (
     GenericAnalytics,
@@ -95,3 +96,12 @@ def test_talib_indicator_timeperiod_is_backward_compatible(monkeypatch):
 
     assert fake.calls
     assert fake.calls[0]["timeperiod"] == 5
+
+
+def test_resample_rule_requires_timebucket_in_group_by():
+    with pytest.raises(ValueError, match="requires 'TimeBucket' in group_by"):
+        GenericAnalyticsConfig(
+            source_pass="pass1",
+            group_by=["ListingId"],
+            resample_rule="15m",
+        )

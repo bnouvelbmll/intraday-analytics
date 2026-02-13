@@ -3,7 +3,7 @@ polars
 pyarrow
 viztracer
 joblib
-pydantic==2.7.1
+pydantic>=2.8,<3
 TA-lib
 textual>=7.5
 textual-web
