@@ -17,6 +17,7 @@ from basalt.analytics_base import (
     build_expressions,
 )
 from basalt.analytics_registry import register_analytics
+from .utils.volatility_common import annualized_std_from_log_returns
 
 
 # =============================
@@ -34,6 +35,7 @@ TradeGenericMeasure = Literal[
     "AuctionNotional",
     "OTCVolume",
     "VWAP",
+    "Volatility",
     "OHLC",
     "AvgPrice",
     "MedianPrice",
@@ -81,6 +83,22 @@ class TradeGenericConfig(CombinatorialMetricConfig):
             "Large measure lists increase output width.\n"
             "Ensure input schema contains required columns.\n"
             "Output names include measure tokens.",
+        },
+    )
+
+    attribute_filters: Dict[str, Union[str, int, float, bool, List[Union[str, int, float, bool]]]] = Field(
+        default_factory=dict,
+        description=(
+            "Optional additional equality/IN filters by trade attributes "
+            "(e.g. {'BMLLTradeType':['LIT'], 'Classification':'LIT_CONTINUOUS'})."
+        ),
+        json_schema_extra={
+            "long_doc": "Adds extra per-row filters for generic trade metrics.\n"
+            "Keys are column names, values are allowed values.\n"
+            "Scalar value => equality, list value => isin(...).\n"
+            "Useful to isolate subsets (trade type, participant type, venue tags).\n"
+            "Unknown columns are ignored.\n"
+            "Applied in `TradeGenericAnalytic._build_filters` before aggregation.\n",
         },
     )
 
@@ -417,6 +435,13 @@ class TradeAnalyticsConfig(BaseModel):
             "Leave empty to use module default naming.\n"
         },
     )
+    time_bucket_seconds: Optional[float] = Field(
+        None,
+        description=(
+            "Bucket size in seconds used for annualizing trade volatility "
+            "(std(log returns) scaling)."
+        ),
+    )
     generic_metrics: List[TradeGenericConfig] = Field(
         default_factory=list,
         description="Generic trade metrics configuration.",
@@ -571,7 +596,12 @@ class TradeGenericAnalytic(AnalyticSpec):
     MODULE = "trade"
     ConfigModel = TradeGenericConfig
 
-    def _build_filters(self, config: TradeGenericConfig, side: str):
+    def _build_filters(
+        self,
+        config: TradeGenericConfig,
+        side: str,
+        available_cols: set[str] | None = None,
+    ):
         cond = pl.col("Size").is_not_null()
         if side == "Bid":
             cond = pl.col("AggressorSide") == 2
@@ -579,6 +609,13 @@ class TradeGenericAnalytic(AnalyticSpec):
             cond = pl.col("AggressorSide") == 1
         if config.market_states:
             cond = cond & pl.col("MarketState").is_in(config.market_states)
+        for col, allowed in (config.attribute_filters or {}).items():
+            if available_cols is not None and col not in available_cols:
+                continue
+            if isinstance(allowed, list):
+                cond = cond & pl.col(col).is_in(allowed)
+            else:
+                cond = cond & (pl.col(col) == allowed)
         return cond
 
     @staticmethod
@@ -783,12 +820,35 @@ class TradeGenericAnalytic(AnalyticSpec):
         Interest:
             VWAP is the standard benchmark for execution quality. It represents the "fair" price for the volume traded.
 
+        Formula:
+            VWAP = sum(LocalPrice * Size) / sum(Size)
+            This is strictly size-weighted and must not degrade to an arithmetic mean of prices.
+
         Usage:
             Used to benchmark execution algorithms and assess price trends.
         """
         num = self._filtered_zero(cond, pl.col("LocalPrice") * pl.col("Size")).sum()
         den = self._filtered_zero(cond, pl.col("Size")).sum()
         return num / den
+
+    @analytic_expression(
+        "Volatility",
+        pattern=r"^Trade(?P<side>Total|Bid|Ask)(?P<measure>Volatility)$",
+        unit="Percentage",
+    )
+    def _expression_volatility(self, cond, bucket_seconds: float | None):
+        """
+        Trade {measure} for {side} trades within the TimeBucket (LIT_CONTINUOUS).
+
+        Formula:
+            annualized_std(log(LocalPrice_t / LocalPrice_{t-1}))
+            where annualization uses bucket size and return count.
+        """
+        log_ret = self._filtered(cond, (pl.col("LocalPrice") / pl.col("LocalPrice").shift(1)).log())
+        return annualized_std_from_log_returns(
+            log_ret,
+            bucket_seconds=float(bucket_seconds) if bucket_seconds else None,
+        )
 
     @analytic_expression(
         "AvgPrice",
@@ -880,7 +940,8 @@ class TradeGenericAnalytic(AnalyticSpec):
     ) -> List[pl.Expr]:
         side = variant["sides"]
         measure = variant["measures"]
-        cond = self._build_filters(config, side)
+        available_cols = set(ctx.base_df.collect_schema().names())
+        cond = self._build_filters(config, side, available_cols=available_cols)
 
         expression_fn = self.EXPRESSIONS.get(measure)
         if expression_fn is None:
@@ -890,7 +951,10 @@ class TradeGenericAnalytic(AnalyticSpec):
             prefix = apply_metric_prefix(ctx, "")
             return expression_fn(self, cond, config, variant, prefix)
 
-        expr = expression_fn(self, cond)
+        if measure == "Volatility":
+            expr = expression_fn(self, cond, ctx.cache.get("time_bucket_seconds"))
+        else:
+            expr = expression_fn(self, cond)
         default_name = f"Trade{side}{measure}"
         return [
             apply_alias(
@@ -1265,8 +1329,15 @@ class TradeDefaultAnalytic(AnalyticSpec):
     DOCS = [
         AnalyticDoc(
             pattern=r"^VWAP$",
-            template="Volume-weighted average price over trades in the TimeBucket.",
+            template="Volume-weighted average price over trades in the TimeBucket: sum(LocalPrice*Size)/sum(Size).",
             unit="XLOC",
+            description="Computed as sum(LocalPrice*Size)/sum(Size); never an arithmetic mean of prices.",
+        ),
+        AnalyticDoc(
+            pattern=r"^Trade(?P<side>Total|Bid|Ask)Volatility$",
+            template="Annualized std(log returns) of trade LocalPrice for {side_or_total} trades within the TimeBucket.",
+            unit="Percentage",
+            description="Computed from std(log(LocalPrice_t/LocalPrice_{t-1})) and annualized using bucket size.",
         ),
         AnalyticDoc(
             pattern=r"^VolumeWeightedPricePlacement$",
@@ -1397,7 +1468,10 @@ class TradeAnalytics(BaseAnalytics):
 
         ctx = AnalyticContext(
             base_df=base_df,
-            cache={"metric_prefix": self.metric_prefix},
+            cache={
+                "metric_prefix": self.metric_prefix,
+                "time_bucket_seconds": self.config.time_bucket_seconds,
+            },
             context=self.context,
         )
 

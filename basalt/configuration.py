@@ -128,6 +128,7 @@ class DataSourceMechanism(str, Enum):
 class PassTimelineMode(str, Enum):
     SPARSE_ORIGINAL = "sparse_original"
     SPARSE_DIGITISED = "sparse_digitised"
+    DAILY_ANALYTICS = "daily_analytics"
     DENSE = "dense"
     EVENT = "event"
 
@@ -269,7 +270,8 @@ class PassConfig(BaseModel):
     timeline_mode: Optional[PassTimelineMode] = Field(
         None,
         description=(
-            "Output timeline mode: sparse_original, sparse_digitised, dense, or event."
+            "Output timeline mode: sparse_original, sparse_digitised, "
+            "daily_analytics, dense, or event."
         ),
         json_schema_extra={"section": "Core"},
     )
@@ -414,6 +416,7 @@ class PassConfig(BaseModel):
         self.l2_analytics.time_bucket_seconds = self.time_bucket_seconds
         self.l2_analytics.time_bucket_anchor = self.time_bucket_anchor
         self.l2_analytics.time_bucket_closed = self.time_bucket_closed
+        self.trade_analytics.time_bucket_seconds = self.time_bucket_seconds
         model_map = get_plugin_module_config_models()
         updated_extensions: Dict[str, Dict] = {}
         for key, cfg in (self.extension_configs or {}).items():

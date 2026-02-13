@@ -89,16 +89,7 @@ def _build_full_config(levels: int = 10, impact_horizons=None) -> AnalyticsConfi
         volatility=[
             L2VolatilityConfig(
                 source=["Mid", "Bid", "Ask", "WeightedMid"],
-                aggregations=[
-                    "First",
-                    "Last",
-                    "Min",
-                    "Max",
-                    "Mean",
-                    "Sum",
-                    "Median",
-                    "Std",
-                ],
+                aggregations=["Std"],
             )
         ],
         ohlc=[

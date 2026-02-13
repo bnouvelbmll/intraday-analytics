@@ -1,7 +1,7 @@
 import logging
 import polars as pl
 from basalt.analytics_base import BaseAnalytics, BaseTWAnalytics
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import Optional, List, Union, Literal, Dict, Any
 
 from basalt.analytics_base import (
@@ -16,6 +16,7 @@ from basalt.analytics_base import (
     apply_metric_prefix,
 )
 from basalt.analytics_registry import register_analytics
+from .utils.volatility_common import annualized_std_from_log_returns
 
 
 # =============================
@@ -196,10 +197,111 @@ class L2VolatilityConfig(CombinatorialMetricConfig):
         )
     )
 
-    aggregations: List[AggregationMethod] = Field(
+    aggregations: List[Literal["Std"]] = Field(
         default_factory=lambda: ["Std"],
-        description="Aggregation operators applied to the volatility series per bucket.",
+        description=(
+            "Volatility estimator(s) to emit per bucket. "
+            "Only 'Std' is supported and represents annualized std(log returns)."
+        ),
+        json_schema_extra={
+            "long_doc": "Volatility is defined as annualized standard deviation of log returns.\n"
+            "Formula (per bucket): std(log(P_t / P_{t-1})) * annualization_factor.\n"
+            "Only 'Std' is valid here to avoid mixing return moments with volatility.\n"
+            "If you need second-order metrics on volatility (daily max/min/mean of\n"
+            "1-minute volatility), compute this module first and then use a\n"
+            "postprocessing pass such as `reaggregate_analytics` over the volatility columns.\n"
+            "This keeps the semantic distinction explicit and avoids mislabeling outputs.\n",
+        },
     )
+
+    @model_validator(mode="after")
+    def _std_only_contract(self) -> "L2VolatilityConfig":
+        bad = [a for a in self.aggregations if a != "Std"]
+        if bad:
+            raise ValueError(
+                "L2 volatility supports only aggregations=['Std'] "
+                "(annualized std of log returns). "
+                "Use a downstream reaggregate pass for second-order stats."
+            )
+        return self
+
+    subsample_seconds: Optional[float] = Field(
+        None,
+        gt=0,
+        description=(
+            "Optional subsampling step (seconds) before computing log returns. "
+            "If set, returns are computed on the subsampled price path."
+        ),
+    )
+
+    second_level_window_seconds: Optional[float] = Field(
+        None,
+        gt=0,
+        description=(
+            "Optional window size (seconds) for second-level volatility aggregates "
+            "(for example volatility-of-volatility within the bucket)."
+        ),
+    )
+
+    second_level_aggregations: List[
+        Literal["Min", "Max", "Mean", "Median", "Std", "Last", "TWMean", "TWStd"]
+    ] = Field(
+        default_factory=list,
+        description=(
+            "Optional second-level aggregations applied to windowed volatility values "
+            "inside the bucket."
+        ),
+        json_schema_extra={
+            "long_doc": "Second-level aggregates summarize a volatility time series inside each bucket.\n"
+            "Example: with subsample_seconds=60 and second_level_window_seconds=900,\n"
+            "you can compute Min/Max/Mean/Last of 15-minute volatility inside a daily bucket.\n"
+            "Unweighted: Min/Max/Mean/Median/Std/Last.\n"
+            "Time-weighted: TWMean and TWStd (weighted by per-window sample counts).\n"
+            "Use this for volatility shape/dispersion analysis (volatility of volatility).\n",
+        },
+    )
+
+    @model_validator(mode="after")
+    def _second_level_contract(self) -> "L2VolatilityConfig":
+        if self.second_level_aggregations and not self.second_level_window_seconds:
+            raise ValueError(
+                "second_level_window_seconds is required when second_level_aggregations is set."
+            )
+        return self
+
+    def expand(self) -> List[Dict[str, Any]]:
+        # Keep second-level aggregation config as a single setting block instead of
+        # exploding one metric per aggregation during combinatorial expansion.
+        import itertools
+
+        single_params: dict[str, Any] = {}
+        list_params: dict[str, list[Any]] = {}
+        exclude_fields = {
+            "aggregations",
+            "output_name_pattern",
+            "second_level_aggregations",
+        }
+
+        for field_name, value in self.model_dump().items():
+            if field_name in exclude_fields:
+                continue
+            if isinstance(value, list) and not isinstance(value, str):
+                list_params[field_name] = value
+            else:
+                single_params[field_name] = value
+
+        keys = list(list_params.keys())
+        values = list(list_params.values())
+        expanded: list[dict[str, Any]] = []
+        if not keys:
+            expanded.append(single_params)
+        else:
+            for combination in itertools.product(*values):
+                item = single_params.copy()
+                for i, key in enumerate(keys):
+                    item[key] = combination[i]
+                expanded.append(item)
+        return expanded
 
 
 class L2OHLCConfig(CombinatorialMetricConfig):
@@ -364,14 +466,16 @@ class L2AnalyticsConfig(BaseModel):
         description="Volatility metrics configuration.",
         json_schema_extra={
             "long_doc": "List of L2 volatility metrics to compute.\n"
-            "Selects price series (Mid, Bid, Ask, WeightedMid) and aggregation.\n"
+            "Selects price series (Mid, Bid, Ask, WeightedMid).\n"
             "Example: source='Mid' computes volatility over mid prices.\n"
             "Computed in `L2VolatilityAnalytic`.\n"
-            "Aggregation defines whether you compute std/mean/etc across TimeBucket.\n"
+            "Estimator is fixed to annualized std(log returns) per TimeBucket.\n"
             "Requires price series columns present in the L2 frame.\n"
             "Volatility is sensitive to bucket size (time_bucket_seconds).\n"
             "Consider longer buckets for stable estimates.\n"
-            "Output names encode source and aggregation.",
+            "For second-order volatility stats (for example daily max/min/mean of\n"
+            "1-minute volatility), chain a postprocessing reaggregate pass.\n"
+            "Output names encode source and estimator (Std).",
         },
     )
     ohlc: List[L2OHLCConfig] = Field(
@@ -815,8 +919,15 @@ class L2LastOHLCAnalytic(AnalyticSpec):
 
 def _twa(expr: pl.Expr, market_states: Optional[List[str]] = None) -> pl.Expr:
     if market_states:
-        expr = expr.filter(pl.col("MarketState").is_in(market_states))
+        mask = pl.col("MarketState").is_in(market_states)
+        num = (expr * pl.col("DT")).filter(mask).sum()
+        den = pl.col("DT").filter(mask).sum()
+        return num / den
     return (expr * pl.col("DT")).sum() / pl.col("DT").sum()
+
+
+def _duration_rule_from_seconds(seconds: float) -> str:
+    return f"{int(round(float(seconds) * 1e9))}ns"
 
 
 class L2TWLiquidityAnalytic(AnalyticSpec):
@@ -1047,12 +1158,21 @@ class L2TWVolatilityAnalytic(AnalyticSpec):
 
     @analytic_expression(
         "Volatility",
-        pattern=r"^L2Volatility(?P<source>Mid|Bid|Ask|WeightedMid)(?P<agg>First|Last|Min|Max|Mean|Sum|Median|Std)$",
+        pattern=r"^L2Volatility(?P<source>Mid|Bid|Ask|WeightedMid)Std$",
         unit="Percentage",
     )
     def _expression_volatility(self):
-        """Aggregation ({agg}) of log-returns of {source} price within TimeBucket; Std is annualized."""
+        """Annualized std(log-returns) of {source} price within TimeBucket."""
         return None
+
+    DOCS = [
+        AnalyticDoc(
+            pattern=r"^L2Volatility(?P<source>Mid|Bid|Ask|WeightedMid)Win(?P<window>\d+)s(?P<agg>Min|Max|Mean|Median|Std|Last|TWMean|TWStd)$",
+            template="Second-level {agg} of windowed annualized volatility for {source} using {window}s windows within TimeBucket.",
+            unit="Percentage",
+            description="Summarizes windowed volatility inside the bucket (volatility-of-volatility style diagnostics). TW* variants are weighted by per-window sample counts.",
+        )
+    ]
 
     def expressions(
         self, ctx: AnalyticContext, config: L2VolatilityConfig, variant: Dict[str, Any]
@@ -1263,6 +1383,7 @@ class L2AnalyticsTW(BaseTWAnalytics):
         self.config = config
 
     def tw_analytics(self, l2: pl.LazyFrame, **kwargs) -> pl.LazyFrame:
+        l2_events = l2
         l2 = l2.group_by(["ListingId", "TimeBucket"])
         ctx = AnalyticContext(
             base_df=l2,
@@ -1284,11 +1405,10 @@ class L2AnalyticsTW(BaseTWAnalytics):
                 (spread, self.config.spreads),
                 (liquidity, self.config.liquidity),
                 (imbalance, self.config.imbalances),
-                (volatility, self.config.volatility),
             ],
         )
 
-        if not expressions:
+        if not expressions and not self.config.volatility:
             default_spread_config = [
                 L2SpreadConfig(variant=["Abs", "BPS"], aggregations=["TWA"])
             ]
@@ -1337,5 +1457,139 @@ class L2AnalyticsTW(BaseTWAnalytics):
                     .alias(self.apply_prefix("BidTWA")),
                 ]
             )
+        if expressions:
+            out = l2.agg(expressions)
+        else:
+            # Preserve one row per (ListingId, TimeBucket) even when only volatility is requested.
+            out = l2.agg(pl.len().alias("__rows")).drop("__rows")
 
-        return l2.agg(expressions)
+        vol_out = self._compute_volatility_columns(l2_events, volatility, ctx)
+        if vol_out is not None:
+            out = out.join(vol_out, on=["ListingId", "TimeBucket"], how="left")
+        return out
+
+    def _compute_volatility_columns(
+        self,
+        l2_events: pl.LazyFrame,
+        volatility: L2TWVolatilityAnalytic,
+        ctx: AnalyticContext,
+    ) -> pl.LazyFrame | None:
+        if not self.config.volatility:
+            return None
+
+        result: pl.LazyFrame | None = None
+
+        for cfg in self.config.volatility:
+            for variant in cfg.expand():
+                source = variant["source"]
+                p = _price_series(source)
+                if p is None:
+                    continue
+
+                lf = l2_events
+                market_states = variant.get("market_states")
+                if market_states:
+                    lf = lf.filter(pl.col("MarketState").is_in(market_states))
+
+                subsample_seconds = variant.get("subsample_seconds")
+                if subsample_seconds:
+                    slot_expr = pl.col("EventTimestamp").dt.truncate(
+                        _duration_rule_from_seconds(float(subsample_seconds))
+                    )
+                else:
+                    slot_expr = pl.col("EventTimestamp")
+
+                sampled = (
+                    lf.with_columns(__price=p, __slot=slot_expr)
+                    .group_by(["ListingId", "TimeBucket", "__slot"])
+                    .agg(pl.col("__price").last().alias("__price"))
+                    .sort(["ListingId", "TimeBucket", "__slot"])
+                    .with_columns(
+                        __ret=(
+                            pl.col("__price")
+                            .truediv(pl.col("__price").shift(1).over(["ListingId", "TimeBucket"]))
+                            .log()
+                        )
+                    )
+                )
+
+                bucket_seconds = ctx.cache.get("time_bucket_seconds")
+                if not bucket_seconds and not subsample_seconds:
+                    logging.warning("time_bucket_seconds missing for L2 volatility.")
+                    continue
+                base_vol_expr = annualized_std_from_log_returns(
+                    pl.col("__ret"),
+                    bucket_seconds=float(bucket_seconds) if bucket_seconds else None,
+                    sample_seconds=float(subsample_seconds) if subsample_seconds else None,
+                )
+
+                row = sampled.group_by(["ListingId", "TimeBucket"]).agg(
+                    base_vol_expr.alias(
+                        apply_metric_prefix(ctx, f"L2Volatility{source}Std")
+                    )
+                )
+
+                window_seconds = variant.get("second_level_window_seconds")
+                second_aggs = list(cfg.second_level_aggregations or [])
+                if window_seconds and second_aggs:
+                    win = (
+                        sampled.with_columns(
+                            __win=pl.col("__slot").dt.truncate(
+                                _duration_rule_from_seconds(float(window_seconds))
+                            )
+                        )
+                        .group_by(["ListingId", "TimeBucket", "__win"])
+                        .agg(
+                            base_vol_expr.alias("__win_vol"),
+                            pl.col("__ret").count().alias("__win_weight"),
+                        )
+                    )
+
+                    agg_exprs: list[pl.Expr] = []
+                    for agg in second_aggs:
+                        if agg == "Min":
+                            expr = pl.col("__win_vol").min()
+                        elif agg == "Max":
+                            expr = pl.col("__win_vol").max()
+                        elif agg == "Mean":
+                            expr = pl.col("__win_vol").mean()
+                        elif agg == "Median":
+                            expr = pl.col("__win_vol").median()
+                        elif agg == "Std":
+                            expr = pl.col("__win_vol").std()
+                        elif agg == "Last":
+                            expr = pl.col("__win_vol").last()
+                        elif agg == "TWMean":
+                            expr = (
+                                (pl.col("__win_vol") * pl.col("__win_weight")).sum()
+                                / pl.col("__win_weight").sum()
+                            )
+                        elif agg == "TWStd":
+                            twmean = (
+                                (pl.col("__win_vol") * pl.col("__win_weight")).sum()
+                                / pl.col("__win_weight").sum()
+                            )
+                            expr = (
+                                (
+                                    pl.col("__win_weight")
+                                    * (pl.col("__win_vol") - twmean).pow(2)
+                                ).sum()
+                                / pl.col("__win_weight").sum()
+                            ).sqrt()
+                        else:
+                            continue
+                        alias = apply_metric_prefix(
+                            ctx,
+                            f"L2Volatility{source}Win{int(float(window_seconds))}s{agg}",
+                        )
+                        agg_exprs.append(expr.alias(alias))
+                    if agg_exprs:
+                        win_row = win.group_by(["ListingId", "TimeBucket"]).agg(agg_exprs)
+                        row = row.join(win_row, on=["ListingId", "TimeBucket"], how="left")
+
+                if result is None:
+                    result = row
+                else:
+                    result = result.join(row, on=["ListingId", "TimeBucket"], how="full")
+
+        return result
