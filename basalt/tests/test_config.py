@@ -118,6 +118,17 @@ class TestConfiguration(unittest.TestCase):
         self.assertNotIn("external_events", cfg.modules)
         self.assertFalse(cfg.dense_analytics.ENABLED)
 
+    def test_daily_timeline_removes_dense_and_events(self):
+        cfg = PassConfig(
+            name="pass1",
+            modules=["trade", "dense", "external_events"],
+            timeline_mode="daily_analytics",
+        )
+        self.assertEqual(cfg.timeline_mode, PassTimelineMode.DAILY_ANALYTICS)
+        self.assertNotIn("dense", cfg.modules)
+        self.assertNotIn("external_events", cfg.modules)
+        self.assertFalse(cfg.dense_analytics.ENABLED)
+
     def test_legacy_events_keys_are_migrated(self):
         cfg = PassConfig(
             name="pass1",

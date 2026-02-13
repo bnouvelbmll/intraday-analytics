@@ -35,6 +35,7 @@ from basalt.visualization.data import (
     estimate_listing_days,
 )
 from basalt.visualization.modules import discover_plot_modules
+from basalt.visualization.scales import choose_scale, transform_series
 from basalt.visualization.scoring import score_numeric_columns, top_interesting_columns
 
 
@@ -84,6 +85,7 @@ def _initial_panel(df_cols: list[str], time_col: str | None) -> dict:
             "columns": [target],
             "plot_type": "historical",
             "as_filter": False,
+            "scales": ["auto"],
         }
     target = numeric[0] if numeric else (df_cols[0] if df_cols else "")
     return {
@@ -92,6 +94,7 @@ def _initial_panel(df_cols: list[str], time_col: str | None) -> dict:
         "columns": [target] if target else [],
         "plot_type": "distribution",
         "as_filter": False,
+        "scales": ["auto"],
     }
 
 
@@ -103,12 +106,43 @@ def _plot_type_options(dims: int) -> list[str]:
     return ["scatter3d"]
 
 
+def _apply_scaled_columns(
+    pdf: pd.DataFrame,
+    columns: list[str],
+    scale_options: list[str],
+) -> tuple[pd.DataFrame, list[str], dict[str, str]]:
+    out = pdf.copy()
+    rendered: list[str] = []
+    labels: dict[str, str] = {}
+    for idx, col in enumerate(columns):
+        if col not in out.columns:
+            continue
+        scale_opt = str(scale_options[idx] if idx < len(scale_options) else "auto")
+        numeric = pd.to_numeric(out[col], errors="coerce")
+        if numeric.notna().sum() == 0:
+            rendered.append(col)
+            labels[col] = "linear"
+            continue
+        if scale_opt == "auto":
+            decision = choose_scale(numeric)
+            scale_name = decision.selected
+        else:
+            scale_name = scale_opt
+        transformed = transform_series(numeric, scale_name) if scale_name != "linear" else numeric
+        out_col = col if scale_name == "linear" else f"{col} [{scale_name}]"
+        out[out_col] = transformed
+        rendered.append(out_col)
+        labels[col] = scale_name
+    return out, rendered, labels
+
+
 def _render_panel_plot(
     df: pd.DataFrame,
     *,
     panel_id: int,
     dims: int,
     columns: list[str],
+    scale_options: list[str],
     plot_type: str,
     time_col: str | None,
 ) -> None:
@@ -116,46 +150,54 @@ def _render_panel_plot(
     if not columns:
         st.info("Select dimensions/columns for this panel.")
         return
+    plotted_df, cols, label_map = _apply_scaled_columns(df, columns, scale_options)
+    if len(cols) < dims:
+        st.info("Selected dimensions are not available.")
+        return
+    if label_map:
+        st.caption(
+            "Scales: " + ", ".join([f"{k}={v}" for k, v in label_map.items()])
+        )
     if dims == 1:
-        c1 = columns[0]
-        if c1 not in df.columns:
+        c1 = cols[0]
+        if c1 not in plotted_df.columns:
             st.info(f"Column `{c1}` not available.")
             return
         if plot_type == "historical":
-            x = time_col if time_col in df.columns else None
+            x = time_col if time_col in plotted_df.columns else None
             if x is None:
                 st.info("Historical plot needs a time column in data.")
                 return
-            st.plotly_chart(px.line(df, x=x, y=c1, title=title), use_container_width=True)
+            st.plotly_chart(px.line(plotted_df, x=x, y=c1, title=title), use_container_width=True)
             return
-        st.plotly_chart(px.histogram(df, x=c1, nbins=80, title=title), use_container_width=True)
+        st.plotly_chart(px.histogram(plotted_df, x=c1, nbins=80, title=title), use_container_width=True)
         return
 
     if dims == 2:
-        c1, c2 = columns[:2]
-        if c1 not in df.columns or c2 not in df.columns:
+        c1, c2 = cols[:2]
+        if c1 not in plotted_df.columns or c2 not in plotted_df.columns:
             st.info("Selected 2D columns are not available.")
             return
         if plot_type == "2d-elevation map":
             st.plotly_chart(
-                px.density_heatmap(df, x=c1, y=c2, nbinsx=60, nbinsy=60, title=title),
+                px.density_heatmap(plotted_df, x=c1, y=c2, nbinsx=60, nbinsy=60, title=title),
                 use_container_width=True,
             )
             return
         if plot_type == "2d-distribution view":
             st.plotly_chart(
-                px.density_contour(df, x=c1, y=c2, title=title),
+                px.density_contour(plotted_df, x=c1, y=c2, title=title),
                 use_container_width=True,
             )
             return
-        st.plotly_chart(px.scatter(df, x=c1, y=c2, title=title), use_container_width=True)
+        st.plotly_chart(px.scatter(plotted_df, x=c1, y=c2, title=title), use_container_width=True)
         return
 
-    c1, c2, c3 = columns[:3]
-    if c1 not in df.columns or c2 not in df.columns or c3 not in df.columns:
+    c1, c2, c3 = cols[:3]
+    if c1 not in plotted_df.columns or c2 not in plotted_df.columns or c3 not in plotted_df.columns:
         st.info("Selected 3D columns are not available.")
         return
-    st.plotly_chart(px.scatter_3d(df, x=c1, y=c2, z=c3, title=title), use_container_width=True)
+    st.plotly_chart(px.scatter_3d(plotted_df, x=c1, y=c2, z=c3, title=title), use_container_width=True)
 
 
 def main() -> None:
@@ -435,6 +477,7 @@ def main() -> None:
                     "columns": [dims_candidates[0]] if dims_candidates else [],
                     "plot_type": "distribution",
                     "as_filter": False,
+                    "scales": ["auto"],
                 }
             )
             st.session_state["_viz_panel_seq"] = nxt + 1
@@ -484,6 +527,7 @@ def main() -> None:
                     remove_ids.append(pid)
 
             selected_cols: list[str] = []
+            selected_scales: list[str] = []
             for cidx in range(dims):
                 default_cols = panel.get("columns", [])
                 default_col = default_cols[cidx] if cidx < len(default_cols) else None
@@ -494,11 +538,25 @@ def main() -> None:
                     key=f"panel_col_{pid}_{cidx}",
                 )
                 selected_cols.append(col_name)
+                default_scales = panel.get("scales", [])
+                default_scale = (
+                    default_scales[cidx] if cidx < len(default_scales) else "auto"
+                )
+                scale_name = st.selectbox(
+                    f"Scale {cidx + 1} #{pid}",
+                    ["auto", "linear", "sqrt", "sgnlog", "percentile"],
+                    index=["auto", "linear", "sqrt", "sgnlog", "percentile"].index(default_scale)
+                    if default_scale in {"auto", "linear", "sqrt", "sgnlog", "percentile"}
+                    else 0,
+                    key=f"panel_scale_{pid}_{cidx}",
+                )
+                selected_scales.append(scale_name)
 
             panel["dims"] = dims
             panel["plot_type"] = plot_type
             panel["as_filter"] = as_filter
             panel["columns"] = selected_cols
+            panel["scales"] = selected_scales
             panels[i] = panel
 
             if as_filter and plot_type in {"distribution", "2d-distribution view"}:
@@ -561,13 +619,23 @@ def main() -> None:
         dims = int(panel.get("dims", 1))
         cols = list(panel.get("columns", []))
         ptype = str(panel.get("plot_type", "distribution"))
+        scales = list(panel.get("scales", ["auto"] * dims))
         view_df = apply_constraints(filtered, constraints, exclude_columns=set(cols))
+        sampled = view_df
+        max_rows = 60_000
+        if view_df.height > max_rows:
+            sampled = view_df.sample(n=max_rows, seed=42)
         with st.expander(f"Rendered panel {pid}", expanded=True):
+            if sampled.height < view_df.height:
+                st.caption(
+                    f"Plot sampled to {sampled.height:,} rows from {view_df.height:,}."
+                )
             _render_panel_plot(
-                view_df.to_pandas(),
+                sampled.to_pandas(),
                 panel_id=pid,
                 dims=dims,
                 columns=cols,
+                scale_options=scales,
                 plot_type=ptype,
                 time_col=used_time_col,
             )

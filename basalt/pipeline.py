@@ -2,6 +2,7 @@ import polars as pl
 from typing import List, Dict, Optional, Callable, Any
 from abc import ABC, abstractmethod
 import logging
+import pandas as pd
 
 from .configuration import PassConfig
 from .utils import dc, ffill_with_shifts, assert_unique_lazy
@@ -52,6 +53,39 @@ def _to_df(value: Any, config) -> pl.DataFrame | None:
         except Exception:
             return None
     return None
+
+
+def _is_daily_analytics_mode(pass_config: PassConfig) -> bool:
+    mode = getattr(pass_config, "timeline_mode", None)
+    if hasattr(mode, "value"):
+        mode = mode.value
+    return mode == "daily_analytics"
+
+
+def _daily_timebucket_for_batch(batch_date: Any) -> pd.Timestamp | None:
+    if batch_date in (None, ""):
+        return None
+    try:
+        d = pd.Timestamp(batch_date)
+    except Exception:
+        return None
+    return d.normalize() + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+
+
+def _apply_daily_timebucket(value: Any, batch_date: Any) -> Any:
+    eod = _daily_timebucket_for_batch(batch_date)
+    if eod is None:
+        return value
+    if isinstance(value, pl.DataFrame):
+        if "TimeBucket" not in value.columns:
+            return value
+        return value.with_columns(pl.lit(eod).cast(pl.Datetime("ns")).alias("TimeBucket"))
+    if isinstance(value, pl.LazyFrame):
+        names = value.collect_schema().names()
+        if "TimeBucket" not in names:
+            return value
+        return value.with_columns(pl.lit(eod).cast(pl.Datetime("ns")).alias("TimeBucket"))
+    return value
 
 
 def _reference_input_df(
@@ -194,6 +228,17 @@ class AnalyticsPipeline:
             raise ValueError(
                 f"Pass '{self.pass_config.name}' has no modules configured."
             )
+        batch_date = self.context.get("__batch_date__")
+        daily_mode = _is_daily_analytics_mode(self.pass_config)
+        prepared_tables = (
+            {
+                key: _apply_daily_timebucket(value, batch_date)
+                for key, value in tables_for_sym.items()
+            }
+            if daily_mode
+            else dict(tables_for_sym)
+        )
+
         base: pl.LazyFrame | None = None
         prev_specific_cols = {}
 
@@ -219,18 +264,20 @@ class AnalyticsPipeline:
             for req in module.REQUIRES:
                 source = module_inputs.get(req, req)
                 data = None
-                if source in tables_for_sym:
-                    data = tables_for_sym[source]
+                if source in prepared_tables:
+                    data = prepared_tables[source]
                 elif source in self.context:
                     data = self.context[source]
+                if daily_mode:
+                    data = _apply_daily_timebucket(data, batch_date)
                 if data is not None:
                     if hasattr(data, "lazy"):
                         setattr(module, req, data.lazy())
                     else:
                         setattr(module, req, data)
 
-            if "marketstate" in tables_for_sym and "marketstate" not in module.REQUIRES:
-                data = tables_for_sym["marketstate"]
+            if "marketstate" in prepared_tables and "marketstate" not in module.REQUIRES:
+                data = prepared_tables["marketstate"]
                 setattr(module, "marketstate", data.lazy() if hasattr(data, "lazy") else data)
 
             # Ensure all required tables are present
@@ -279,7 +326,7 @@ class AnalyticsPipeline:
         reference_df = _reference_input_df(
             self.pass_config,
             self.modules,
-            tables_for_sym,
+            prepared_tables,
             self.context,
             self.config,
         )

@@ -627,6 +627,7 @@ class ProcessInterval(Process):
                     symbols=symbols,
                     config=self.config,
                 )
+                context["__batch_date__"] = current_date.date().isoformat()
                 nanoseconds = int(self.pass_config.time_bucket_seconds * 1e9)
 
                 if MODE == "naive":

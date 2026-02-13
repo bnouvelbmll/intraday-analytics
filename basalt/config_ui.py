@@ -1333,6 +1333,7 @@ def _timeline_mode_label(mode: str) -> str:
     labels = {
         "sparse_original": "sparse original",
         "sparse_digitised": "sparse digitised",
+        "daily_analytics": "daily analytics",
         "dense": "dense",
         "event": "event",
     }
@@ -1612,6 +1613,7 @@ class PassEditor(Screen):
                 [
                     ("Sparse original (TimeBucket=timestamp)", "sparse_original"),
                     ("Sparse digitised (TimeBucket=ceil timestamp)", "sparse_digitised"),
+                    ("Daily analytics (TimeBucket=batch-date end)", "daily_analytics"),
                     ("Dense", "dense"),
                     ("External events", "event"),
                 ],
