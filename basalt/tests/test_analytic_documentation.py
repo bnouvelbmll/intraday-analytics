@@ -50,6 +50,17 @@ def test_explorer_docs_present_for_alpha101_and_event_modules():
         ("correlation", "MetricX"),
         ("correlation", "MetricY"),
         ("correlation", "Corr"),
+        ("hurst", "Metric"),
+        ("hurst", "HurstExponent"),
+        ("predictor", "Target"),
+        ("predictor", "Predictor"),
+        ("predictor", "BestLag"),
+        ("predictor", "BestCorr"),
+        ("predictor", "Confidence"),
+        ("predictor", "AnticipationSteps"),
+        ("predictor", "AnticipationSeconds"),
+        ("predictor", "TStatistic"),
+        ("predictor", "PValue"),
     ]
     for module, column in checks:
         docs = _apply_docs(module, column)

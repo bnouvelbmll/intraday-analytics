@@ -523,6 +523,34 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
     except Exception as e:
         output_columns["correlation_error"] = [str(e)]
 
+    # --- Hurst ---
+    try:
+        output_columns["hurst"] = [
+            "ListingId",
+            "TimeBucket",
+            "Metric",
+            "HurstExponent",
+        ]
+    except Exception as e:
+        output_columns["hurst_error"] = [str(e)]
+
+    # --- Predictor ---
+    try:
+        output_columns["predictor"] = [
+            "ListingId",
+            "Target",
+            "Predictor",
+            "BestLag",
+            "BestCorr",
+            "Confidence",
+            "AnticipationSteps",
+            "AnticipationSeconds",
+            "TStatistic",
+            "PValue",
+        ]
+    except Exception as e:
+        output_columns["predictor_error"] = [str(e)]
+
     return output_columns
 
 

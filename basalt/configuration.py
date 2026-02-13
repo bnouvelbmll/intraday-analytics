@@ -12,6 +12,8 @@ from .analytics.cbbo import CBBOAnalyticsConfig
 from .time.external_events import ExternalEventsAnalyticsConfig
 from .analytics.observed_events import ObservedEventsAnalyticsConfig
 from .analytics.correlation import CorrelationAnalyticsConfig
+from .analytics.hurst import HurstAnalyticsConfig
+from .analytics.predictor import PredictorAnalyticsConfig
 from .plugins import get_plugin_module_config_models
 
 
@@ -340,6 +342,14 @@ class PassConfig(BaseModel):
     correlation_analytics: CorrelationAnalyticsConfig = Field(
         default_factory=CorrelationAnalyticsConfig,
         description="Configuration for correlation analytics.",
+    )
+    hurst_analytics: HurstAnalyticsConfig = Field(
+        default_factory=HurstAnalyticsConfig,
+        description="Configuration for Hurst exponent analytics.",
+    )
+    predictor_analytics: PredictorAnalyticsConfig = Field(
+        default_factory=PredictorAnalyticsConfig,
+        description="Configuration for predictor analytics (lagged correlations).",
     )
     quality_checks: QualityCheckConfig = Field(
         default_factory=QualityCheckConfig,

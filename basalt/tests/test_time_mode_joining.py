@@ -1,6 +1,7 @@
 import datetime as dt
 
 import polars as pl
+import pytest
 
 from basalt.analytics_base import BaseAnalytics
 
@@ -15,6 +16,9 @@ class _DummyAnalytics(BaseAnalytics):
         return self.df
 
 
+@pytest.mark.filterwarnings(
+    "ignore:Sortedness of columns cannot be checked when 'by' groups provided"
+)
 def test_join_asof_aligns_to_previous_timebucket():
     base = pl.DataFrame(
         {
@@ -40,4 +44,3 @@ def test_join_asof_aligns_to_previous_timebucket():
 
     joined = module.join(base, other_specific_cols={}, use_asof=True).collect()
     assert joined["metric"].to_list() == [10.0, 10.0, 30.0]
-

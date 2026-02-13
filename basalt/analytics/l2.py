@@ -1588,6 +1588,11 @@ class L2AnalyticsTW(BaseTWAnalytics):
                 if result is None:
                     result = row
                 else:
-                    result = result.join(row, on=["ListingId", "TimeBucket"], how="full")
+                    result = result.join(
+                        row,
+                        on=["ListingId", "TimeBucket"],
+                        how="full",
+                        coalesce=True,
+                    )
 
         return result

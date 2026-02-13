@@ -628,7 +628,7 @@ def create_date_batches(
         align_freq = "M"
         offset = pd.DateOffset(months=1)
     elif period_freq == "A":
-        align_freq = "A"
+        align_freq = "Y"
         offset = pd.DateOffset(years=1)
     else:
         raise ValueError(
