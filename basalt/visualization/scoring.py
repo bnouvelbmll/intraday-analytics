@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import log
-from typing import Any
 
 import numpy as np
 import polars as pl
+import pandas as pd
+
+try:
+    from sklearn.feature_selection import mutual_info_regression as _mutual_info_regression
+except Exception:
+    _mutual_info_regression = None
 
 
 @dataclass(frozen=True)
@@ -15,6 +20,12 @@ class SeriesScore:
     variance_score: float
     non_null_ratio: float
     total_score: float
+
+
+@dataclass(frozen=True)
+class FeatureAssociationScore:
+    feature: str
+    score: float
 
 
 def _normalized_entropy(values: np.ndarray) -> float:
@@ -72,3 +83,72 @@ def score_numeric_columns(df: pl.DataFrame) -> list[SeriesScore]:
 def top_interesting_columns(df: pl.DataFrame, limit: int = 12) -> list[str]:
     return [row.column for row in score_numeric_columns(df)[: int(limit)]]
 
+
+def suggest_feature_target_associations(
+    df: pl.DataFrame,
+    *,
+    target: str,
+    min_score: float = 0.6,
+    max_score: float = 0.8,
+    max_suggestions: int = 5,
+    sample_rows: int = 20_000,
+    random_seed: int = 0,
+) -> tuple[list[FeatureAssociationScore], str | None]:
+    """
+    Suggest feature/target associations based on normalized mutual information.
+    Returns (scores, warning_message).
+    """
+    if _mutual_info_regression is None:
+        return [], "scikit-learn is not installed; mutual information suggestions are unavailable."
+    if target not in df.columns:
+        return [], f"Target column `{target}` not found."
+    if min_score > max_score:
+        min_score, max_score = max_score, min_score
+
+    numeric_cols = [
+        col
+        for col, dtype in zip(df.columns, df.dtypes)
+        if dtype.is_numeric() and col != target
+    ]
+    if not numeric_cols:
+        return [], "No numeric feature columns available."
+
+    cols = [target] + numeric_cols
+    prepared = (
+        df.select([pl.col(c).cast(pl.Float64).alias(c) for c in cols])
+        .drop_nulls()
+    )
+    if prepared.height < 10:
+        return [], "Not enough non-null samples to estimate feature-target associations."
+    if prepared.height > int(sample_rows):
+        prepared = prepared.sample(n=int(sample_rows), seed=int(random_seed))
+
+    pdf = prepared.to_pandas()
+    y = pd.to_numeric(pdf[target], errors="coerce").to_numpy()
+    x_pdf = pdf[numeric_cols].apply(pd.to_numeric, errors="coerce")
+    valid = np.isfinite(y) & np.isfinite(x_pdf.to_numpy()).all(axis=1)
+    if valid.sum() < 10:
+        return [], "Not enough finite samples to estimate feature-target associations."
+    y = y[valid]
+    x_pdf = x_pdf.loc[valid]
+
+    scores = np.asarray(
+        _mutual_info_regression(x_pdf, y, random_state=int(random_seed)),
+        dtype=float,
+    )
+    if scores.size == 0:
+        return [], None
+    max_val = float(np.nanmax(scores)) if np.isfinite(scores).any() else 0.0
+    if max_val <= 0:
+        return [], "Mutual information scores are zero for all candidate features."
+    normalized = scores / max_val
+
+    out: list[FeatureAssociationScore] = []
+    for feature, score in zip(numeric_cols, normalized):
+        val = float(score)
+        if not np.isfinite(val):
+            continue
+        if float(min_score) <= val <= float(max_score):
+            out.append(FeatureAssociationScore(feature=feature, score=val))
+    out.sort(key=lambda x: x.score, reverse=True)
+    return out[: int(max_suggestions)], None

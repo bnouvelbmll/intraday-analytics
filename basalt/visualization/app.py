@@ -36,7 +36,11 @@ from basalt.visualization.data import (
 )
 from basalt.visualization.modules import discover_plot_modules
 from basalt.visualization.scales import choose_scale, transform_series
-from basalt.visualization.scoring import score_numeric_columns, top_interesting_columns
+from basalt.visualization.scoring import (
+    score_numeric_columns,
+    suggest_feature_target_associations,
+    top_interesting_columns,
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -656,6 +660,67 @@ def main() -> None:
             use_container_width=True,
         )
     st.dataframe(_format_score_table(scored[:30]), use_container_width=True, hide_index=True)
+
+    st.subheader("Feature-Target Association")
+    numeric_cols = [c for c, dt in zip(filtered.columns, filtered.dtypes) if dt.is_numeric()]
+    if len(numeric_cols) < 2:
+        st.info("Need at least 2 numeric columns (target + feature) for association suggestions.")
+    else:
+        assoc_cols = st.columns([2, 2, 1, 1])
+        with assoc_cols[0]:
+            target_col = st.selectbox("Target", options=numeric_cols, index=0)
+        with assoc_cols[1]:
+            score_range = st.slider(
+                "Mutual information score range",
+                min_value=0.0,
+                max_value=1.0,
+                value=(0.6, 0.8),
+                step=0.01,
+            )
+        with assoc_cols[2]:
+            max_scatter = st.number_input("Max plots", min_value=1, max_value=20, value=5, step=1)
+        with assoc_cols[3]:
+            sample_cap = st.number_input(
+                "Sample cap",
+                min_value=1_000,
+                max_value=200_000,
+                value=20_000,
+                step=1_000,
+            )
+
+        suggested, warn = suggest_feature_target_associations(
+            filtered,
+            target=target_col,
+            min_score=float(score_range[0]),
+            max_score=float(score_range[1]),
+            max_suggestions=int(max_scatter),
+            sample_rows=int(sample_cap),
+        )
+        if warn:
+            st.info(warn)
+        if suggested:
+            table = pd.DataFrame(
+                [{"feature": s.feature, "score": round(float(s.score), 4)} for s in suggested]
+            )
+            st.dataframe(table, use_container_width=True, hide_index=True)
+            for row in suggested:
+                pair = (
+                    filtered.select([row.feature, target_col])
+                    .drop_nulls()
+                    .sample(n=min(int(sample_cap), filtered.height), seed=42)
+                    .to_pandas()
+                )
+                st.plotly_chart(
+                    px.scatter(
+                        pair,
+                        x=row.feature,
+                        y=target_col,
+                        title=f"{row.feature} vs {target_col} (MI={row.score:.3f})",
+                    ),
+                    use_container_width=True,
+                )
+        elif not warn:
+            st.info("No features found in the selected mutual-information range.")
 
     st.subheader("Modular Finance Plots")
     modules = discover_plot_modules()
