@@ -14,7 +14,7 @@ import fire
 import yaml
 
 from basalt.configuration import AnalyticsConfig, BMLLJobConfig
-from basalt.executors.bmll_jobs import submit_instance_job
+from basalt.executors.bmll import submit_instance_job
 from basalt.orchestrator import run_multiday_pipeline
 
 

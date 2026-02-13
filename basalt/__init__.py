@@ -10,7 +10,7 @@ from .configuration import AnalyticsConfig, PassConfig
 from .analytics_base import BaseAnalytics, BaseTWAnalytics
 from .orchestrator import run_metrics_pipeline, run_multiday_pipeline
 from .cli import run_cli
-from .executors.bmll_jobs import bmll_job
+from .executors.bmll import bmll_job
 from .pipeline import create_pipeline
 from .utils import cache_universe
 from .connections import (
