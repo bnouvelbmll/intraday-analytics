@@ -19,6 +19,7 @@ from basalt.utils import (
 )
 
 DEFAULT_GROUPED_BUFFER_ROWS = 250_000
+MAX_BMLL_OBJECT_IDS_PER_QUERY = 2000
 
 
 class SymbolBatcherStreaming:
@@ -246,6 +247,24 @@ class SymbolSizeEstimator:
         from .api_stats import api_call
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
+        def _sanitize_listing_ids(values) -> list[int]:
+            cleaned: list[int] = []
+            seen: set[int] = set()
+            for raw in values:
+                if pd.isna(raw):
+                    continue
+                try:
+                    lid = int(raw)
+                except Exception:
+                    continue
+                if lid <= 0:
+                    continue
+                if lid in seen:
+                    continue
+                seen.add(lid)
+                cleaned.append(lid)
+            return cleaned
+
         try:
             universe = self.get_universe(self.date)
         except Exception as e:
@@ -303,20 +322,45 @@ class SymbolSizeEstimator:
 
         def query_mic(mic, group):
             try:
-                logging.debug(f"🔍 Querying size estimates for mic {mic}")
-                res = api_call(
-                    "bmll.time_series.query",
-                    lambda: bmll.time_series.query(
-                        object_ids=group["ListingId"].tolist(),
-                        metric=["TradeCount"],
-                        start_date=end_date_m2w,
-                        end_date=self.date,
-                    ),
-                    extra={"mic": mic},
-                )
-                res = res.groupby("ObjectId")["TradeCount|Lit"].median().reset_index()
-                if not isinstance(res, pd.DataFrame):
+                listing_ids = _sanitize_listing_ids(group["ListingId"])
+                if not listing_ids:
+                    logging.warning(
+                        f"No valid listing ids for mic {mic} when loading size estimates."
+                    )
                     return None
+                if len(listing_ids) < len(group):
+                    logging.warning(
+                        f"Filtered invalid/duplicate listing ids for mic {mic}: "
+                        f"{len(group)} -> {len(listing_ids)}."
+                    )
+
+                logging.debug(f"🔍 Querying size estimates for mic {mic}")
+                pages = [
+                    listing_ids[i : i + MAX_BMLL_OBJECT_IDS_PER_QUERY]
+                    for i in range(0, len(listing_ids), MAX_BMLL_OBJECT_IDS_PER_QUERY)
+                ]
+                page_results = []
+                for page in pages:
+                    res_page = api_call(
+                        "bmll.time_series.query",
+                        lambda page_ids=page: bmll.time_series.query(
+                            object_ids=page_ids,
+                            metric=["TradeCount"],
+                            start_date=end_date_m2w,
+                            end_date=self.date,
+                        ),
+                        extra={
+                            "mic": mic,
+                            "object_ids_page_size": len(page),
+                            "object_ids_total": len(listing_ids),
+                        },
+                    )
+                    if isinstance(res_page, pd.DataFrame) and not res_page.empty:
+                        page_results.append(res_page)
+                if not page_results:
+                    return None
+                res = pd.concat(page_results, ignore_index=True)
+                res = res.groupby("ObjectId")["TradeCount|Lit"].median().reset_index()
                 return res
             except Exception as e:
                 logging.warning(
