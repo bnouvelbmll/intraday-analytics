@@ -167,6 +167,10 @@ Install all modular dists locally in one command:
 BASALT_DIST=all pip install -e .
 ```
 
+Notes:
+- `BASALT_DIST=all` installs a single aggregate editable package (`bmll-basalt-all`) so plugin discovery works in source-tree environments.
+- For wheel/sdist builds, `BASALT_DIST=all` still rotates and builds each publishable dist separately.
+
 Build commands (`bdist_wheel`, `bdist`, `sdist`) automatically rotate through:
 
 - `core` -> `bmll-basalt`

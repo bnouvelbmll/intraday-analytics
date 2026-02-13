@@ -64,7 +64,7 @@ if (
 
 
 dist = os.environ.get("BASALT_DIST", "core")
-if dist == "all":
+if dist == "all" and any(cmd in sys.argv for cmd in ("bdist_wheel", "bdist", "sdist")):
     _build_all_dists()
     raise SystemExit(0)
 
@@ -319,6 +319,49 @@ elif dist == "mcp":
         )
     )
     install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+elif dist == "all":
+    # Aggregate editable/install mode: a single distribution containing all
+    # local subpackages and all plugin/cli entry points. This avoids pip editable
+    # failures that expect a single .egg-info directory.
+    name = "bmll-basalt-all"
+    extras_require = {}
+    entry_points = {
+        "console_scripts": [
+            "basalt=basalt.basalt:main",
+        ],
+        "basalt.plugins": [
+            "dagster=basalt.dagster:get_basalt_plugin",
+            "preprocessors=basalt.preprocessors:get_basalt_plugin",
+            "characteristics=basalt.analytics.characteristics:get_basalt_plugin",
+            "alpha101=basalt.analytics.alpha101:get_basalt_plugin",
+            "talib=basalt.analytics.talib:get_basalt_plugin",
+            "mcp=basalt.mcp:get_basalt_plugin",
+            "optimize=basalt.optimize:get_basalt_plugin",
+            "objective_functions=basalt.objective_functions:get_basalt_plugin",
+            "models=basalt.models:get_basalt_plugin",
+            "aws_ec2=basalt.executors.aws_ec2:get_basalt_plugin",
+            "kubernetes=basalt.executors.kubernetes:get_basalt_plugin",
+            "visualization=basalt.visualization:get_basalt_plugin",
+        ],
+        "basalt.cli": [
+            "dagster=basalt.dagster.cli_ext:get_cli_extension",
+            "mcp=basalt.mcp.cli_ext:get_cli_extension",
+            "optimize=basalt.optimize.cli_ext:get_cli_extension",
+            "ec2=basalt.executors.aws_ec2:get_cli_extension",
+            "k8s=basalt.executors.kubernetes:get_cli_extension",
+            "viz=basalt.visualization.cli_ext:get_cli_extension",
+        ],
+    }
+    packages = find_packages(
+        exclude=(
+            "intraday_analytics*",
+            "basalt.tests*",
+            "basalt.analytics.tests*",
+            "basalt.dagster.tests*",
+            "basalt.preprocessors.tests*",
+        )
+    )
+    install_requires = core_requirements
 else:
     name = f"bmll-basalt-{dist}"
     extras_require = {}
