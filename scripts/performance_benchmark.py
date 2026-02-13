@@ -101,7 +101,7 @@ def _run_bmll_case(
     delete_after: bool,
     extra_args: dict[str, Any],
 ) -> tuple[Any, str | None, str | None]:
-    from basalt.bmll_jobs import submit_instance_job
+    from basalt.executors.bmll.backend import submit_instance_job
     from basalt.cli import (
         _format_cli_args,
         _load_bmll_job_config,
@@ -290,6 +290,7 @@ def _run_case(
             raise ValueError(f"Unsupported executor: {executor}")
     except Exception as exc:
         record["status"] = "error"
+        record["error_type"] = type(exc).__name__
         record["error"] = str(exc)
         record["success"] = False
     finally:
@@ -436,6 +437,8 @@ def main() -> int:
                 f"[{executor}] size={size} repeat={i} "
                 f"status={record['status']} duration_s={record['duration_s']}"
             )
+            if record.get("error"):
+                print(f"  error: {record['error_type']}: {record['error']}")
 
     summary = _summarize(records)
 
