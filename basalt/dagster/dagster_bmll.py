@@ -11,7 +11,7 @@ from dagster._core.launcher import RunLauncher
 from dagster._core.storage.pipeline_run import DagsterRunStatus
 from dagster._serdes import serialize_value
 
-from basalt.bmll_jobs import submit_instance_job
+from basalt.executors.bmll_jobs import submit_instance_job
 from basalt.configuration import BMLLJobConfig
 
 
