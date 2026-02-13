@@ -362,7 +362,7 @@ def submit_instance_job(
 
     if job and hasattr(job, "id"):
         desired_log_path = (
-            f"intraday-metrics/_bmll_jobs/{job.id}/logs"
+            f"basalt/_bmll_jobs/{job.id}/logs"
             if config.log_path == "job_run_logs"
             else config.log_path
         )
