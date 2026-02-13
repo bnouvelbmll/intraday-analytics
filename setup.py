@@ -30,8 +30,8 @@ core_requirements = [
 VERSION = "0.1.0"
 
 
-def _build_all_dists() -> None:
-    dist_names = [
+def _all_dist_names() -> list[str]:
+    return [
         "core",
         "dagster",
         "preprocessors",
@@ -46,7 +46,10 @@ def _build_all_dists() -> None:
         "aws_ec2",
         "kubernetes",
     ]
-    for name in dist_names:
+
+
+def _build_all_dists() -> None:
+    for name in _all_dist_names():
         env = os.environ.copy()
         env["BASALT_DIST"] = name
         subprocess.check_call([sys.executable, __file__, *sys.argv[1:]], env=env)
@@ -61,6 +64,10 @@ if (
 
 
 dist = os.environ.get("BASALT_DIST", "core")
+if dist == "all":
+    _build_all_dists()
+    raise SystemExit(0)
+
 shutil.rmtree("build", ignore_errors=True)
 subpackage_requirements = {
     "dagster": ["dagster", "dagster-webserver"],

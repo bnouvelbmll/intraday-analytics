@@ -161,6 +161,12 @@ python3 scripts/validate_schema_name_mapping.py --schema-dir /path/to/schema-cat
 
 The default build (`BASALT_DIST=core`) produces `bmll-basalt`.
 
+Install all modular dists locally in one command:
+
+```bash
+BASALT_DIST=all pip install -e .
+```
+
 Build commands (`bdist_wheel`, `bdist`, `sdist`) automatically rotate through:
 
 - `core` -> `bmll-basalt`
