@@ -392,6 +392,21 @@ them per-run using Dagster run tags:
 
 Disable by removing the launcher configuration.
 
+### User vs Organisation Area
+
+By default, BMLL jobs use `/home/bmll/user` for the jobs directory and project
+root. If your mounts only populate the organisation area, set:
+
+```yaml
+BMLL_JOBS:
+  jobs_area: organisation
+```
+
+This switches auto-resolved `jobs_dir` and `project_root` to
+`/home/bmll/organisation/<project>`. When installing the scheduler, make sure
+the `--pipeline` or `--workspace` path matches the selected area; the CLI will
+warn if they differ.
+
 ## Enable / Disable Dagster Integration
 
 Enable:

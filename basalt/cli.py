@@ -318,6 +318,24 @@ def dagster_scheduler_install(
     """
     job_config = _load_bmll_job_config(pipeline or workspace)
     scheduler_name = _default_basalt_scheduler_name(pipeline, workspace, name)
+    jobs_area = getattr(job_config, "jobs_area", "user")
+    target_root = "/home/bmll/organisation" if jobs_area == "organisation" else "/home/bmll/user"
+    for path in (pipeline, workspace):
+        if path and isinstance(path, str):
+            if path.startswith("/home/bmll/user") and jobs_area == "organisation":
+                logging.warning(
+                    "BMLL_JOBS.jobs_area=organisation but scheduler path is under /home/bmll/user: %s. "
+                    "Use a path under %s to match the mounted area.",
+                    path,
+                    target_root,
+                )
+            elif path.startswith("/home/bmll/organisation") and jobs_area == "user":
+                logging.warning(
+                    "BMLL_JOBS.jobs_area=user but scheduler path is under /home/bmll/organisation: %s. "
+                    "Use a path under %s to match the mounted area.",
+                    path,
+                    target_root,
+                )
     dow = getattr(job_config, "scheduler_days", "MON-SAT") or "MON-SAT"
     if interval_hours == 24:
         cron = f"0 0 ? * {dow} *"
