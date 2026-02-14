@@ -21,6 +21,8 @@ class DatasetOption:
     path: str
     is_default: bool
     kind: str = "output"
+    is_materialized: bool = True
+    is_used: bool = True
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,17 @@ def _render_path_template(
     return path.replace("//", "/")
 
 
+def _side_output_key(pass_name: str, pass_cfg: dict[str, Any], side_name: str) -> str:
+    side_cfg = pass_cfg.get("side_outputs", {}).get(side_name) or {}
+    context_key = side_cfg.get("context_key")
+    if context_key:
+        return str(context_key)
+    namespace = pass_cfg.get("side_output_namespace")
+    if namespace:
+        return f"{namespace}:{side_name}"
+    return f"{pass_name}:{side_name}"
+
+
 def infer_dataset_options(config: dict[str, Any]) -> list[DatasetOption]:
     passes = list(config.get("PASSES") or [])
     if not passes:
@@ -125,6 +138,11 @@ def infer_dataset_options(config: dict[str, Any]) -> list[DatasetOption]:
     base_target = dict(config.get("OUTPUT_TARGET") or {})
     datasetname_root = str(config.get("DATASETNAME") or "sample2d")
     out: list[DatasetOption] = []
+    side_usage = _side_output_usage(config)
+    side_name_counts: dict[str, int] = {}
+    for pass_cfg in passes:
+        for side_name in (pass_cfg.get("side_outputs") or {}).keys():
+            side_name_counts[side_name] = side_name_counts.get(side_name, 0) + 1
     for idx, pass_cfg in enumerate(passes):
         pass_name = str(pass_cfg.get("name") or f"pass_{idx + 1}")
         target = dict(pass_cfg.get("output") or base_target)
@@ -141,9 +159,56 @@ def infer_dataset_options(config: dict[str, Any]) -> list[DatasetOption]:
                 pass_name=pass_name,
                 path=path,
                 is_default=(idx == len(passes) - 1),
+                kind="output",
+                is_used=True,
             )
         )
+        side_outputs = pass_cfg.get("side_outputs") or {}
+        for side_name, side_cfg in side_outputs.items():
+            policy = str((side_cfg or {}).get("materialize") or "auto")
+            key = _side_output_key(pass_name, pass_cfg, side_name)
+            materialized = policy == "always"
+            side_path = ""
+            if materialized:
+                side_path = _render_path_template(
+                    output_target=target,
+                    datasetname=f"{datasetname_root}_{pass_name}_{side_name}",
+                    pass_name=pass_name,
+                    universe=universe,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            out.append(
+                DatasetOption(
+                    pass_name=f"{pass_name}:{side_name}",
+                    path=side_path,
+                    is_default=False,
+                    kind="side",
+                    is_materialized=materialized,
+                    is_used=(
+                        side_usage.get(key, False)
+                        or (
+                            side_usage.get(side_name, False)
+                            and side_name_counts.get(side_name, 0) == 1
+                        )
+                    ),
+                )
+            )
     return out
+
+
+def _side_output_usage(config: dict[str, Any]) -> dict[str, bool]:
+    usage: dict[str, bool] = {}
+    passes = list(config.get("PASSES") or [])
+    for pass_cfg in passes:
+        module_inputs = pass_cfg.get("module_inputs") or {}
+        for entry in module_inputs.values():
+            if isinstance(entry, str):
+                usage[entry] = True
+            elif isinstance(entry, dict):
+                for value in entry.values():
+                    usage[value] = True
+    return usage
 
 
 def _pick_time_column(df: pl.DataFrame) -> str | None:

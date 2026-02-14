@@ -9,7 +9,9 @@ import glob
 import polars as pl
 import pandas as pd
 import shutil
+import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
 
 from .batching import (
     SymbolBatcherStreaming,
@@ -150,7 +152,7 @@ def _load_table_lazy_with_fallback(
 
 
 def _resolve_module_names(pass_config) -> list[str]:
-    module_names = list(pass_config.modules)
+    module_names = list(getattr(pass_config, "preprocess_modules", []) or []) + list(pass_config.modules)
     if pass_config.trade_analytics.enable_retail_imbalance:
         if "retail_imbalance" not in module_names:
             module_names.append("retail_imbalance")
@@ -315,6 +317,23 @@ def _derive_tables_to_load(
     return tables
 
 
+def _side_output_context_keys(config) -> list[str]:
+    keys: list[str] = []
+    for pass_cfg in config.PASSES or []:
+        side_outputs = getattr(pass_cfg, "side_outputs", {}) or {}
+        for name in side_outputs.keys():
+            side_cfg = side_outputs.get(name)
+            if side_cfg is not None and getattr(side_cfg, "context_key", None):
+                keys.append(str(side_cfg.context_key))
+                continue
+            namespace = getattr(pass_cfg, "side_output_namespace", None)
+            if namespace:
+                keys.append(f"{namespace}:{name}")
+            else:
+                keys.append(f"{pass_cfg.name}:{name}")
+    return keys
+
+
 def _call_get_pipeline(get_pipeline, **kwargs):
     sig = inspect.signature(get_pipeline)
     if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
@@ -343,10 +362,21 @@ def process_batch_task(i, temp_dir, current_date, config, pipe):
             temp_dir, f"batch-metrics-{i}-{current_date.date()}.parquet"
         )
         writer = BatchWriter(out_path)
+        side_writers: dict[str, BatchWriter] = {}
 
-        runner = AnalyticsRunner(pipe, writer.write, config)
+        def _side_write(name: str, df: pl.DataFrame, listing_id: str | None = None):
+            side_path = os.path.join(
+                temp_dir, f"batch-side-{name}-{i}-{current_date.date()}.parquet"
+            )
+            if name not in side_writers:
+                side_writers[name] = BatchWriter(side_path)
+            side_writers[name].write(df, listing_id)
+
+        runner = AnalyticsRunner(pipe, writer.write, config, side_writer=_side_write)
         result = runner.run_batch(batch_data)
         writer.close()
+        for w in side_writers.values():
+            w.close()
         if result is not None:
             logging.info(
                 f"Batch {i} for {current_date.date()} produced {len(result)} rows."
@@ -433,7 +463,7 @@ class ProcessInterval(Process):
         self.get_universe = get_universe
         self.context_path = context_path
 
-    def update_and_persist_context(self, pipe, final_path):
+    def update_and_persist_context(self, pipe, final_path, side_paths: dict[str, str]):
         """
         Updates the pipeline context with the result of the current pass and persists it to disk.
         """
@@ -457,6 +487,25 @@ class ProcessInterval(Process):
             logging.warning(
                 f"Could not load output of pass {self.pass_config.name} into context: {e}"
             )
+
+        for side_name, side_path in (side_paths or {}).items():
+            if not side_path:
+                continue
+            try:
+                side_cfg = (self.pass_config.side_outputs or {}).get(side_name)
+                if side_cfg is not None and getattr(side_cfg, "context_key", None):
+                    key = str(side_cfg.context_key)
+                else:
+                    namespace = getattr(self.pass_config, "side_output_namespace", None)
+                    key = f"{namespace}:{side_name}" if namespace else f"{self.pass_config.name}:{side_name}"
+                pipe.context[key] = pl.scan_parquet(side_path)
+            except Exception as e:
+                logging.warning(
+                    "Could not load side output %s for pass %s: %s",
+                    side_name,
+                    self.pass_config.name,
+                    e,
+                )
 
         # After the pass is complete, save the context
         with open(self.context_path, "wb") as f:
@@ -705,7 +754,7 @@ class ProcessInterval(Process):
             else:
                 sort_keys = ["ListingId", "TimeBucket"]
 
-            final_path = aggregate_and_write_final_output(
+            final_path, side_paths = aggregate_and_write_final_output(
                 self.sd,
                 self.ed,
                 self.config,
@@ -715,7 +764,7 @@ class ProcessInterval(Process):
             )
 
             # Update context with the result of this pass
-            self.update_and_persist_context(pipe, final_path)
+            self.update_and_persist_context(pipe, final_path, side_paths)
 
         except Exception as e:
             logging.error(
@@ -746,6 +795,101 @@ def check_s3_url_exists(s3_url):
             return False
         # 403 means you don't have permission to see if it exists
         raise e
+
+
+def _find_git_root(candidates: list[str]) -> Path | None:
+    for raw in candidates:
+        if not raw:
+            continue
+        path = Path(raw).expanduser().resolve()
+        if path.is_file():
+            path = path.parent
+        for parent in [path, *path.parents]:
+            if (parent / ".git").exists():
+                return parent
+    return None
+
+
+def _collect_git_metadata(git_root: Path | None) -> dict:
+    if git_root is None:
+        return {}
+    data: dict = {"root": str(git_root)}
+    try:
+        head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=git_root, text=True
+        ).strip()
+        data["commit"] = head
+    except Exception:
+        pass
+    try:
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=git_root, text=True
+        )
+        data["dirty"] = bool(status.strip())
+    except Exception:
+        pass
+    try:
+        describe = subprocess.check_output(
+            ["git", "describe", "--tags", "--always", "--dirty"],
+            cwd=git_root,
+            text=True,
+        ).strip()
+        data["describe"] = describe
+    except Exception:
+        pass
+    return data
+
+
+def _collect_package_versions(prefix: str = "bmll-basalt") -> dict:
+    versions: dict = {}
+    try:
+        import importlib.metadata as _metadata
+
+        for dist in _metadata.distributions():
+            name = dist.metadata.get("Name") if dist and dist.metadata else None
+            if not name:
+                continue
+            if name == prefix or name.startswith(f"{prefix}-"):
+                versions[name] = dist.version
+    except Exception:
+        return versions
+    return versions
+
+
+def _write_run_artifact(config, temp_dir: str) -> None:
+    if not getattr(config, "RUN_ARTIFACTS_ENABLED", False):
+        return
+    artifact_dir = getattr(config, "RUN_ARTIFACTS_DIR", None) or os.path.join(
+        temp_dir, "run_artifacts"
+    )
+    os.makedirs(artifact_dir, exist_ok=True)
+    timestamp = dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    name = getattr(config, "RUN_ARTIFACTS_NAME", None)
+    filename = name or f"run_metadata_{timestamp}.json"
+    path = os.path.join(artifact_dir, filename)
+    candidates = [
+        os.getenv("BASALT_CONFIG_FILE", ""),
+        os.getenv("BASALT_PROJECT_ROOT", ""),
+        os.getcwd(),
+        __file__,
+    ]
+    git_root = _find_git_root(candidates)
+    payload = {
+        "timestamp_utc": timestamp,
+        "config": config.model_dump(),
+        "environment": {
+            "python": sys.version,
+            "platform": platform.platform(),
+        },
+        "git": _collect_git_metadata(git_root),
+        "packages": _collect_package_versions(),
+    }
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+        logging.info("Run metadata artifact written to %s", path)
+    except Exception as exc:
+        logging.warning("Failed to write run metadata artifact: %s", exc)
 
 
 def run_metrics_pipeline(config, get_universe, get_pipeline=None):
@@ -833,7 +977,8 @@ def run_metrics_pipeline(config, get_universe, get_pipeline=None):
                 pass_tables_to_load = _derive_tables_to_load(
                     pass_config,
                     config.TABLES_TO_LOAD,
-                    known_context_sources=[p.name for p in config.PASSES],
+                    known_context_sources=[p.name for p in config.PASSES]
+                    + _side_output_context_keys(config),
                 )
                 config = config.model_copy(
                     update={"TABLES_TO_LOAD": pass_tables_to_load}

@@ -357,11 +357,13 @@ def assert_unique_lazy(lf: pl.LazyFrame, keys: list[str], name=""):
 
     def check_uniqueness(df: pl.DataFrame) -> pl.DataFrame:
         # Perform the actual check on the materialized chunk
-        is_duplicated = df.select(keys).is_duplicated().any()
-        if is_duplicated:
-            # You can also print which keys are duplicated here for debugging
-            dupes = df.filter(df.select(keys).is_duplicated()).head(5)
-            raise AssertionError(f"Duplicate keys found in {name}: {dupes}")
+        subset = df.select(keys).to_pandas()
+        dup_mask = subset.duplicated()
+        if dup_mask.any():
+            dupes = subset.loc[dup_mask].head(5)
+            raise AssertionError(
+                f"Duplicate keys found in {name}: {dupes.to_dict(orient='records')}"
+            )
         return df
 
     # map_batches injects a custom function into the physical plan

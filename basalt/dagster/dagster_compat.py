@@ -415,6 +415,68 @@ def build_assets(
 
             return _new_asset
 
+        def _side_output_assets(
+            pass_config: dict,
+            base_config: dict,
+            pass_asset_key,
+        ):
+            side_outputs = pass_config.get("side_outputs") or {}
+            if not side_outputs:
+                return []
+            assets = []
+            try:
+                from dagster import asset
+            except Exception as exc:
+                raise ImportError("Dagster is required to build datasets.") from exc
+
+            for side_name, side_cfg in side_outputs.items():
+                policy = (side_cfg or {}).get("materialize") or "auto"
+                if policy != "always":
+                    continue
+                side_asset_name = f"{_sanitize_name(pass_config.get('name', 'pass'))}__{side_name}"
+                key_prefix = [package_root, asset_base, _sanitize_name(pass_config.get("name", "pass"))]
+                @asset(
+                    name=side_asset_name,
+                    partitions_def=partitions_def,
+                    group_name=asset_base,
+                    key_prefix=key_prefix,
+                    deps=[pass_asset_key],
+                    io_manager_key=io_manager_key,
+                    tags=_bmll_job_tags(config_model),
+                    **auto_kwargs,
+                )
+                def _side_asset(context=None, _side_name=side_name, _base_config=base_config):
+                    cfg = AnalyticsConfig(**_base_config)
+                    if context and getattr(context, "partition_key", None):
+                        keys = getattr(context.partition_key, "keys_by_dimension", None)
+                        if keys and universe_dim in keys and date_dim in keys:
+                            date_partition = parse_date_key(keys[date_dim])
+                            start_date, end_date = (
+                                date_partition.start_date,
+                                date_partition.end_date,
+                            )
+                        else:
+                            start_date, end_date = (
+                                _base_config["START_DATE"],
+                                _base_config["END_DATE"],
+                            )
+                    else:
+                        start_date, end_date = (
+                            _base_config["START_DATE"],
+                            _base_config["END_DATE"],
+                        )
+                    from basalt.process import get_side_output_path
+                    return get_side_output_path(
+                        dt.date.fromisoformat(start_date),
+                        dt.date.fromisoformat(end_date),
+                        cfg,
+                        pass_config.get("name", "pass"),
+                        _side_name,
+                        output_target,
+                    )
+                assets.append(_side_asset)
+            return assets
+
         if split_passes and passes:
             for pass_config in passes:
                 pass_name = _sanitize_name(pass_config.get("name", "pass"))
@@ -434,6 +496,7 @@ def build_assets(
                     )
                 )
                 last_pass_key = assets[-1].key
+                assets.extend(_side_output_assets(pass_config, per_pass_config, last_pass_key))
         else:
             deps = list(input_asset_keys or [])
             assets.append(
@@ -564,6 +627,74 @@ def build_assets_for_module(
 
         return _new_asset
 
+    def _side_output_assets(
+        pass_config: dict,
+        base_config: dict,
+        pass_asset_key,
+    ):
+        side_outputs = pass_config.get("side_outputs") or {}
+        if not side_outputs:
+            return []
+        assets = []
+        try:
+            from dagster import asset
+        except Exception as exc:
+            raise ImportError("Dagster is required to build datasets.") from exc
+
+        for side_name, side_cfg in side_outputs.items():
+            policy = (side_cfg or {}).get("materialize") or "auto"
+            if policy != "always":
+                continue
+            side_asset_name = (
+                f"{_sanitize_name(pass_config.get('name', 'pass'))}__{side_name}"
+            )
+            key_prefix = [
+                package_root,
+                asset_base,
+                _sanitize_name(pass_config.get("name", "pass")),
+            ]
+            @asset(
+                name=side_asset_name,
+                partitions_def=partitions_def,
+                group_name=asset_base,
+                key_prefix=key_prefix,
+                deps=[pass_asset_key],
+                io_manager_key=io_manager_key,
+                tags=_bmll_job_tags(config_model),
+                **auto_kwargs,
+            )
+            def _side_asset(context=None, _side_name=side_name, _base_config=base_config):
+                cfg = AnalyticsConfig(**_base_config)
+                if context and getattr(context, "partition_key", None):
+                    keys = getattr(context.partition_key, "keys_by_dimension", None)
+                    if keys and universe_dim in keys and date_dim in keys:
+                        date_partition = parse_date_key(keys[date_dim])
+                        start_date, end_date = (
+                            date_partition.start_date,
+                            date_partition.end_date,
+                        )
+                    else:
+                        start_date, end_date = (
+                            _base_config["START_DATE"],
+                            _base_config["END_DATE"],
+                        )
+                else:
+                    start_date, end_date = (
+                        _base_config["START_DATE"],
+                        _base_config["END_DATE"],
+                    )
+                from basalt.process import get_side_output_path
+                return get_side_output_path(
+                    dt.date.fromisoformat(start_date),
+                    dt.date.fromisoformat(end_date),
+                    cfg,
+                    pass_config.get("name", "pass"),
+                    _side_name,
+                    output_target,
+                )
+            assets.append(_side_asset)
+        return assets
+
     assets = []
     if split_passes and passes:
         for pass_config in passes:
@@ -584,6 +715,9 @@ def build_assets_for_module(
                 )
             )
             last_pass_key = assets[-1].key
+            assets.extend(
+                _side_output_assets(pass_config, per_pass_config, last_pass_key)
+            )
     else:
         deps = list(input_asset_keys or [])
         assets.append(

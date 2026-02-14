@@ -369,12 +369,23 @@ def main() -> None:
         if not options:
             st.warning("No pass outputs found in config.")
             return
-        labels = [f"{o.pass_name} :: {o.path}" for o in options]
+        labels = []
+        for o in options:
+            if o.is_materialized:
+                status = "ACTIVE"
+            elif o.is_used:
+                status = "used"
+            else:
+                status = "inactive"
+            labels.append(f"{o.pass_name} :: {o.path or '[no output]'} [{status}]")
         default_idx = next((i for i, o in enumerate(options) if o.is_default), len(options) - 1)
         selected_idx = st.sidebar.selectbox("Dataset (pass output)", range(len(options)), index=default_idx, format_func=lambda i: labels[i])
         selected = options[selected_idx]
+        if not selected.path:
+            st.warning("Selected dataset is not materialized. Enable materialization to view it.")
+            return
         selected_dataset_path = selected.path
-        selected_meta = {"pass": selected.pass_name, "path": selected.path, "kind": "output"}
+        selected_meta = {"pass": selected.pass_name, "path": selected.path, "kind": selected.kind}
         st.sidebar.code(selected.path)
     else:
         if not input_options:
