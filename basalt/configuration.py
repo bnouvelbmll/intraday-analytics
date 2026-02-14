@@ -545,6 +545,16 @@ class BMLLJobConfig(BaseModel):
         description="Project root used in the bootstrap for PYTHONPATH and installs.",
         json_schema_extra={"section": "Automation"},
     )
+    jobs_area: Literal["user", "organisation"] = Field(
+        "user",
+        description="Default area for jobs_dir/project_root when auto-resolving paths.",
+        json_schema_extra={
+            "section": "Automation",
+            "long_doc": "When set to 'organisation', default jobs_dir and project_root\n"
+            "are resolved under /home/bmll/organisation instead of /home/bmll/user.\n"
+            "Explicit jobs_dir/project_root values still take precedence.\n",
+        },
+    )
     pythonpath_prefixes: List[str] = Field(
         default_factory=list,
         description="Extra PYTHONPATH entries exported by the bootstrap script.",

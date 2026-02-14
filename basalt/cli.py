@@ -128,9 +128,18 @@ def _load_bmll_job_config(config_file: Optional[str]) -> BMLLJobConfig:
             return path.parent.resolve()
         return path.resolve()
 
+    def _resolve_area_root(area: str) -> Path:
+        if area == "organisation":
+            return Path("/home/bmll/organisation")
+        return Path("/home/bmll/user")
+
     def _hydrate_runtime_paths(cfg: BMLLJobConfig, source_path: Optional[Path]) -> BMLLJobConfig:
         runtime_root = _runtime_root_from_path(source_path)
         updates: dict[str, object] = {}
+        area_root = _resolve_area_root(getattr(cfg, "jobs_area", "user"))
+        in_bmll = str(runtime_root).startswith("/home/bmll/")
+        if in_bmll:
+            runtime_root = area_root / runtime_root.name
 
         project_root = str(getattr(cfg, "project_root", "") or "").strip()
         if (
