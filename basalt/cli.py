@@ -247,6 +247,7 @@ def _write_dagster_scheduler_script(
             [
                 "#!/usr/bin/env python3",
                 "import os",
+                "import shutil",
                 "import subprocess",
                 "import sys",
                 "",
@@ -257,6 +258,8 @@ def _write_dagster_scheduler_script(
                 f"dagster_home = {repr(dagster_home)}",
                 "if dagster_home:",
                 "    env['DAGSTER_HOME'] = dagster_home",
+                "if shutil.which(cmd[0]) is None:",
+                "    cmd = [sys.executable, '-m', 'dagster', 'daemon', 'run']",
                 "try:",
                 "    subprocess.run(cmd, check=True, env=env, timeout=timeout)",
                 "except subprocess.TimeoutExpired:",
