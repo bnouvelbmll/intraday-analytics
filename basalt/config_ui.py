@@ -1461,9 +1461,13 @@ class PassListEditor(Screen):
                 )
                 metrics_list = _pass_metric_list(p)
                 yield PassSummaryBox(title, body, metrics_list)
-                yield Button(f"Edit {name}", id=f"edit_{idx}")
+                with Horizontal():
+                    yield Button(f"Edit {name}", id=f"edit_{idx}")
+                    yield Button("Move Up", id=f"move_up_{idx}")
+                    yield Button("Move Down", id=f"move_down_{idx}")
         with Horizontal():
             yield Button("Add Pass", id="add")
+            yield Button("Auto Order", id="auto_order")
             yield Button("Back", id="back")
         yield self.status
         yield Footer()
@@ -1476,9 +1480,17 @@ class PassListEditor(Screen):
                 self.app._refresh_summary()
         elif button_id == "add":
             self._ensure_unlocked(self._open_pass_editor)
+        elif button_id == "auto_order":
+            self._ensure_unlocked(self._auto_order_passes)
         elif button_id.startswith("edit_"):
             idx = int(button_id.split("_", 1)[1])
             self._ensure_unlocked(lambda: self._edit_pass(idx))
+        elif button_id.startswith("move_up_"):
+            idx = int(button_id.split("_", 2)[2])
+            self._ensure_unlocked(lambda: self._move_pass(idx, -1))
+        elif button_id.startswith("move_down_"):
+            idx = int(button_id.split("_", 2)[2])
+            self._ensure_unlocked(lambda: self._move_pass(idx, 1))
 
     def _ensure_unlocked(self, action) -> None:
         if not self.pass_readonly:
@@ -1535,6 +1547,91 @@ class PassListEditor(Screen):
             on_readonly_change=self.on_readonly_change,
         )
         self.app.push_screen(screen)
+
+    def _move_pass(self, idx: int, offset: int) -> None:
+        passes = list(self.config_data.get("PASSES", []) or [])
+        new_idx = idx + offset
+        if new_idx < 0 or new_idx >= len(passes):
+            return
+        passes[idx], passes[new_idx] = passes[new_idx], passes[idx]
+        self.config_data["PASSES"] = passes
+        if hasattr(self.app, "_refresh_summary"):
+            self.app._refresh_summary()
+        self.app.pop_screen()
+        self.app.push_screen(
+            PassListEditor(
+                self.config_data,
+                advanced_modules=self.advanced_modules,
+                pass_readonly=self.pass_readonly,
+                on_readonly_change=self.on_readonly_change,
+            )
+        )
+
+    def _auto_order_passes(self) -> None:
+        passes = list(self.config_data.get("PASSES", []) or [])
+        if len(passes) < 2:
+            return
+        names = [p.get("name", f"pass{idx+1}") for idx, p in enumerate(passes)]
+        name_set = set(names)
+
+        def _deps_for(pass_data: dict) -> list[str]:
+            deps: list[str] = []
+            module_inputs = pass_data.get("module_inputs") or {}
+            values: list[str] = []
+            for entry in module_inputs.values():
+                if isinstance(entry, str):
+                    values.append(entry)
+                elif isinstance(entry, dict):
+                    values.extend(str(v) for v in entry.values())
+            for value in values:
+                if value in name_set:
+                    deps.append(value)
+                    continue
+                if ":" in value:
+                    prefix = value.split(":", 1)[0]
+                    if prefix in name_set:
+                        deps.append(prefix)
+            return deps
+
+        deps_map = {names[i]: _deps_for(passes[i]) for i in range(len(passes))}
+        forward: dict[str, list[str]] = {name: [] for name in names}
+        indegree = {name: 0 for name in names}
+        for name, deps in deps_map.items():
+            unique_deps = [d for d in deps if d != name]
+            indegree[name] = len(set(unique_deps))
+            for dep in unique_deps:
+                forward.setdefault(dep, []).append(name)
+
+        ordered: list[str] = []
+        queue = [n for n in names if indegree[n] == 0]
+        while queue:
+            current = queue.pop(0)
+            ordered.append(current)
+            for child in forward.get(current, []):
+                indegree[child] -= 1
+                if indegree[child] == 0:
+                    queue.append(child)
+
+        if len(ordered) < len(names):
+            remaining = [n for n in names if n not in ordered]
+            ordered.extend(remaining)
+            self.status.update("Auto order complete with cycles or unresolved dependencies.")
+        else:
+            self.status.update("Auto order complete.")
+
+        by_name = {names[i]: passes[i] for i in range(len(passes))}
+        self.config_data["PASSES"] = [by_name[name] for name in ordered]
+        if hasattr(self.app, "_refresh_summary"):
+            self.app._refresh_summary()
+        self.app.pop_screen()
+        self.app.push_screen(
+            PassListEditor(
+                self.config_data,
+                advanced_modules=self.advanced_modules,
+                pass_readonly=self.pass_readonly,
+                on_readonly_change=self.on_readonly_change,
+            )
+        )
 
 
 class PassEditor(Screen):
