@@ -423,7 +423,7 @@ class AggressiveTradesPreprocessConfig(BaseModel):
         json_schema_extra={
             "ui": {
                 "module": "aggressive_preprocess",
-                "tier": "preprocess",
+                "tier": "pre",
                 "desc": "Preprocess: aggregate executions into aggressive orders.",
                 "schema_keys": ["aggressive_orders", "aggressive_executions"],
             }
