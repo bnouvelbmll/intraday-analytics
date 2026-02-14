@@ -268,6 +268,14 @@ def _bmll_install(*, pipeline: str | None = None, **kwargs):
     return bmll_install(pipeline=pipeline, **kwargs)
 
 
+def _bmll_bootstrap_refresh(**kwargs):
+    try:
+        from basalt.cli import bmll_bootstrap_refresh
+    except Exception as exc:
+        raise SystemExit("BMLL bootstrap refresh is not available.") from exc
+    return bmll_bootstrap_refresh(**kwargs)
+
+
 def _ec2_run(*, pipeline: str | None = None, **kwargs):
     try:
         from basalt.executors.aws_ec2 import ec2_run
@@ -383,6 +391,10 @@ class BMLLCLI:
     @staticmethod
     def install(*args, **kwargs):
         return _bmll_install(*args, **kwargs)
+
+    @staticmethod
+    def refresh_bootstrap(*args, **kwargs):
+        return _bmll_bootstrap_refresh(*args, **kwargs)
 
 
 class EC2CLI:

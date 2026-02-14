@@ -208,22 +208,55 @@ def _expand_cron_without_slash(expr: str) -> list[str]:
     return [expr]
 
 
-def ensure_default_bootstrap(config: BMLLJobConfig) -> tuple[str, str, list[Any]]:
+def _bootstrap_needs_refresh(content: str) -> bool:
+    if "/home/bmll/user/basalt" in content:
+        return True
+    if "BASALT_DIST=all python -m pip install -e ." not in content:
+        return True
+    if "waiting for /home/bmll/user mount" not in content:
+        return True
+    return False
+
+
+def ensure_default_bootstrap(
+    config: BMLLJobConfig, *, force: bool = False
+) -> tuple[str, str, list[Any]]:
     if config.default_bootstrap:
-        area, rel_path = _relativize_to_area(Path(config.default_bootstrap))
+        bootstrap_path = Path(config.default_bootstrap)
+        if bootstrap_path.exists():
+            try:
+                current = bootstrap_path.read_text(encoding="utf-8")
+                if _bootstrap_needs_refresh(current):
+                    logger.warning(
+                        "Bootstrap script %s is missing mount-wait or other updates. "
+                        "Refresh it or provide an updated script.",
+                        bootstrap_path,
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to inspect custom bootstrap script %s for updates.",
+                    bootstrap_path,
+                )
+        area, rel_path = _relativize_to_area(bootstrap_path)
         return area, rel_path, list(config.default_bootstrap_args or [])
 
     jobs_dir = Path(config.jobs_dir)
     _ensure_dir(jobs_dir)
     bootstrap_path = jobs_dir / "bootstrap.sh"
-    should_rewrite = not bootstrap_path.exists()
+    should_rewrite = force or not bootstrap_path.exists()
     if bootstrap_path.exists():
         try:
             current = bootstrap_path.read_text(encoding="utf-8")
             if (
-                "/home/bmll/user/basalt" in current
-                or "BASALT_DIST=all python -m pip install -e ." not in current
+                force
+                or _bootstrap_needs_refresh(current)
             ):
+                if not force:
+                    logger.warning(
+                        "Default bootstrap script %s is outdated; rewriting to include "
+                        "mount-wait and install updates.",
+                        bootstrap_path,
+                    )
                 should_rewrite = True
         except Exception:
             should_rewrite = True

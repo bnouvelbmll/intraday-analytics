@@ -374,6 +374,24 @@ def dagster_scheduler_uninstall(
         pass
 
 
+def bmll_bootstrap_refresh(
+    *,
+    config_file: Optional[str] = None,
+):
+    """
+    Force refresh the default BMLL bootstrap script in the jobs directory.
+    """
+    job_config = _load_bmll_job_config(config_file)
+    from basalt.executors.bmll.backend import ensure_default_bootstrap
+
+    area, rel_path, _ = ensure_default_bootstrap(job_config, force=True)
+    return {
+        "bootstrap_area": area,
+        "bootstrap_path": rel_path,
+        "jobs_dir": job_config.jobs_dir,
+    }
+
+
 def bmll_job_run(
     *,
     config_file: Optional[str] = None,
