@@ -218,6 +218,25 @@ Start the UI without the daemon:
 basalt dagster ui --pipeline demo/01_ohlcv_bars.py --port 3000
 ```
 
+## Side Outputs (Aggressive Orders / Icebergs)
+
+Passes can emit **side outputs** (e.g. `aggressive_orders`, `iceberg_events`). When
+`side_outputs.<name>.materialize=always`, Dagster exposes them as separate assets
+that depend on the main pass asset. Side outputs are not independently runnable.
+
+Example config:
+
+```yaml
+PASSES:
+  - name: pass1
+    preprocess_modules: ["aggressive_preprocess"]
+    side_outputs:
+      aggressive_orders:
+        materialize: always
+      aggressive_executions:
+        materialize: always
+```
+
 ## Bulk Sync (Materializations/Observations)
 
 You can force Dagster to ingest materializations/observations from S3 using the

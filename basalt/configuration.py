@@ -135,6 +135,25 @@ class PassTimelineMode(str, Enum):
     EVENT = "event"
 
 
+class SideOutputConfig(BaseModel):
+    """
+    Configuration for a side output table produced by a pass.
+    """
+
+    description: Optional[str] = Field(
+        None,
+        description="Human-readable description of the side output.",
+    )
+    materialize: Literal["auto", "always", "never"] = Field(
+        "auto",
+        description="Whether to materialize this side output to the output target.",
+    )
+    context_key: Optional[str] = Field(
+        None,
+        description="Optional override for the context key used to expose this side output.",
+    )
+
+
 class OutputType(str, Enum):
     PARQUET = "parquet"
     DELTA = "delta"
@@ -264,6 +283,21 @@ class PassConfig(BaseModel):
     modules: List[str] = Field(
         default_factory=list,
         description="Ordered module names enabled for this pass.",
+    )
+    preprocess_modules: List[str] = Field(
+        default_factory=list,
+        description="Modules executed before the main pass (no join, side outputs only).",
+        json_schema_extra={"section": "Advanced"},
+    )
+    side_outputs: Dict[str, "SideOutputConfig"] = Field(
+        default_factory=dict,
+        description="Side output tables produced by this pass.",
+        json_schema_extra={"section": "Advanced"},
+    )
+    side_output_namespace: Optional[str] = Field(
+        None,
+        description="Optional namespace prefix for side output context keys.",
+        json_schema_extra={"section": "Advanced"},
     )
     output: Optional[OutputTarget] = Field(
         None,
@@ -699,6 +733,36 @@ class AnalyticsConfig(BaseModel):
         description="Dagster IO manager key to use when running in Dagster.",
         json_schema_extra={"section": "Outputs"},
     )
+    RUN_ARTIFACTS_ENABLED: bool = Field(
+        False,
+        description="Persist a run metadata artifact for each pipeline run.",
+        json_schema_extra={"section": "Outputs"},
+    )
+    RUN_ARTIFACTS_DIR: Optional[str] = Field(
+        None,
+        description="Directory to store run metadata artifacts (defaults to temp_dir/run_artifacts).",
+        json_schema_extra={"section": "Outputs"},
+    )
+    RUN_ARTIFACTS_NAME: Optional[str] = Field(
+        None,
+        description="Optional filename for the run metadata artifact.",
+        json_schema_extra={"section": "Outputs"},
+    )
+    RUN_ARTIFACTS_ENABLED: bool = Field(
+        False,
+        description="Persist a run metadata artifact for each pipeline run.",
+        json_schema_extra={"section": "Outputs"},
+    )
+    RUN_ARTIFACTS_DIR: Optional[str] = Field(
+        None,
+        description="Directory to store run metadata artifacts (defaults to temp_dir/run_artifacts).",
+        json_schema_extra={"section": "Outputs"},
+    )
+    RUN_ARTIFACTS_NAME: Optional[str] = Field(
+        None,
+        description="Optional filename for the run metadata artifact.",
+        json_schema_extra={"section": "Outputs"},
+    )
 
     # --- Execution ---
     PREPARE_DATA_MODE: PrepareDataMode = Field(
@@ -825,3 +889,6 @@ class AnalyticsConfig(BaseModel):
 
     def to_dict(self):
         return self.model_dump()
+
+
+PassConfig.model_rebuild()

@@ -244,6 +244,18 @@ def _pipeline_datasets(
     }
 
 
+def _pipeline_side_outputs(
+    *,
+    pipeline: str | None = None,
+    config_precedence: str = "yaml_overrides",
+):
+    if not pipeline:
+        raise SystemExit("Provide --pipeline <path_or_module>")
+    from basalt.cli import list_side_outputs
+
+    return list_side_outputs(pipeline=pipeline, config_precedence=config_precedence)
+
+
 def _job_run(*, pipeline: str | None = None, **kwargs):
     if _help_requested():
         _print_suite_header()
@@ -371,6 +383,10 @@ class PipelineCLI:
     @staticmethod
     def datasets(*args, **kwargs):
         return _pipeline_datasets(*args, **kwargs)
+
+    @staticmethod
+    def side_outputs(*args, **kwargs):
+        return _pipeline_side_outputs(*args, **kwargs)
 
 
 class JobCLI:

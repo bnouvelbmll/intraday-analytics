@@ -33,6 +33,13 @@ The system follows a pipeline architecture where data flows through a series of 
 *   **Multi-Pass Support**: The system must support defining multiple sequential "Passes".
     *   **Context Propagation**: Results from Pass $N$ must be accessible to Pass $N+1$ via a shared context.
     *   **Independent Configuration**: Each pass must have its own configuration (time buckets, active modules).
+    *   **Preprocess Modules**: Each pass may run preprocessing modules before main modules, without joining into the main output.
+*   **Side Outputs**: A pass can emit additional tables beyond the main aggregated output.
+    *   **Main Output**: Aggregatable, keyed by primary keys (e.g., `ListingId`, `TimeBucket`).
+    *   **Side Outputs**: Optional tables (e.g., `aggressive_orders`, `iceberg_events`) that can be materialized or kept in-memory.
+    *   **Materialization Policy**: Side outputs support `auto/always/never`. `auto` materializes when downstream passes reference the side output.
+    *   **Context Keys**: Side outputs are exposed in context as `<pass_name>:<side_name>` for downstream module inputs.
+    *   **Namespaces**: Passes may override the context key via a namespace or per-output `context_key` to support a global asset catalog.
 *   **Parallel Execution**: Processing must be parallelizable across dates and/or batches of symbols.
 *   **Batching Strategies**:
     *   **Heuristic**: Batching based on estimated data size.

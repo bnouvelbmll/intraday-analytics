@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .iceberg import IcebergAnalyticsConfig
+from .aggressive_trades import AggressiveTradesPreprocessConfig
 from .cbbo_preprocess import CBBOPreprocessConfig
 from .cbbofroml3_preprocess import CBBOfromL3PreprocessConfig
 
@@ -24,6 +25,11 @@ def get_basalt_plugin():
                 "module": "cbbofroml3_preprocess",
                 "config_key": "cbbofroml3_preprocess",
                 "model": CBBOfromL3PreprocessConfig,
+            },
+            {
+                "module": "aggressive_preprocess",
+                "config_key": "aggressive_preprocess",
+                "model": AggressiveTradesPreprocessConfig,
             },
         ],
     }

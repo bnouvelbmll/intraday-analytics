@@ -69,13 +69,46 @@ def get_final_output_path(start_date, end_date, config, pass_name, output_target
     return final_s3_path
 
 
+def get_side_output_path(
+    start_date, end_date, config, pass_name, side_name, output_target=None
+):
+    output_target = output_target or config.OUTPUT_TARGET
+    dataset_name = config.DATASETNAME
+    final_dataset_name = f"{dataset_name}_{pass_name}_{side_name}"
+    template = getattr(output_target, "path_template", None) or ""
+    universe = config.UNIVERSE or "all"
+
+    def _coerce_date(value):
+        try:
+            return value.date()
+        except Exception:
+            return value
+
+    final_path = template.format(
+        bucket="",
+        prefix="",
+        datasetname=final_dataset_name,
+        **{"pass": pass_name},
+        universe=universe,
+        start_date=_coerce_date(start_date),
+        end_date=_coerce_date(end_date),
+    )
+    if final_path.startswith("s3://"):
+        protocol = "s3://"
+        path_part = final_path[5:]
+        final_path = protocol + path_part.replace("//", "/")
+    else:
+        final_path = final_path.replace("//", "/")
+    return final_path
+
+
 def get_final_s3_path(start_date, end_date, config, pass_name, output_target=None):
     return get_final_output_path(start_date, end_date, config, pass_name, output_target)
 
 
 def aggregate_and_write_final_output(
     start_date, end_date, config, pass_config, temp_dir, sort_keys=None
-):
+) -> tuple[str | None, dict[str, str]]:
     """
     Aggregates all processed batch-metrics files for a single pass into a final
     output file and writes it to the specified S3 location.
@@ -92,7 +125,7 @@ def aggregate_and_write_final_output(
         logging.warning(
             f"No batch-metrics files found in {temp_dir} to aggregate for Pass {pass_config.name}."
         )
-        return
+        return None, {}
 
     combined_df = pl.scan_parquet(all_metrics_files)
 
@@ -367,7 +400,123 @@ def aggregate_and_write_final_output(
             os.remove(f)
         except OSError as e:
             logging.error(f"Error removing temporary aggregated file {f}: {e}")
-    return final_s3_path
+    side_paths = _materialize_side_outputs(
+        start_date,
+        end_date,
+        config,
+        pass_config,
+        temp_dir,
+        sort_keys=sort_keys,
+    )
+    return final_s3_path, side_paths
+
+
+def _side_output_is_used(config, pass_name: str, side_name: str) -> bool:
+    key = None
+    for pass_cfg in config.PASSES or []:
+        if pass_cfg.name != pass_name:
+            continue
+        side_cfg = (pass_cfg.side_outputs or {}).get(side_name)
+        if side_cfg is not None and getattr(side_cfg, "context_key", None):
+            key = str(side_cfg.context_key)
+            break
+        namespace = getattr(pass_cfg, "side_output_namespace", None)
+        key = f"{namespace}:{side_name}" if namespace else f"{pass_name}:{side_name}"
+        break
+    if key is None:
+        key = f"{pass_name}:{side_name}"
+    for pass_cfg in config.PASSES or []:
+        module_inputs = pass_cfg.module_inputs or {}
+        for entry in module_inputs.values():
+            if isinstance(entry, str) and (entry == key or entry == side_name):
+                return True
+            if isinstance(entry, dict) and key in entry.values():
+                return True
+    return False
+
+
+def _materialize_side_outputs(
+    start_date,
+    end_date,
+    config,
+    pass_config,
+    temp_dir,
+    sort_keys=None,
+):
+    side_outputs = getattr(pass_config, "side_outputs", {}) or {}
+    if not side_outputs:
+        return
+
+    output_target = pass_config.output or config.OUTPUT_TARGET
+    if output_target is None:
+        return
+    if not isinstance(output_target, OutputTarget):
+        output_target = OutputTarget.model_validate(output_target)
+
+    materialized_paths: dict[str, str] = {}
+    for side_name, side_cfg in side_outputs.items():
+        policy = getattr(side_cfg, "materialize", "auto")
+        is_used = _side_output_is_used(config, pass_config.name, side_name)
+        if policy == "auto" and not is_used:
+            continue
+        if policy == "never" and not is_used:
+            continue
+
+        side_files = glob.glob(
+            os.path.join(temp_dir, f"batch-side-{side_name}-*.parquet")
+        )
+        if not side_files:
+            continue
+
+        combined_df = pl.scan_parquet(side_files)
+        schema_keys = combined_df.collect_schema().names()
+        use_sort_keys = sort_keys or ["ListingId", "TimeBucket"]
+        valid_sort_keys = [k for k in use_sort_keys if k in schema_keys]
+        final_df = combined_df.sort(valid_sort_keys) if valid_sort_keys else combined_df
+        final_df = normalize_float_lf(final_df)
+
+        local_path = os.path.join(
+            temp_dir, f"side-{side_name}-{start_date.date()}-{end_date.date()}.parquet"
+        )
+        final_df.collect().write_parquet(local_path)
+        materialized_paths[side_name] = local_path
+
+        final_path = None
+        if policy == "always":
+            if output_target and getattr(output_target, "path_template", None):
+                final_path = get_side_output_path(
+                    start_date, end_date, config, pass_config.name, side_name, output_target
+                )
+            else:
+                final_path = get_side_output_path(
+                    start_date, end_date, config, pass_config.name, side_name
+                )
+
+        logging.info(
+            "Writing side output %s for Pass %s to %s",
+            side_name,
+            pass_config.name,
+            final_path,
+        )
+        if policy == "always" and final_path:
+            if output_target.type.value == "parquet":
+                retry_s3(
+                    lambda: final_df.sink_parquet(final_path)
+                    if is_s3_path(final_path)
+                    else final_df.collect().write_parquet(final_path),
+                    desc=f"write side output {side_name}",
+                )
+            elif output_target.type.value == "delta":
+                final_df.collect().write_delta(final_path, mode="overwrite")
+            else:
+                logging.warning("Side output materialization only supported for file outputs.")
+
+        for f in side_files:
+            try:
+                os.remove(f)
+            except OSError as e:
+                logging.error("Error removing temporary side output file %s: %s", f, e)
+    return materialized_paths
 
 
 class BatchWriter:

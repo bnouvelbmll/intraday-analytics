@@ -610,6 +610,49 @@ def run_cli(
     )
 
 
+def list_side_outputs(
+    *,
+    pipeline: str,
+    config_precedence: str = "yaml_overrides",
+) -> list[dict]:
+    path = Path(pipeline)
+    if path.exists():
+        spec = importlib.util.spec_from_file_location(path.stem, path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Unable to load pipeline: {pipeline}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # type: ignore[attr-defined]
+    else:
+        module = importlib.import_module(pipeline)
+    if not hasattr(module, "USER_CONFIG"):
+        raise ValueError("Pipeline module must define USER_CONFIG.")
+    config_file = getattr(module, "__file__", None) or pipeline
+    base_config = resolve_user_config(
+        dict(module.USER_CONFIG),
+        module_file=config_file,
+        precedence=config_precedence,
+    )
+    config = AnalyticsConfig(**base_config)
+    rows: list[dict] = []
+    for pass_cfg in config.PASSES:
+        side_outputs = pass_cfg.side_outputs or {}
+        for name, cfg in side_outputs.items():
+            namespace = pass_cfg.side_output_namespace
+            key = cfg.context_key if cfg.context_key else (
+                f"{namespace}:{name}" if namespace else f"{pass_cfg.name}:{name}"
+            )
+            rows.append(
+                {
+                    "pass": pass_cfg.name,
+                    "name": name,
+                    "context_key": key,
+                    "materialize": cfg.materialize,
+                    "description": cfg.description,
+                }
+            )
+    return rows
+
+
 def main():
     _disable_fire_pager()
     if len(sys.argv) > 1 and sys.argv[1] == "bmll_job_run":

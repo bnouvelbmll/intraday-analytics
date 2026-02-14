@@ -560,6 +560,7 @@ class BaseAnalytics(ABC):
         self.specific_fill_cols = specific_fill_cols or {}
         self.context: Dict[str, Any] = {}
         self.metric_prefix = metric_prefix or ""
+        self._side_outputs: Dict[str, Any] = {}
 
     @abstractmethod
     def compute(self, **kwargs) -> pl.LazyFrame:
@@ -664,6 +665,18 @@ class BaseAnalytics(ABC):
         if self.metric_prefix:
             return f"{self.metric_prefix}{name}"
         return name
+
+    def set_side_output(self, name: str, value: Any) -> None:
+        """
+        Register a side output table produced by this module.
+        """
+        self._side_outputs[name] = value
+
+    def get_side_outputs(self) -> Dict[str, Any]:
+        """
+        Return side outputs registered by this module.
+        """
+        return dict(self._side_outputs)
 
     def _ohlc_names(self, req: Any, variant: Dict[str, Any]) -> dict[str, str]:
         names = {}

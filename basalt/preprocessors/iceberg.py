@@ -820,6 +820,9 @@ class IcebergAnalytics(BaseAnalytics):
         if self.config.tag_trades:
             tagged_trades = self._tag_trades(iceberg_exec, exec_base)
             self.context[self.config.trade_tag_context_key] = tagged_trades
+            self.set_side_output("iceberg_trades", tagged_trades)
+
+        self.set_side_output("iceberg_events", iceberg_exec)
 
         ctx = AnalyticContext(
             base_df=iceberg_exec,

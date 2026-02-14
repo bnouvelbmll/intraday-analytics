@@ -1,5 +1,10 @@
 import polars as pl
-from typing import Optional, Dict, Callable, List
+from typing import Optional, Dict, Callable, List, Literal
+
+from pydantic import BaseModel, Field, ConfigDict
+
+from basalt.analytics_base import BaseAnalytics
+from basalt.analytics_registry import register_analytics
 
 
 def snake_to_pascal(snake_case: str) -> str:
@@ -330,3 +335,160 @@ class AggressiveTradesTransform:
             )
 
         return aggressive_orders
+
+
+def compute_aggressive_orders_and_executions(
+    data: pl.LazyFrame,
+    *,
+    execution_size: Optional[str],
+    deltat: float,
+    time_bucket_seconds: Optional[int],
+) -> tuple[Optional[pl.LazyFrame], Optional[pl.LazyFrame]]:
+    schema = data.collect_schema()
+
+    if (
+        "EventTimestamp" not in schema.names()
+        and "TimestampNanoseconds" in schema.names()
+    ):
+        data = data.with_columns(
+            EventTimestamp=pl.col("TimestampNanoseconds").cast(pl.Datetime("ns"))
+        )
+        schema = data.collect_schema()
+
+    group_cols = [col for col in ["MIC", "ListingId"] if col in schema.names()]
+
+    is_l3 = (
+        _first_available(schema, ["LobAction", "lob_action"]) is not None
+        and _first_available(schema, ["ExecutionSize", "execution_size"])
+        is not None
+    )
+
+    if is_l3:
+        ts_col = (
+            "EventTimestamp"
+            if "EventTimestamp" in schema.names()
+            else "TimestampNanoseconds"
+        )
+        execution_size_col = execution_size or "ExecutionSize"
+        enriched_data = data
+        if "BestAskPrice" in schema.names():
+            enriched_data = enrich_orderbook(data, group_cols)
+        trades = filter_executions(enriched_data, execution_size_col)
+    else:
+        ts_col = "TradeTimestamp"
+        execution_size_col = execution_size or "Size"
+        required_enrich_cols = ["OldBestAskPrice", "OldBestBidPrice"]
+        if not all(c in schema.names() for c in required_enrich_cols):
+            data = enrich_orderbook(data, group_cols)
+        trades = filter_executions(data, execution_size_col)
+
+    if trades.collect().is_empty():
+        return None, None
+
+    trades = normalise_aggressor_side(trades)
+    trades = group_executions(trades, deltat, ts_col=ts_col, group_cols=group_cols)
+
+    if (
+        is_l3
+        and "OldPrice" in trades.collect_schema().names()
+        and "ExecutionPrice" in trades.collect_schema().names()
+    ):
+        trades = trades.filter(pl.col("OldPrice") == pl.col("ExecutionPrice"))
+
+    aggressive_orders = aggregate_trades(
+        trades, execution_size_col, ts_col=ts_col, group_cols=group_cols
+    )
+
+    if time_bucket_seconds:
+        aggressive_orders = aggressive_orders.with_columns(
+            TimeBucket=pl.col(ts_col).dt.truncate(f"{time_bucket_seconds}s")
+        )
+        trades = trades.with_columns(
+            TimeBucket=pl.col(ts_col).dt.truncate(f"{time_bucket_seconds}s")
+        )
+
+    return aggressive_orders, trades
+
+
+class AggressiveTradesPreprocessConfig(BaseModel):
+    """
+    Build aggressive order groupings from trades or L3 executions.
+
+    Side outputs:
+    - `aggressive_orders`: aggregated aggressive orders (one row per order)
+    - `aggressive_executions`: executions grouped into aggressive orders
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "ui": {
+                "module": "aggressive_preprocess",
+                "tier": "preprocess",
+                "desc": "Preprocess: aggregate executions into aggressive orders.",
+                "schema_keys": ["aggressive_orders", "aggressive_executions"],
+            }
+        }
+    )
+
+    ENABLED: bool = Field(
+        False,
+        description="Enable or disable aggressive order preprocessing.",
+    )
+    source_table: Literal["trades", "l3"] = Field(
+        "trades",
+        description="Input source table for aggressive grouping.",
+    )
+    execution_size: Optional[str] = Field(
+        None,
+        description="Override execution size column (defaults to Size or ExecutionSize).",
+    )
+    deltat: float = Field(
+        1e-5,
+        description="Max inter-execution gap (seconds) for grouping into aggressive orders.",
+    )
+    time_bucket_seconds: Optional[int] = Field(
+        None,
+        description="Optional time bucket override for aggressive outputs.",
+    )
+
+
+@register_analytics("aggressive_preprocess", config_attr="aggressive_preprocess")
+class AggressiveTradesPreprocess(BaseAnalytics):
+    """
+    Preprocess aggressive orders into side output tables.
+    """
+
+    REQUIRES = ["trades"]
+
+    def __init__(self, config: AggressiveTradesPreprocessConfig):
+        super().__init__("aggressive_preprocess", {})
+        self.config = config
+        if config.source_table == "l3":
+            self.REQUIRES = ["l3"]
+
+    def compute(self) -> pl.LazyFrame:
+        if not self.config.ENABLED:
+            return pl.DataFrame().lazy()
+        source = self.trades if self.config.source_table == "trades" else self.l3
+        if source is None:
+            raise ValueError("Aggressive preprocess source table not provided.")
+        if isinstance(source, pl.DataFrame):
+            source = source.lazy()
+
+        orders, executions = compute_aggressive_orders_and_executions(
+            source,
+            execution_size=self.config.execution_size,
+            deltat=self.config.deltat,
+            time_bucket_seconds=self.config.time_bucket_seconds,
+        )
+        if orders is not None:
+            size_col = "ExecutionSize" if "ExecutionSize" in orders.collect_schema().names() else "Size"
+            if size_col in orders.collect_schema().names():
+                orders = orders.with_columns(AggressiveSize=pl.col(size_col))
+            self.set_side_output("aggressive_orders", orders)
+        if executions is not None:
+            exec_size_col = "ExecutionSize" if "ExecutionSize" in executions.collect_schema().names() else "Size"
+            if exec_size_col in executions.collect_schema().names():
+                executions = executions.with_columns(AggressiveExecutionSize=pl.col(exec_size_col))
+            self.set_side_output("aggressive_executions", executions)
+        return pl.DataFrame().lazy()

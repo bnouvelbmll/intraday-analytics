@@ -40,6 +40,27 @@ def _resolve_module_inputs(pass_config: PassConfig, module: BaseAnalytics) -> di
     )
 
 
+def _side_output_key(pass_config: PassConfig, side_name: str) -> str:
+    side_cfg = (pass_config.side_outputs or {}).get(side_name)
+    if side_cfg and getattr(side_cfg, "context_key", None):
+        return str(side_cfg.context_key)
+    namespace = getattr(pass_config, "side_output_namespace", None)
+    if namespace:
+        return f"{namespace}:{side_name}"
+    return f"{pass_config.name}:{side_name}"
+
+
+def _resolve_context_source(source: str, context: dict) -> str:
+    if source in context:
+        return source
+    if ":" in source:
+        return source
+    matches = [k for k in context.keys() if k.endswith(f":{source}")]
+    if len(matches) == 1:
+        return matches[0]
+    return source
+
+
 def _to_df(value: Any, config) -> pl.DataFrame | None:
     if value is None:
         return None
@@ -203,7 +224,7 @@ class AnalyticsPipeline:
     Orchestrates the execution of a series of analytics modules for a single pass.
     """
 
-    def __init__(self, modules, config, pass_config, context=None):
+    def __init__(self, modules, config, pass_config, context=None, preprocess_modules=None):
         """
         Initializes the AnalyticsPipeline.
 
@@ -214,9 +235,16 @@ class AnalyticsPipeline:
             context: A dictionary for sharing data between passes.
         """
         self.modules = modules
+        self.preprocess_modules = preprocess_modules or []
         self.config = config
         self.pass_config = pass_config
         self.context = context if context is not None else {}
+        self._last_side_outputs: Dict[str, pl.LazyFrame | pl.DataFrame] = {}
+
+    def pop_side_outputs(self) -> Dict[str, pl.LazyFrame | pl.DataFrame]:
+        out = dict(self._last_side_outputs)
+        self._last_side_outputs = {}
+        return out
 
     def run_on_multi_tables(
         self, **tables_for_sym: Dict[str, pl.DataFrame]
@@ -248,6 +276,41 @@ class AnalyticsPipeline:
             if "TimeBucket" not in join_keys_override:
                 join_keys_override.append("TimeBucket")
 
+        side_outputs: Dict[str, pl.LazyFrame | pl.DataFrame] = {}
+
+        for module in self.preprocess_modules:
+            module.context = self.context
+            if hasattr(module, "config") and hasattr(module.config, "time_bucket_seconds"):
+                if getattr(module.config, "time_bucket_seconds", None) is None:
+                    module.config.time_bucket_seconds = int(self.pass_config.time_bucket_seconds)
+            module_inputs = _resolve_module_inputs(self.pass_config, module)
+            for req in module.REQUIRES:
+                source = module_inputs.get(req, req)
+                data = None
+                if source in prepared_tables:
+                    data = prepared_tables[source]
+                else:
+                    resolved_source = _resolve_context_source(source, self.context)
+                    if resolved_source in self.context:
+                        data = self.context[resolved_source]
+                if daily_mode:
+                    data = _apply_daily_timebucket(data, batch_date)
+                if data is not None:
+                    if hasattr(data, "lazy"):
+                        setattr(module, req, data.lazy())
+                    else:
+                        setattr(module, req, data)
+            for r in module.REQUIRES:
+                if getattr(module, r) is None:
+                    source = module_inputs.get(r, r)
+                    raise AssertionError(f"{r} is not loaded (source='{source}')")
+
+            module.compute()
+            for name, value in module.get_side_outputs().items():
+                side_outputs[name] = value
+                key = _side_output_key(self.pass_config, name)
+                self.context[key] = value
+
         for module in self.modules:
             # Provide the context to the module
             module.context = self.context
@@ -266,8 +329,10 @@ class AnalyticsPipeline:
                 data = None
                 if source in prepared_tables:
                     data = prepared_tables[source]
-                elif source in self.context:
-                    data = self.context[source]
+                else:
+                    resolved_source = _resolve_context_source(source, self.context)
+                    if resolved_source in self.context:
+                        data = self.context[resolved_source]
                 if daily_mode:
                     data = _apply_daily_timebucket(data, batch_date)
                 if data is not None:
@@ -321,6 +386,11 @@ class AnalyticsPipeline:
                     base = collect_lazy(base, config=self.config).lazy()
                 prev_specific_cols.update(module.specific_fill_cols)
 
+            for name, value in module.get_side_outputs().items():
+                side_outputs[name] = value
+                key = _side_output_key(self.pass_config, name)
+                self.context[key] = value
+
         # Store the result in the context for subsequent passes
         output_df = collect_lazy(base, config=self.config)
         reference_df = _reference_input_df(
@@ -332,6 +402,7 @@ class AnalyticsPipeline:
         )
         _validate_pass_expectations(self.pass_config, output_df, reference_df)
         self.context[self.pass_config.name] = output_df
+        self._last_side_outputs = side_outputs
         return self.context[self.pass_config.name]
 
     def save(self, df: pl.DataFrame | pl.LazyFrame, path: str, profile: bool = False):
@@ -371,10 +442,12 @@ class AnalyticsRunner:
         pipeline: AnalyticsPipeline,
         out_writer: Callable[[pl.DataFrame, str], None],
         config: dict,
+        side_writer: Optional[Callable[[str, pl.DataFrame, Optional[str]], None]] = None,
     ):
         self.pipeline = pipeline
         self.out_writer = out_writer
         self.config = config
+        self.side_writer = side_writer
 
     def run_batch(self, batch_data: Dict[str, pl.DataFrame]):
         """
@@ -413,10 +486,22 @@ class AnalyticsRunner:
                     for name, df in batch_data.items()
                 }
                 result = self.pipeline.run_on_multi_tables(**tables_for_sym)
+                side_outputs = self.pipeline.pop_side_outputs()
+                if self.side_writer:
+                    for name, value in side_outputs.items():
+                        df = collect_lazy(value, config=self.config) if hasattr(value, "collect_schema") else value
+                        if df is not None:
+                            self.side_writer(name, df, sym)
                 self.out_writer(result, sym)
             return result if "result" in locals() else None
         else:
             result = self.pipeline.run_on_multi_tables(**batch_data)
+            side_outputs = self.pipeline.pop_side_outputs()
+            if self.side_writer:
+                for name, value in side_outputs.items():
+                    df = collect_lazy(value, config=self.config) if hasattr(value, "collect_schema") else value
+                    if df is not None:
+                        self.side_writer(name, df, "batch")
             self.out_writer(result, "batch")
             return result
 
@@ -445,6 +530,7 @@ def create_pipeline(
     # Build the list of module instances for this pass
     modules = []
     module_names = _order_modules_for_timeline(list(pass_config.modules))
+    preprocess_names = list(getattr(pass_config, "preprocess_modules", []) or [])
     if pass_config.trade_analytics.enable_retail_imbalance:
         if "retail_imbalance" not in module_names:
             module_names.append("retail_imbalance")
@@ -460,6 +546,16 @@ def create_pipeline(
                     module_names.insert(trade_idx, "iceberg")
             except ValueError:
                 pass
+    preprocess_modules = []
+    for module_name in preprocess_names:
+        factory = module_registry.get(module_name)
+        if isinstance(factory, BaseAnalytics):
+            preprocess_modules.append(factory)
+        elif callable(factory):
+            preprocess_modules.append(factory())
+        else:
+            logging.warning(f"Preprocess module '{module_name}' not recognized in factory.")
+
     for module_name in module_names:
         factory = module_registry.get(module_name)
         if isinstance(factory, BaseAnalytics):
@@ -479,4 +575,4 @@ def create_pipeline(
     if config is None:
         raise ValueError("create_pipeline requires config=AnalyticsConfig")
 
-    return AnalyticsPipeline(modules, config, pass_config, context)
+    return AnalyticsPipeline(modules, config, pass_config, context, preprocess_modules=preprocess_modules)

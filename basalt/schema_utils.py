@@ -551,6 +551,42 @@ def get_output_schema(config_or_pass) -> Dict[str, List[str]]:
     except Exception as e:
         output_columns["predictor_error"] = [str(e)]
 
+    # --- Aggressive orders ---
+    try:
+        output_columns["aggressive_orders"] = [
+            "ListingId",
+            "TimeBucket",
+            "AggressorSide",
+            "AggressiveSize",
+            "NumExecutions",
+        ]
+        output_columns["aggressive_executions"] = [
+            "ListingId",
+            "TimeBucket",
+            "AggressorSide",
+            "AggressiveExecutionSize",
+        ]
+    except Exception as e:
+        output_columns["aggressive_orders_error"] = [str(e)]
+
+    # --- Iceberg side outputs ---
+    try:
+        output_columns["iceberg_events"] = [
+            "ListingId",
+            "TimeBucket",
+            "ExecutionSize",
+            "ExecutionPrice",
+            "IcebergId",
+        ]
+        output_columns["iceberg_trades"] = [
+            "ListingId",
+            "TradeTimestamp",
+            "IcebergExecution",
+            "IcebergTag",
+        ]
+    except Exception as e:
+        output_columns["iceberg_side_error"] = [str(e)]
+
     return output_columns
 
 
@@ -570,7 +606,8 @@ def _filter_schema_for_pass1(config: AnalyticsConfig | PassConfig, schema: Dict[
         "trade": ["trade"],
         "l3": ["l3"],
         "execution": ["execution"],
-        "iceberg": ["iceberg"],
+        "iceberg": ["iceberg", "iceberg_events", "iceberg_trades"],
+        "aggressive_preprocess": ["aggressive_orders", "aggressive_executions"],
         "cbbo_analytics": ["cbbo_analytics"],
         "external_events": ["external_events"],
         "observed_events": ["observed_events"],
@@ -578,6 +615,8 @@ def _filter_schema_for_pass1(config: AnalyticsConfig | PassConfig, schema: Dict[
 
     keys = []
     for module in pass1.modules:
+        keys.extend(module_map.get(module, []))
+    for module in getattr(pass1, "preprocess_modules", []) or []:
         keys.extend(module_map.get(module, []))
 
     if not keys:
