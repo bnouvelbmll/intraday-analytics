@@ -1,9 +1,13 @@
 from pathlib import Path
 from setuptools import find_packages, setup
+import importlib.util
 import os
 import sys
 import subprocess
 import shutil
+
+
+VERSION = "0.1.0"
 
 
 def _load_requirements(path: str) -> list[str]:
@@ -27,364 +31,115 @@ core_requirements = [
     if not req.lower().startswith(_OPTIONAL_CORE_REQ_PREFIXES)
 ]
 
-VERSION = "0.1.0"
+
+def _load_subsetup(path: Path) -> dict:
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load subpackage setup: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore[attr-defined]
+    if not hasattr(module, "get_subpackage_spec"):
+        raise RuntimeError(f"Missing get_subpackage_spec in {path}")
+    data = module.get_subpackage_spec()
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Subpackage spec in {path} must be a dict")
+    data["_path"] = str(path)
+    return data
 
 
-def _all_dist_names() -> list[str]:
-    return [
-        "core",
-        "dagster",
-        "preprocessors",
-        "characteristics",
-        "alpha101",
-        "visualization",
-        "optimize",
-        "objective_functions",
-        "models",
-        "talib",
-        "mcp",
-        "aws_ec2",
-        "kubernetes",
-        "backtest",
-    ]
+def _discover_subpackages(root: str = "basalt") -> list[dict]:
+    specs: list[dict] = []
+    for path in sorted(Path(root).rglob("subsetup.py")):
+        specs.append(_load_subsetup(path))
+    return specs
 
 
-def _build_all_dists() -> None:
-    for name in _all_dist_names():
+def _all_dist_names(specs: list[dict]) -> list[str]:
+    names = ["core"]
+    names.extend(sorted({spec["dist"] for spec in specs}))
+    return names
+
+
+def _merge_entry_points(*groups: dict) -> dict:
+    merged: dict[str, list[str]] = {}
+    for group in groups:
+        for key, values in (group or {}).items():
+            merged.setdefault(key, [])
+            for value in values:
+                if value not in merged[key]:
+                    merged[key].append(value)
+    return merged
+
+
+def _build_all_dists(specs: list[dict]) -> None:
+    for name in _all_dist_names(specs):
         env = os.environ.copy()
         env["BASALT_DIST"] = name
         subprocess.check_call([sys.executable, __file__, *sys.argv[1:]], env=env)
 
 
+subpackages = _discover_subpackages()
+subpackages_by_dist = {spec["dist"]: spec for spec in subpackages}
+
 if (
     os.environ.get("BASALT_DIST") is None
     and any(cmd in sys.argv for cmd in ("bdist_wheel", "bdist", "sdist"))
 ):
-    _build_all_dists()
+    _build_all_dists(subpackages)
     raise SystemExit(0)
 
 
 dist = os.environ.get("BASALT_DIST", "core")
 if dist == "all" and any(cmd in sys.argv for cmd in ("bdist_wheel", "bdist", "sdist")):
-    _build_all_dists()
+    _build_all_dists(subpackages)
     raise SystemExit(0)
 
 shutil.rmtree("build", ignore_errors=True)
+
 subpackage_requirements = {
-    "dagster": ["dagster", "dagster-webserver"],
-    "preprocessors": [],
-    "characteristics": [],
-    "alpha101": [],
-    "visualization": ["streamlit", "plotly"],
-    "optimize": [],
-    "objective_functions": [],
-    "models": [],
-    "talib": ["TA-Lib"],
-    "mcp": [
-        # Pinned ranges reduce pip backtracking in editable/all installs.
-        "fastmcp>=2.14,<2.15",
-        "mcp>=1.22,<2",
-    ],
-    "aws_ec2": [],
-    "kubernetes": [],
-    "backtest": [],
+    spec["dist"]: list(spec.get("requirements") or []) for spec in subpackages
 }
+
 extras = {
     name: [f"bmll-basalt-{name}>={VERSION}"] for name in subpackage_requirements
 }
 extras["all"] = sorted({dep for deps in extras.values() for dep in deps})
 
+core_entry_points = {
+    "console_scripts": [
+        "basalt=basalt.basalt:main",
+    ],
+    "basalt.plugins": [
+        "bmll=basalt.executors.bmll:get_basalt_plugin",
+    ],
+    "basalt.cli": [
+        "bmll=basalt.executors.bmll:get_cli_extension",
+    ],
+}
+
 if dist == "core":
     name = "bmll-basalt"
-    packages = find_packages(
-        exclude=(
-            "intraday_analytics*",
-            "basalt.dagster*",
-            "basalt.preprocessors*",
-            "basalt.analytics.characteristics*",
-            "basalt.analytics.alpha101*",
-            "basalt.visualization*",
-            "basalt.optimize*",
-            "basalt.objective_functions*",
-            "basalt.models*",
-            "basalt.executors.aws_ec2*",
-            "basalt.executors.kubernetes*",
-            "basalt.analytics.talib*",
-            "basalt.mcp*",
-            "basalt.backtest*",
-            "basalt.tests*",
-            "basalt.analytics.tests*",
-            "basalt.dagster.tests*",
-            "basalt.preprocessors.tests*",
-        )
-    )
+    core_excludes = [
+        "intraday_analytics*",
+        "basalt.tests*",
+        "basalt.analytics.tests*",
+        "basalt.dagster.tests*",
+        "basalt.preprocessors.tests*",
+    ]
+    for spec in subpackages:
+        for pkg_root in spec.get("package_roots", []):
+            core_excludes.append(f"{pkg_root}*")
+    packages = find_packages(exclude=tuple(core_excludes))
     install_requires = core_requirements
     extras_require = extras
-    entry_points = {
-        "console_scripts": [
-            "basalt=basalt.basalt:main",
-        ],
-        "basalt.plugins": [
-            "bmll=basalt.executors.bmll:get_basalt_plugin",
-        ],
-        "basalt.cli": [
-            "bmll=basalt.executors.bmll:get_cli_extension",
-        ],
-    }
-elif dist == "dagster":
-    name = "bmll-basalt-dagster"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "dagster=basalt.dagster:get_basalt_plugin",
-        ],
-        "basalt.cli": [
-            "dagster=basalt.dagster.cli_ext:get_cli_extension",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.dagster",
-            "basalt.dagster.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "preprocessors":
-    name = "bmll-basalt-preprocessors"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "preprocessors=basalt.preprocessors:get_basalt_plugin",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.preprocessors",
-            "basalt.preprocessors.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "characteristics":
-    name = "bmll-basalt-characteristics"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "characteristics=basalt.analytics.characteristics:get_basalt_plugin",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.analytics.characteristics",
-            "basalt.analytics.characteristics.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "alpha101":
-    name = "bmll-basalt-alpha101"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "alpha101=basalt.analytics.alpha101:get_basalt_plugin",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.analytics.alpha101",
-            "basalt.analytics.alpha101.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "visualization":
-    name = "bmll-basalt-visualization"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "visualization=basalt.visualization:get_basalt_plugin",
-        ],
-        "basalt.cli": [
-            "viz=basalt.visualization.cli_ext:get_cli_extension",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.visualization",
-            "basalt.visualization.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "optimize":
-    name = "bmll-basalt-optimize"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "optimize=basalt.optimize:get_basalt_plugin",
-        ],
-        "basalt.cli": [
-            "optimize=basalt.optimize.cli_ext:get_cli_extension",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.optimize",
-            "basalt.optimize.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "backtest":
-    name = "bmll-basalt-backtest"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "backtest=basalt.backtest:get_basalt_plugin",
-        ],
-        "basalt.cli": [
-            "backtest=basalt.backtest.cli_ext:get_cli_extension",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.backtest",
-            "basalt.backtest.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "objective_functions":
-    name = "bmll-basalt-objective-functions"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "objective_functions=basalt.objective_functions:get_basalt_plugin",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.objective_functions",
-            "basalt.objective_functions.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "models":
-    name = "bmll-basalt-models"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "models=basalt.models:get_basalt_plugin",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.models",
-            "basalt.models.*",
-        )
-    )
-    install_requires = [
-        "bmll-basalt>=" + VERSION,
-        "bmll-basalt-objective-functions>=" + VERSION,
-    ] + subpackage_requirements[dist]
-elif dist in {"aws_ec2", "kubernetes"}:
-    name = f"bmll-basalt-{dist}"
-    extras_require = {}
-    if dist == "aws_ec2":
-        packages = find_packages(
-            include=(
-                "basalt.executors",
-                "basalt.executors.aws_ec2",
-                "basalt.executors.aws_ec2.*",
-            )
-        )
-        entry_points = {
-            "basalt.plugins": [
-                "aws_ec2=basalt.executors.aws_ec2:get_basalt_plugin",
-            ],
-            "basalt.cli": [
-                "ec2=basalt.executors.aws_ec2:get_cli_extension",
-            ],
-        }
-    else:
-        packages = find_packages(
-            include=(
-                "basalt.executors",
-                "basalt.executors.kubernetes",
-                "basalt.executors.kubernetes.*",
-            )
-        )
-        entry_points = {
-            "basalt.plugins": [
-                "kubernetes=basalt.executors.kubernetes:get_basalt_plugin",
-            ],
-            "basalt.cli": [
-                "k8s=basalt.executors.kubernetes:get_cli_extension",
-            ],
-        }
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "talib":
-    name = "bmll-basalt-talib"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "talib=basalt.analytics.talib:get_basalt_plugin",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.analytics.talib",
-            "basalt.analytics.talib.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
-elif dist == "mcp":
-    name = "bmll-basalt-mcp"
-    extras_require = {}
-    entry_points = {
-        "basalt.plugins": [
-            "mcp=basalt.mcp:get_basalt_plugin",
-        ],
-        "basalt.cli": [
-            "mcp=basalt.mcp.cli_ext:get_cli_extension",
-        ],
-    }
-    packages = find_packages(
-        include=(
-            "basalt.mcp",
-            "basalt.mcp.*",
-        )
-    )
-    install_requires = ["bmll-basalt>=" + VERSION] + subpackage_requirements[dist]
+    entry_points = core_entry_points
 elif dist == "all":
-    # Aggregate editable/install mode: a single distribution containing all
-    # local subpackages and all plugin/cli entry points. This avoids pip editable
-    # failures that expect a single .egg-info directory.
     name = "bmll-basalt-all"
     extras_require = {}
-    entry_points = {
-        "console_scripts": [
-            "basalt=basalt.basalt:main",
-        ],
-        "basalt.plugins": [
-            "bmll=basalt.executors.bmll:get_basalt_plugin",
-            "dagster=basalt.dagster:get_basalt_plugin",
-            "preprocessors=basalt.preprocessors:get_basalt_plugin",
-            "characteristics=basalt.analytics.characteristics:get_basalt_plugin",
-            "alpha101=basalt.analytics.alpha101:get_basalt_plugin",
-            "talib=basalt.analytics.talib:get_basalt_plugin",
-            "mcp=basalt.mcp:get_basalt_plugin",
-            "optimize=basalt.optimize:get_basalt_plugin",
-            "objective_functions=basalt.objective_functions:get_basalt_plugin",
-            "models=basalt.models:get_basalt_plugin",
-            "aws_ec2=basalt.executors.aws_ec2:get_basalt_plugin",
-            "kubernetes=basalt.executors.kubernetes:get_basalt_plugin",
-            "visualization=basalt.visualization:get_basalt_plugin",
-        ],
-        "basalt.cli": [
-            "bmll=basalt.executors.bmll:get_cli_extension",
-            "dagster=basalt.dagster.cli_ext:get_cli_extension",
-            "mcp=basalt.mcp.cli_ext:get_cli_extension",
-            "optimize=basalt.optimize.cli_ext:get_cli_extension",
-            "ec2=basalt.executors.aws_ec2:get_cli_extension",
-            "k8s=basalt.executors.kubernetes:get_cli_extension",
-            "viz=basalt.visualization.cli_ext:get_cli_extension",
-        ],
-    }
+    entry_points = _merge_entry_points(
+        core_entry_points,
+        *(spec.get("entry_points") or {} for spec in subpackages),
+    )
     packages = find_packages(
         exclude=(
             "intraday_analytics*",
@@ -395,19 +150,25 @@ elif dist == "all":
         )
     )
     all_optional = sorted(
-        {
-            dep
-            for deps in subpackage_requirements.values()
-            for dep in deps
-        }
+        {dep for deps in subpackage_requirements.values() for dep in deps}
     )
     install_requires = core_requirements + all_optional
 else:
-    name = f"bmll-basalt-{dist}"
-    extras_require = {}
-    entry_points = {}
-    packages = []
-    install_requires = ["bmll-basalt>=" + VERSION] + extras.get(dist, [])
+    spec = subpackages_by_dist.get(dist)
+    if spec is None:
+        name = f"bmll-basalt-{dist}"
+        extras_require = {}
+        entry_points = {}
+        packages = []
+        install_requires = ["bmll-basalt>=" + VERSION] + extras.get(dist, [])
+    else:
+        name = spec.get("name") or f"bmll-basalt-{dist}"
+        extras_require = {}
+        entry_points = spec.get("entry_points") or {}
+        packages = find_packages(include=tuple(spec.get("packages") or ()))
+        install_requires = ["bmll-basalt>=" + VERSION] + list(
+            spec.get("requirements") or []
+        )
 
 
 setup(
