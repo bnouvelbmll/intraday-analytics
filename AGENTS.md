@@ -40,7 +40,7 @@ Operational recommendations for contributors working on `basalt` core and subpac
 - Avoid hard dependency from core import path to optional backends.
 
 ## Tests And Quality
-- Run full suite before commit: `python3 -m pytest -q`.
+- Run full suite before commit: `python3 -m pytest` (use `-q` when you want quieter output).
 - Add targeted tests when changing:
   - timeline/join semantics,
   - config UI behavior,

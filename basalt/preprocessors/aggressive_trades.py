@@ -424,7 +424,18 @@ class AggressiveTradesPreprocessConfig(BaseModel):
             "ui": {
                 "module": "aggressive_preprocess",
                 "tier": "pre",
-                "desc": "Preprocess: aggregate executions into aggressive orders.",
+                "desc": (
+                    "Preprocess aggressive executions into coherent order-level events.\n"
+                    "This module groups nearby executions that likely belong to one aggressor order.\n"
+                    "It is intended for downstream analytics that need order-level, not fill-level, features.\n"
+                    "The grouping logic uses timestamp proximity and side/price continuity rules.\n"
+                    "You can run it from `trades` when execution-level trade prints are available.\n"
+                    "You can run it from `l3` when order-book event streams are the preferred source.\n"
+                    "Outputs are side tables: one for grouped orders and one for grouped executions.\n"
+                    "Grouped outputs can be reused by later modules through explicit context mappings.\n"
+                    "Tune `deltat` conservatively: too small fragments orders, too large merges unrelated flow.\n"
+                    "Use this module when your analysis depends on aggressor intent and execution clustering."
+                ),
                 "schema_keys": ["aggressive_orders", "aggressive_executions"],
             }
         }
@@ -433,22 +444,57 @@ class AggressiveTradesPreprocessConfig(BaseModel):
     ENABLED: bool = Field(
         False,
         description="Enable or disable aggressive order preprocessing.",
+        json_schema_extra={
+            "long_doc": (
+                "Turns this preprocessing module on for the current pass.\n"
+                "Keep disabled when you do not need aggressive side outputs to avoid extra compute.\n"
+                "Enable only when downstream modules or diagnostics consume aggressive order tables.\n"
+            )
+        },
     )
     source_table: Literal["trades", "l3"] = Field(
         "trades",
         description="Input source table for aggressive grouping.",
+        json_schema_extra={
+            "long_doc": (
+                "Selects the raw dataset used to detect and group aggressive executions.\n"
+                "Use `trades` for print-driven workflows; use `l3` when you need book-event precision.\n"
+                "Match this choice with module_inputs so the selected source is available in the pass.\n"
+            )
+        },
     )
     execution_size: Optional[str] = Field(
         None,
         description="Override execution size column (defaults to Size or ExecutionSize).",
+        json_schema_extra={
+            "long_doc": (
+                "Optional explicit size column name used when aggregating grouped executions.\n"
+                "Leave unset to auto-detect `Size` or `ExecutionSize` from the selected source table.\n"
+                "Set this when your dataset uses a custom size field to prevent mis-aggregation.\n"
+            )
+        },
     )
     deltat: float = Field(
         1e-5,
         description="Max inter-execution gap (seconds) for grouping into aggressive orders.",
+        json_schema_extra={
+            "long_doc": (
+                "Maximum time gap allowed between consecutive executions in the same aggressive group.\n"
+                "Start from the default and increase gradually only if one logical order is being fragmented.\n"
+                "If set too high, unrelated executions may be merged and distort order-level metrics.\n"
+            )
+        },
     )
     time_bucket_seconds: Optional[int] = Field(
         None,
         description="Optional time bucket override for aggressive outputs.",
+        json_schema_extra={
+            "long_doc": (
+                "Optional bucket size used to derive `TimeBucket` on aggressive side outputs.\n"
+                "Leave unset to preserve event-level timestamps without adding bucketed time labels.\n"
+                "Set this when downstream modules expect bucket-aligned aggressive order features.\n"
+            )
+        },
     )
 
 

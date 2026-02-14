@@ -205,13 +205,130 @@ def _field_short_doc(field) -> Optional[str]:
     return getattr(field, "description", None)
 
 
-def _field_long_doc(field) -> Optional[str]:
+def _doc_lines(text: Optional[str]) -> list[str]:
+    if not text:
+        return []
+    return [line.strip() for line in str(text).splitlines() if line.strip()]
+
+
+def _field_type_name(field) -> str:
+    annotation = getattr(field, "annotation", None)
+    if annotation is None:
+        return "value"
+    try:
+        name = getattr(annotation, "__name__", None)
+        if name:
+            return str(name)
+        return str(annotation).replace("typing.", "")
+    except Exception:
+        return "value"
+
+
+def _field_long_doc(field, field_name: Optional[str] = None) -> Optional[str]:
     if field is None:
         return None
     extra = getattr(field, "json_schema_extra", None) or {}
+    long_doc = None
     if isinstance(extra, dict):
-        return extra.get("long_doc")
-    return None
+        long_doc = extra.get("long_doc")
+    lines = _doc_lines(long_doc)
+    if len(lines) >= 3:
+        return "\n".join(lines)
+
+    description = (getattr(field, "description", None) or "").strip()
+    default = getattr(field, "default", PydanticUndefined)
+    default_text = (
+        "required"
+        if default is PydanticUndefined
+        else (
+            repr(default)
+            if isinstance(default, (str, int, float, bool, list, dict, tuple))
+            else "provided by default factory"
+        )
+    )
+    name = field_name or "this option"
+    generated = [
+        f"Purpose: {description or f'Controls {name} for this module.'}",
+        f"Setup: use a value compatible with `{_field_type_name(field)}`; default is {default_text}.",
+        "Guidance: keep the default first, then change this only when your dataset or pass objective requires it.",
+    ]
+    lines.extend(generated)
+    return "\n".join(lines[: max(3, len(lines))])
+
+
+def _module_long_doc(module_key: str, module_meta: dict, model_cls: Optional[type[BaseModel]]) -> str:
+    desc = (module_meta.get("desc") or "").strip()
+    tier = str(module_meta.get("tier", "core"))
+    outputs = module_meta.get("columns") or []
+    requires = list(getattr(model_cls, "REQUIRES", []) or [])
+    model_name = (
+        f"{model_cls.__module__}.{model_cls.__name__}" if model_cls is not None else "unknown"
+    )
+    class_doc = (inspect.getdoc(model_cls) or "").strip() if model_cls is not None else ""
+
+    lines = _doc_lines(desc)
+    if class_doc:
+        lines.extend(_doc_lines(class_doc))
+
+    scaffold = [
+        f"Module: `{module_key}`",
+        f"Tier: `{tier}` module in the pass editor.",
+        f"Purpose: {desc or f'Provides analytics for {module_key}.'}",
+        f"Config model: `{model_name}`.",
+        "How it works: when selected in a pass, this module contributes columns to that pass output.",
+        "Execution context: settings are validated before run so invalid setup fails fast at config time.",
+        (
+            "Inputs: " + ", ".join(requires)
+            if requires
+            else "Inputs: no hard raw-table requirement declared; typically uses prior pass data."
+        ),
+        (
+            "Outputs: " + ", ".join(str(x) for x in outputs)
+            if outputs
+            else "Outputs: column keys depend on configured metric family and naming pattern."
+        ),
+        "Setup step 1: enable only when the required inputs are available in this pass.",
+        "Setup step 2: review key options in the module config editor and keep defaults unless a clear use case exists.",
+        "Setup step 3: verify the generated output columns and downstream module input mappings.",
+    ]
+    lines.extend(scaffold)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        if line in seen:
+            continue
+        seen.add(line)
+        deduped.append(line)
+    while len(deduped) < 10:
+        deduped.append(
+            "Operational note: this module's options are documented in the field Details panel."
+        )
+    return "\n".join(deduped)
+
+
+def _ensure_minimum_module_and_option_docs(
+    module_key: str,
+    model_cls: Optional[type[BaseModel]],
+    ui_meta: dict,
+) -> None:
+    if not isinstance(ui_meta, dict):
+        return
+    if model_cls is None:
+        return
+
+    desc_lines = _doc_lines(ui_meta.get("desc"))
+    if len(desc_lines) < 10:
+        ui_meta["desc"] = _module_long_doc(module_key, ui_meta, model_cls)
+
+    for field_name, field in model_cls.model_fields.items():
+        extra = getattr(field, "json_schema_extra", None)
+        if not isinstance(extra, dict):
+            extra = {}
+            field.json_schema_extra = extra
+        long_doc_lines = _doc_lines(extra.get("long_doc"))
+        if len(long_doc_lines) < 3:
+            generated = _field_long_doc(field, field_name=field_name) or ""
+            extra["long_doc"] = generated
 
 
 def _yaml_from_value(value: Any) -> str:
@@ -507,7 +624,7 @@ class ModelEditor(Screen):
                 yield Button("Pick columns", id=pick_id)
             if field_info := self.model_cls.model_fields.get(name):  # type: ignore[attr-defined]
                 short_doc = _field_short_doc(field_info)
-                long_doc = _field_long_doc(field_info)
+                long_doc = _field_long_doc(field_info, field_name=name)
                 if short_doc:
                     yield Label(f"{short_doc}", classes="help")
                 if long_doc:
@@ -1068,6 +1185,7 @@ def _module_meta() -> tuple[dict, dict, dict]:
         module_name = ui.get("module")
         if not module_name:
             continue
+        _ensure_minimum_module_and_option_docs(module_name, annotation, ui)
         meta = module_info.setdefault(
             module_name,
             {
@@ -1108,6 +1226,7 @@ def _module_meta() -> tuple[dict, dict, dict]:
         )
         if not isinstance(ui, dict):
             continue
+        _ensure_minimum_module_and_option_docs(module_name, model_cls, ui)
         meta = module_info.setdefault(
             module_name,
             {
@@ -1657,6 +1776,8 @@ class PassEditor(Screen):
         self.widgets: dict[str, Any] = {}
         self._full_schema_counts: Optional[dict[str, int]] = None
         self._module_edit_map: dict[str, str] = {}
+        self._module_details_map: dict[str, str] = {}
+        self._module_docs: dict[str, str] = {}
         self._render_token = 0
         self._timeline_render_token = 0
 
@@ -1843,6 +1964,14 @@ class PassEditor(Screen):
                         title=f"{module_key} configs",
                     )
                 )
+            return
+        if button_id.startswith("details_module_"):
+            module_key = self._module_details_map.get(button_id)
+            if not module_key:
+                return
+            long_doc = self._module_docs.get(module_key)
+            if long_doc:
+                self.status.update(long_doc)
             return
         if button_id != "save":
             return
@@ -2140,6 +2269,8 @@ class PassEditor(Screen):
         self.widgets["modules"] = []
         self.widgets["module_edit_buttons"] = {}
         self._module_edit_map.clear()
+        self._module_details_map.clear()
+        self._module_docs.clear()
         self._render_token += 1
         pass_type = (
             self.widgets.get("pass_type").value
@@ -2148,7 +2279,7 @@ class PassEditor(Screen):
         )
 
         current_counts, full_counts = self._module_schema_counts()
-        module_info, _, _ = _module_meta()
+        module_info, field_map, _ = _module_meta()
 
         for key, meta in module_info.items():
             if key in {"dense", "external_events"}:
@@ -2178,6 +2309,13 @@ class PassEditor(Screen):
                 self.widgets["module_edit_buttons"][key] = edit_btn
                 self._module_edit_map[edit_id] = key
                 modules_box.mount(edit_btn)
+            module_fields = field_map.get(key, [])
+            model_cls = _module_model_for_field(module_fields[0]) if module_fields else None
+            module_long_doc = _module_long_doc(key, meta, model_cls)
+            details_id = f"details_module_{self._render_token}_{key}"
+            self._module_details_map[details_id] = key
+            self._module_docs[key] = module_long_doc
+            modules_box.mount(Button("Details", id=details_id))
             modules_box.mount(Label(f"  {meta['desc']}", classes="help"))
             modules_box.mount(
                 Label(f"  Outputs: {', '.join(meta['columns'])}", classes="help")

@@ -108,7 +108,7 @@ def get_final_s3_path(start_date, end_date, config, pass_name, output_target=Non
 
 def aggregate_and_write_final_output(
     start_date, end_date, config, pass_config, temp_dir, sort_keys=None
-) -> tuple[str | None, dict[str, str]]:
+) -> str | None:
     """
     Aggregates all processed batch-metrics files for a single pass into a final
     output file and writes it to the specified S3 location.
@@ -125,7 +125,7 @@ def aggregate_and_write_final_output(
         logging.warning(
             f"No batch-metrics files found in {temp_dir} to aggregate for Pass {pass_config.name}."
         )
-        return None, {}
+        return None
 
     combined_df = pl.scan_parquet(all_metrics_files)
 
@@ -408,7 +408,13 @@ def aggregate_and_write_final_output(
         temp_dir,
         sort_keys=sort_keys,
     )
-    return final_s3_path, side_paths
+    # Preserve side-output paths for callers that need them without changing the
+    # historical return type of this function.
+    try:
+        setattr(pass_config, "_last_side_output_paths", side_paths or {})
+    except Exception:
+        pass
+    return final_s3_path
 
 
 def _side_output_is_used(config, pass_name: str, side_name: str) -> bool:

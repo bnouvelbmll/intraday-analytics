@@ -463,7 +463,9 @@ class ProcessInterval(Process):
         self.get_universe = get_universe
         self.context_path = context_path
 
-    def update_and_persist_context(self, pipe, final_path, side_paths: dict[str, str]):
+    def update_and_persist_context(
+        self, pipe, final_path, side_paths: dict[str, str] | None = None
+    ):
         """
         Updates the pipeline context with the result of the current pass and persists it to disk.
         """
@@ -754,7 +756,7 @@ class ProcessInterval(Process):
             else:
                 sort_keys = ["ListingId", "TimeBucket"]
 
-            final_path, side_paths = aggregate_and_write_final_output(
+            aggregate_result = aggregate_and_write_final_output(
                 self.sd,
                 self.ed,
                 self.config,
@@ -762,9 +764,23 @@ class ProcessInterval(Process):
                 TEMP_DIR,
                 sort_keys=sort_keys,
             )
+            if isinstance(aggregate_result, tuple):
+                final_path = aggregate_result[0]
+                side_paths = aggregate_result[1] if len(aggregate_result) > 1 else {}
+            else:
+                final_path = aggregate_result
+                side_paths = getattr(
+                    self.pass_config, "_last_side_output_paths", {}
+                ) or {}
 
             # Update context with the result of this pass
-            self.update_and_persist_context(pipe, final_path, side_paths)
+            update_sig = inspect.signature(self.update_and_persist_context)
+            if len(update_sig.parameters) >= 3:
+                self.update_and_persist_context(pipe, final_path, side_paths)
+            else:
+                # Backward compatibility for test doubles/overrides still using
+                # update_and_persist_context(self, pipe, final_path).
+                self.update_and_persist_context(pipe, final_path)
 
         except Exception as e:
             logging.error(
